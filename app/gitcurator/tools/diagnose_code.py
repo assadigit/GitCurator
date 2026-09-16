@@ -39,9 +39,9 @@ if os.path.exists(CONFIG_FILE):
     PROXY_CFG = cfg.get('proxy', {})
 else:
     # Fall back to test.py's hardcoded values
-    API_ID = 39788344
-    API_HASH = 'REMOVED-API-HASH'
-    PHONE = '+98XXXXXXXXXX'
+    API_ID = 0
+    API_HASH = 'YOUR_API_HASH'
+    PHONE = '+15551234567'
     PROXY_CFG = {
         'enabled': True,
         'type': 'socks5',

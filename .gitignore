@@ -32,3 +32,6 @@ dashboard/server.log
 Thumbs.db
 desktop.ini
 *.swp
+
+# Live Telethon sessions — never commit (audit finding v0.0.10)
+app/session.session*

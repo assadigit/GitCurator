@@ -5,6 +5,39 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## ⚡ Quick path — update an EXISTING deployment (2 minutes)
+
+Already deployed before? Your D1 database, KV namespace, Queues, R2 bucket
+and **all secrets persist across deploys** — updating to the latest version
+only ships the new worker code:
+
+```bash
+cd cloudflare-bot
+npm install                 # one-time, installs wrangler locally
+npx wrangler login          # one-time, opens your browser
+bash deploy-latest.sh       # schema (idempotent) + deploy + health check
+```
+
+On Windows, run `.\deploy-latest.ps1` instead (same steps, PowerShell).
+Flags: `--with-secret` / `-WithSecret` also sets the **WEBHOOK_SECRET**
+anti-impersonation hardening (v30+); `--skip-schema` / `-SkipSchema`
+skips the (safe, `IF NOT EXISTS`) schema re-apply.
+
+Prefer manual? The script is just these three commands:
+
+```bash
+npx wrangler d1 execute curator-bot --remote --file=schema.sql   # idempotent
+npx wrangler deploy
+npx wrangler tail                                                 # watch it live
+```
+
+After deploying, verify: `curl https://<your-worker>.workers.dev/`
+should answer `{"status":"ok", ...}`.
+
+First time here instead? Follow the from-scratch guide below.
+
+---
+
 ## Prerequisites
 
 ### 1. Software
@@ -31,7 +64,7 @@ You need these ready BEFORE starting:
 
 #### b) Telegram Bot Token (you already have this)
 - Your existing `@githubfetcherbot` token
-- Format: `REMOVED-BOT-TOKEN`
+- Format: `YOUR_BOT_TOKEN`
 
 #### c) Your Telegram User ID
 - Open Telegram, search for `@userinfobot`
@@ -228,7 +261,7 @@ Run each command. It prompts you to paste a value:
 ```bash
 npx wrangler secret put BOT_TOKEN
 ```
-Paste your bot token: `REMOVED-BOT-TOKEN`
+Paste your bot token: `YOUR_BOT_TOKEN`
 
 #### b) GitHub PAT
 ```bash
@@ -301,7 +334,7 @@ curl -s "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook?url=YOUR_WORKER_U
 
 **Example:**
 ```bash
-curl -s "https://api.telegram.org/botREMOVED-BOT-TOKEN/setWebhook?url=https://github-curator-bot.my-subdomain.workers.dev/webhook"
+curl -s "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook?url=https://github-curator-bot.my-subdomain.workers.dev/webhook"
 ```
 
 **Expected response:**

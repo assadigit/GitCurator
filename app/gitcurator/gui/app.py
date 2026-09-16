@@ -4216,7 +4216,7 @@ class MainWindow(QMainWindow):
         token_row2.addWidget(QLabel("Bot Token:"))
         self.bot_token = QLineEdit(self.config.get('bot_token', ''))
         self.bot_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.bot_token.setPlaceholderText("e.g. 8526017013:AAF... (optional)")
+        self.bot_token.setPlaceholderText("e.g. 123456789:AAF... (optional)")
         token_row2.addWidget(self.bot_token, 1)
         save_token_btn = QPushButton("💾 Save")
         save_token_btn.clicked.connect(self.save_config)

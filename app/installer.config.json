@@ -2,9 +2,8 @@
   "_comment": "Fill in your credentials below, then run: node install.js",
   "_comment2": "Get your Telegram user ID from @userinfobot",
   "_comment3": "Get your GitHub PAT from https://github.com/settings/tokens (scope: public_repo)",
-
-  "bot_token": "REMOVED-BOT-TOKEN",
-  "github_pat": "REMOVED-GITHUB-PAT",
-  "allowed_user_ids": "92788333",
-  "hmac_secret": "curator-hmac-secret-2025-9n3wm444lqmkg12oii9t"
+  "bot_token": "",
+  "github_pat": "",
+  "allowed_user_ids": "",
+  "hmac_secret": ""
 }

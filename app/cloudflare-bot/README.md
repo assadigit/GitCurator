@@ -80,7 +80,7 @@ Should show 10 tables.
 ```bash
 # Telegram bot token
 npx wrangler secret put BOT_TOKEN
-# Paste: your bot token (e.g., 8526017013:AAF...)
+# Paste: your bot token (e.g., 123456789:AAF...)
 
 # GitHub PAT (public_repo scope)
 npx wrangler secret put GITHUB_PAT

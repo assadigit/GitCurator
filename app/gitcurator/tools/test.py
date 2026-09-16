@@ -3,9 +3,9 @@ from telethon import TelegramClient
 import socks
 
 # ====== YOUR CREDENTIALS ======
-api_id = 39788344
-api_hash = 'REMOVED-API-HASH'
-phone = '+98XXXXXXXXXX'
+api_id = 0
+api_hash = 'YOUR_API_HASH'
+phone = '+15551234567'
 
 # ====== PROXY SETTINGS ======
 USE_PROXY = True

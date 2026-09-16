@@ -202,7 +202,7 @@ async function main() {
       console.log('');
       console.log('💬 How to log in:');
       console.log('   1. Open the dashboard URL in your browser');
-      console.log('   2. Enter your Telegram user ID (92788333)');
+      console.log('   2. Enter your Telegram user ID (123456789)');
       console.log('   3. Click "Send Magic Link"');
       console.log('   4. Check your Telegram — bot DMs you a login link');
       console.log('   5. Click the link → you\'re logged in!');
