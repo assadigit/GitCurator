@@ -15,16 +15,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitCurator v0.0.7 — Release & Audit Dashboard",
+  title: "GitCurator v0.0.8 — Release & Audit Dashboard",
   description:
-    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.7 Modular Core & Good Repos: the app became the gitcurator package (core/integrations/cloud/gui/tools), every curation run now also publishes an emoji-rich PUBLIC curated directory (github.com/assadigit/good-repos), and the UI speaks pastel — cream day / plum night with AA-verified tokens. 73/73 tests, live verification gate with persisted history, drift detection, repository & release console with CI history.",
+    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.8 Resilience Fix Pack: a rejected GitHub token now degrades to anonymous instead of killing the batch (401 fallback), quoted LLM categories can no longer crash master-index generation on Windows, the light/dark pastel toggle is always visible, and a one-click GitHub token tester guards the Credentials tab. Modular package lineage, GoodRepos public directory, 73/73 tests, live verification gate with persisted history, drift detection, repository & release console with CI history.",
   keywords: ["GitCurator", "GitHub", "Obsidian", "Ollama", "Telegram", "audit", "reliability", "Python", "PyQt6", "vault backup", "VaultSeal"],
   authors: [{ name: "Z.ai Team" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "GitCurator v0.0.7 — Release & Audit Dashboard",
+    title: "GitCurator v0.0.8 — Release & Audit Dashboard",
     description: "13 fixes shipped, 45/45 tests, live verification gate, VaultSeal automatic vault backup to a private GitHub repo, repository & release console with CI history",
     siteName: "Z.ai",
     type: "website",

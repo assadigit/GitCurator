@@ -89,21 +89,21 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.7",
-  codename: "Modular Core & Good Repos — Public Directory, Pastel UI",
+  version: "0.0.8",
+  codename: "Resilience Fix Pack — 401 Fallback, Windows-safe MOCs, Visible Theme Toggle",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
   metrics: {
-    bugsFixed: 14,
+    bugsFixed: 17,
     testsTotal: 73,
     testsPassed: 73,
     mainPyLines: 9200,
-    filesTouched: 24,
+    filesTouched: 30,
     newModules: 8,
     testCaughtBugs: 3,
   },
-  severityBreakdown: { critical: 3, high: 5, medium: 2 },
+  severityBreakdown: { critical: 3, high: 7, medium: 3 },
   pipeline: [
     {
       id: 1,
@@ -126,7 +126,7 @@ export const releaseReport: ReleaseReport = {
       name: "GitHub API",
       icon: "github",
       description: "Repo metadata, README fetch, commits, releases, social banners.",
-      hardening: "Rate-limit guard at 50 remaining; 429 backoff on banners.",
+      hardening: "Rate-limit guard at 50 remaining; 429 backoff on banners; 401 bad-credentials falls back to anonymous for the rest of the batch (v0.0.8).",
     },
     {
       id: 4,
@@ -290,6 +290,42 @@ export const releaseReport: ReleaseReport = {
       files: ["main.py — CacheDB, run"],
       evidence: "main.py:659-872 · 1381-1475 · 1848-1855",
     },
+    {
+      id: "F11",
+      title: "401 bad-credentials fallback",
+      severity: "high",
+      status: "shipped",
+      summary:
+        "An expired/rotated GitHub token failed EVERY repo of a batch with raw 401 JSON and killed VaultSeal/GoodRepos — now one actionable error, anonymous fallback, batch survives.",
+      detail:
+        "Observed live (Windows run 2026-09-16): 30 GitHub links → 7 raw '401 Bad credentials' blobs, user pressed Stop, '7 links need retry', VaultSeal + GoodRepos both failed to resolve the account. Fix: the first 401 logs ONE actionable error (token invalid/expired/rotated + where to fix it), drops the token for the rest of the batch (anonymous access, 60 req/h), retries the current repo, and continues. VaultSeal/GoodRepos could-not-resolve messages now name the fix too.",
+      files: ["gitcurator/gui/app.py — ProcessingWorker.run", "gitcurator/integrations/vaultseal.py", "gitcurator/integrations/goodrepos.py"],
+      evidence: "commit 4ac3562 · offscreen smoke verified the branch + user log reproduced the failure",
+    },
+    {
+      id: "F12",
+      title: "Windows-safe MOC filenames",
+      severity: "high",
+      status: "shipped",
+      summary:
+        "LLM categories with quotes or '>' separators crashed master-index generation with [Errno 22] — one canonical sanitizer fixes files AND wiki-links.",
+      detail:
+        "Observed live: the LLM returned a category named \"Agents_Skills\" (with literal quotes); the generator built _moc/\"Agents_Skills\".md — quotes are ILLEGAL in Windows filenames, so open() died with '[Errno 22] Invalid argument' and the whole master index was skipped. _safe_moc_name() maps / and \\ to _, strips <>:\"|?* + control chars, collapses whitespace, and falls back to 'Uncategorized' — used by both the file writes and the [[_moc/…|View MOC]] links so they always match.",
+      files: ["gitcurator/gui/app.py — _safe_moc_name + _generate_master_index"],
+      evidence: "commit 4ac3562 · 6 sanitizer cases incl. the exact crash input, all green in the offscreen smoke",
+    },
+    {
+      id: "F13",
+      title: "Always-visible light/dark toggle + token tester",
+      severity: "medium",
+      status: "shipped",
+      summary:
+        "The theme toggle was buried in More → Settings — users read the app as 'dark only'. A 🌙/☀️ icon button now sits in the action row; Credentials gained a one-click '🔑 Test GitHub Token' validator.",
+      detail:
+        "The v31.1 spec filed the toggle under Settings (display preference), which made it undiscoverable — with dark_mode:true saved, the app opened dark with no visible way out. New: a compact 38×36 icon button in the action row (pastel violet on white / lavender on plum, tooltip names the current mode — icon + text, never color alone) flips the full cream/plum theme and persists the choice; the Settings entry stays in sync. The tester validates the token as typed via GET /user before Save: account login on success, actionable 401/403 messages on failure.",
+      files: ["gitcurator/gui/app.py — theme_toggle_btn, _sync_theme_toggle_btn, _btn_kind_style('icon'), test_github_token"],
+      evidence: "commit 4ac3562 · offscreen smoke toggled both ways (config persisted), geometry 38×36, window histograms verified cream/plum in both themes",
+    },
   ],
   testSuites: [
     {
@@ -356,6 +392,10 @@ export const releaseReport: ReleaseReport = {
     "GoodRepos config bridge + post-run hooks: GUI Backup tab group + headless _on_finished mirror the VaultSeal pattern (QThread, never blocks, never raises)",
     "Pastel retheme (v0.0.7): 30 text pairs AA-verified programmatically (all ≥ 4.5:1) — pastel fills carry deep companion text (mint #B9E3C9 + #17402B 8.3:1, rose #F6C6CD + #5E1120 8.8:1)",
     "Pastel verification: window-composite histograms in BOTH themes — light dominated by white sheets + cream #FBF8F2 + lavender/mint washes; dark dominated by plum #2B2639 with zero white leakage; VLM review scored light 9/10",
+    "Resilience pack (v0.0.8): 12/12 py_compiles + 73/73 tests in BOTH the live copy and the repo mirror; offscreen smoke toggled the theme BOTH ways (config persisted each flip) with the toggle geometry verified at 38×36",
+    "Sanitizer regression (v0.0.8): all 6 _safe_moc_name cases green — including the exact \"Agents_Skills\" input from the user's Windows crash log and 'AI > Skills' separator handling",
+    "Token tester (v0.0.8): empty-field warning path exercised offscreen; the 401/403 branches verified against the live GitHub API",
+    "Release v0.0.8 (2026-09-16): commit 4ac3562 + tag pushed one-time-token; tags v0.0.1–v0.0.8 verified via the GitHub API; zip GitCurator-v0.08.zip served from download/ + public/",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -374,6 +414,7 @@ export const releaseReport: ReleaseReport = {
       "Modular package (v0.0.7): gitcurator/{core,integrations,cloud,gui,tools} — every module in its place, pure-stdlib core + integrations stay pip-free for CI",
       "GoodRepos (v0.0.7): every curation run also regenerates the PUBLIC curated directory — an emoji README everyone can browse, with the notes mirrored into category folders",
       "Pastel theme (v0.0.7): cream day / plum night with mint-violet-rose pastel actions — AA contrast preserved on every text pair",
+      "Resilience (v0.0.8): a rejected GitHub token degrades to anonymous instead of killing the batch; quoted LLM categories can no longer crash index generation; the theme toggle is always visible",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
       "GitHub Actions CI runs the full 73-test gate (12 py_compiles) on every push, tag and PR",
     ],

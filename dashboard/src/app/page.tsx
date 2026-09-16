@@ -275,7 +275,7 @@ function MetricsRow({ report }: { report: ReleaseReport }) {
   const m = report.metrics;
   const metrics: Metric[] = [
     { icon: Bug, label: "Bugs fixed", num: m.bugsFixed, sub: "10 approved + model bug + 2 test-caught", accent: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
-    { icon: FlaskConical, label: "Tests passing", num: m.testsPassed, format: (v) => `${Math.round(v)}/${m.testsTotal}`, sub: "34 unit + 11 end-to-end — 0.22s, no network", accent: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
+    { icon: FlaskConical, label: "Tests passing", num: m.testsPassed, format: (v) => `${Math.round(v)}/${m.testsTotal}`, sub: "34 unit + 28 goodrepos + 11 e2e — 0.6s, no network", accent: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },
     { icon: FileCode2, label: "Lines audited", num: m.mainPyLines, format: (v) => `${(v / 1000).toFixed(1)}K`, sub: "main.py + 6 satellite modules", accent: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
     { icon: Layers, label: "Files touched", num: m.filesTouched, sub: "v30.1: +e2e suite, −2 stale artifacts", accent: "text-orange-600 dark:text-orange-400 bg-orange-500/10" },
     { icon: Sparkles, label: "New modules", num: m.newModules, sub: "4 core + 2 test suites, zero GUI deps", accent: "text-lime-600 dark:text-lime-400 bg-lime-500/10" },
@@ -959,7 +959,7 @@ function TestsTab({ report, verify, onRunVerify }: { report: ReleaseReport; veri
                 <p className="font-mono text-xl font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
                   {report.metrics.testsPassed}/{report.metrics.testsTotal} passing
                 </p>
-                <p className="text-xs text-zinc-500">34 unit + 11 end-to-end · 0.22s · no network, no GUI, no Ollama</p>
+                <p className="text-xs text-zinc-500">34 unit + 28 goodrepos + 11 e2e · 0.6s · no network, no GUI, no Ollama</p>
               </div>
             </div>
             <div className="w-48">
@@ -4018,11 +4018,13 @@ export default function Home() {
             <span className="text-emerald-600 dark:text-emerald-400">hardened, tested pipeline</span>.
           </h2>
           <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-            Full SWOT audit, 13 shipped fixes (including the model-dialog bug you reported), a
-            testable 4-module core, and a 45-case regression suite — 34 unit + 11 end-to-end —
-            with a live verification gate, persisted run history, code-drift detection and
-            per-case timing insights. Now versioned and published: every release ships to the
-            private GitCurator repository with a tagged commit and a downloadable .zip backup.
+            Full SWOT audit, 17 shipped fixes across 8 releases — latest: a rejected GitHub token
+            degrades to anonymous instead of killing the batch, Windows-illegal MOC filenames
+            sanitized, the light/dark pastel toggle always visible — plus a modular
+            gitcurator package and a 73-case regression suite with a live verification gate,
+            persisted run history, code-drift detection and per-case timing insights. Every
+            release ships to the private GitCurator repository with a tagged commit and a
+            downloadable .zip backup.
           </p>
           {report && (
             <div className="mt-4 flex flex-wrap gap-1.5">
