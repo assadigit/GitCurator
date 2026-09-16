@@ -63,3 +63,33 @@ model VaultSealEvent {
 
   @@index([sealedAt])
 }
+
+/// v0.0.7 — one row per GoodRepos publish (post-run generation of the
+/// PUBLIC curated directory). Powers the Good Repos tab: directory stats,
+/// publish history timeline, and per-event outcomes.
+model GoodReposEvent {
+  id             String   @id @default(cuid())
+  publishedAt    DateTime @default(now())
+  /// "published" (a commit was created) | "skipped" (directory unchanged /
+  /// disabled — a healthy no-op) | "failed" (error)
+  status         String
+  commitMessage  String
+  commitSha      String?
+  filesChanged   Int      @default(0)
+  pushed         Boolean  @default(false)
+  repoName       String?
+  repoUrl        String?
+  /// good-repos is PUBLIC by design
+  repoPublic     Boolean  @default(true)
+  entries        Int      @default(0)
+  categories     Int      @default(0)
+  /// who produced the event: "app" (a real GitCurator run — GUI or
+  /// headless), "demo" (dashboard-triggered local build via the module),
+  /// "simulate" (plausible fake)
+  source         String   @default("app")
+  skippedReason  String?
+  error          String?
+  durationMs     Int      @default(0)
+
+  @@index([publishedAt])
+}

@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox
 )
 
-from cloudflare_sync import CloudflareSync
+from gitcurator.cloud.cloudflare_sync import CloudflareSync
 
 
 # ========================================

@@ -30,10 +30,10 @@ _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
-import links
-import storage
-import note_builder
-import llm_client
+from gitcurator.core import links
+from gitcurator.core import storage
+from gitcurator.core import note_builder
+from gitcurator.core import llm_client
 
 
 # ---------------------------------------------------------------------------

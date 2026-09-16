@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QSplitter
 )
 
-from gdrive_backup import GDriveBackup
+from gitcurator.cloud.gdrive_backup import GDriveBackup
 
 
 # ========================================

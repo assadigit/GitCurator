@@ -4,8 +4,8 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.6` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** UI/UX overhaul shipped — fixed 1000×750 window, WCAG-AA tokens, 3-variant button hierarchy · 45/45 automated tests green.
+**Version:** `0.0.7` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green.
 
 ---
 
@@ -34,8 +34,11 @@
 5. **Seal** — the whole vault is committed and pushed to a **private GitHub
    repository** after every run (`vaultseal.py`) — Obsidian's free tier has no
    sync, VaultSeal is the safety net.
+6. **Publish** — the curated notes become an emoji-rich **public README
+   directory** (`goodrepos.py`) organized like *AI → Skills → …*, with the
+   notes mirrored into category folders of the public `good-repos` repo.
 
-## UI standards (v0.0.6)
+## UI standards (v0.0.6 + v0.0.7 pastel)
 
 The desktop GUI follows a small, explicit set of visual rules:
 
@@ -43,11 +46,14 @@ The desktop GUI follows a small, explicit set of visual rules:
   independently and starts at the same top position at its natural height.
 - **One growable region per tab** — the results/list/log panel absorbs the
   leftover vertical space; forms and buttons stay content-sized.
-- **Three button variants** — filled emerald primary (exactly one per tab),
-  outlined indigo secondary, filled red danger; everything infrequent
-  (tests, verify, export, retry, recategorize) lives in the **More ⋯ menu**.
-- **WCAG-AA colors** — `#047857` / `#4338CA` / `#B91C1C` fills; red only
-  for errors; pending counts are neutral zinc with a ⏳ icon.
+- **Three button variants** — filled pastel-mint primary (exactly one per
+  tab, deep-forest text), outlined violet secondary, filled pastel-rose
+  danger; everything infrequent (tests, verify, export, retry,
+  recategorize) lives in the **More ⋯ menu**.
+- **Pastel palette, AA contrast** — cream day (`#FBF8F2` + white sheets +
+  warm-sand borders) / plum night (`#2B2639` sheets + lavender accents);
+  mint `#B9E3C9`+`#17402B`, violet `#5F54B4`, rose `#F6C6CD`+`#5E1120` —
+  every text pair ≥ 4.5:1; red only for errors; pending counts neutral.
 - **Status always labeled** — the proxy dot reads `Connected / Idle / Error`;
   the progress bar appears only while a batch runs
   (`Processing X of Y — owner/repo`), and batches over 10 items confirm
@@ -78,20 +84,53 @@ opens the clone directly.
 - **Runs for failed batches too** — notes written before a mid-run failure
   are exactly what you want backed up.
 
-Manual seal / status: `python app/vaultseal.py --vault <path> [--token
-$GITHUB_TOKEN]` · configure in the GUI's Backup tab or `config.json`
-(`vaultseal` section). The dashboard's **Vault Seal** tab shows live vault
-state and the seal history (`GET /api/vault-seal`).
+Manual seal / status: `python app/gitcurator/integrations/vaultseal.py
+--vault <path> [--token $GITHUB_TOKEN]` · configure in the GUI's Backup tab
+or `config.json` (`vaultseal` section). The dashboard's **Vault Seal** tab
+shows live vault state and the seal history (`GET /api/vault-seal`).
+
+## Good Repos — the public curated directory (v0.0.7)
+
+VaultSeal keeps the vault private; **GoodRepos shares the curation with the
+world**. After every run, the curated notes become a browsable, emoji-rich
+README directory — organized like *AI → Skills → …* — with the full notes
+mirrored into category folders of the **public**
+[`good-repos`](https://github.com/assadigit/good-repos) repository. Everyone
+can benefit from your curated collection of good GitHub repositories.
+
+- **Emoji README, auto-maintained** — stats line, contents anchors, category
+  tree with per-category counts, and one line per repo: link, TL;DR, stars,
+  language, tags. Regenerated after every run.
+- **History-preserving publishes** — the module fetches the remote history
+  first (`fetch` + `reset --mixed`), so each publish is a real diff on top of
+  the previous directory; an unchanged vault is a no-op.
+- **Public by design** — creates the repo as public via the API if missing
+  (warns if an existing repo is private, still publishes).
+- **Same hygiene as VaultSeal** — pure stdlib, token never persisted, never
+  logged; only curated notes + `_index.md` + `links_manifest.json` are
+  copied (no config, no sessions).
+- **Derived data** — the vault (and its private VaultSeal mirror) remains
+  the source of truth; delete `good-repos` and the next run recreates it.
+
+Manual publish / status: `python app/gitcurator/integrations/goodrepos.py
+--vault <path> [--repo-name good-repos] [--token $GITHUB_TOKEN]` · configure
+in the GUI's Backup tab or `config.json` (`goodrepos` section). The
+dashboard's **Good Repos** tab shows the live directory scan and the publish
+history (`GET /api/goodrepos`).
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
 | `app/` | The Python application: PyQt6 GUI + headless CLI (start with `app/README.md`) |
-| `app/main.py` | Orchestrator, GUI, worker threads, headless runner |
-| `app/links.py` · `storage.py` · `note_builder.py` · `llm_client.py` | Pure-stdlib testable core |
-| `app/vaultseal.py` | Post-run vault backup to a private GitHub repo (v0.0.5) |
-| `app/tests/` | 34 unit tests + 11 end-to-end tests (fake Ollama + fake GitHub) |
+| `app/main.py` | Thin launcher — the real entry point is `gitcurator.gui.app.main` |
+| `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` |
+| `app/gitcurator/integrations/` | Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
+| `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful) |
+| `app/gitcurator/gui/` | `app.py` — MainWindow, pipeline worker, headless CLI |
+| `app/gitcurator/tools/` | Developer utilities (diagnostics, import-surface docs) |
+| `app/gitcurator/constants.py` | Shared design tokens + config defaults |
+| `app/tests/` | 73 tests (34 unit + 11 e2e + 28 goodrepos) — fake Ollama + fake GitHub, zero pip |
 | `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
 | `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
 
@@ -125,7 +164,7 @@ drift between runs, and reports live repository/release status
 (`GET /api/releases` — last commit, tags, dirty files, CHANGELOG, zip
 backups, and the last 10 GitHub Actions runs). The **Vault Seal** tab
 (`GET /api/vault-seal`) shows the live git state of your vault and the
-seal history; "Seal vault now" runs the real `app/vaultseal.py` (local
+seal history; "Seal vault now" runs the real `app/gitcurator/integrations/vaultseal.py` (local
 commit — pushing stays the app's job; the dashboard holds no GitHub token
 by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
 
@@ -138,7 +177,7 @@ by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
   strip (last 10 Actions runs, each chip linking to its run) plus a
   version-history timeline rail and card-hover polish.
 - **0.0.3** — CI Pipeline & Actions Status: GitHub Actions runs the
-  45-test gate on every push/tag/PR; the Releases tab shows live CI status.
+  73-test gate (12 py_compiles) on every push/tag/PR; the Releases tab shows live CI status.
 - **0.0.2** — Repository & Release Console: `/api/releases` + Releases tab,
   header backup download, version alignment, mobile 2×4 tab grid.
 - **0.0.1** — initial repository import. The internal build lineage
@@ -151,7 +190,7 @@ by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
 ## CI
 
 Every push, tag and PR runs `.github/workflows/ci.yml` — py_compile of the
-9 audited modules + the 45-case suite (no pip installs needed; the
+12 audited modules + the 73-case suite (no pip installs needed; the
 testable core is pure stdlib). The dashboard's Releases tab shows the
 live status when a read-only `GITCURATOR_GH_TOKEN` is configured.
 

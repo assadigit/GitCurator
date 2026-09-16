@@ -8,7 +8,7 @@ import {
   CircleDot, ClipboardCheck, Clock, Cpu, Download, ExternalLink, FileArchive, FileCode2, FileJson, FileText,
   FlaskConical, Fingerprint, Gauge, GitCommitHorizontal, Github, GitBranch, HardDrive, History, Layers, Lightbulb, Link2, ListChecks, Loader2,
   Lock, Monitor, Moon, MousePointerClick, Package, Play, RefreshCw, RotateCcw, Rocket, Search, Send, ServerCog, ShieldCheck,
-  Sparkles, Sun, Tag, Target, TerminalSquare, TrendingUp, Trash2, Vault, Workflow, Wrench, X, Zap,
+  Sparkles, Star, Sun, Tag, Target, TerminalSquare, TrendingUp, Trash2, Vault, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer,
@@ -36,6 +36,7 @@ import type { TimingInsight, TimingSample } from "@/lib/insights";
 import type { HistoryData, HistoryRun } from "@/app/api/history/route";
 import type { ReleasesData } from "@/app/api/releases/route";
 import type { VaultSealData, VaultSealEventRow } from "@/app/api/vault-seal/route";
+import type { GoodReposData, GoodReposEventRow } from "@/app/api/goodrepos/route";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -2654,6 +2655,338 @@ const SEAL_STEPS: Array<{ icon: React.ComponentType<{ className?: string }>; tit
 
 const SEAL_EXCLUDED = ["workspace.json", "workspace-mobile.json", ".obsidian/cache", ".trash/", "__pycache__/", ".DS_Store", "*.tmp", "*.bak"];
 
+function GoodReposTab({
+  data, loading, publishing, simulating, onPublishNow, onSimulate, onRefresh, onDelete, onClear,
+}: {
+  data: GoodReposData | null;
+  loading: boolean;
+  publishing: boolean;
+  simulating: boolean;
+  onPublishNow: () => void;
+  onSimulate: () => void;
+  onRefresh: () => void;
+  onDelete: (id: string) => void;
+  onClear: () => void;
+}) {
+  const status = data?.status ?? null;
+  const cfg = data?.config ?? null;
+  const events = data?.events ?? [];
+  const stats = data?.stats ?? null;
+  const treeEntries = Object.entries(status?.tree ?? {});
+
+  return (
+    <div className="space-y-6">
+      {/* Header + actions */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-400"
+            aria-hidden="true"
+          >
+            <Star className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              Good Repos — public curated directory
+            </h3>
+            <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              After every curation run the vault becomes an emoji-rich README directory — organized like{" "}
+              <span className="font-medium text-zinc-700 dark:text-zinc-200">AI → Skills → …</span> — with the full notes
+              mirrored into category folders of a <span className="font-medium text-zinc-700 dark:text-zinc-200">public</span>{" "}
+              GitHub repository. Everyone can browse and benefit from your curation.
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  onClick={onPublishNow}
+                  disabled={publishing || !status?.exists}
+                  className="h-8 border-amber-600/40 bg-amber-600 px-3 text-[12px] font-medium text-white shadow-none hover:bg-amber-700"
+                >
+                  {publishing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Star className="mr-1.5 h-3.5 w-3.5" />}
+                  Publish directory now
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="max-w-xs text-xs">
+                  Runs the real goodrepos.py — builds the README + category tree in a local staging repo. Pushing to
+                  the public repo stays the app&apos;s job (the dashboard holds no GitHub token by design).
+                </span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onSimulate}
+                  disabled={simulating}
+                  className="h-8 px-3 text-[12px]"
+                >
+                  {simulating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />}
+                  Simulate event
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="text-xs">Record a plausible publish — try the timeline without a vault.</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRefresh}
+                  aria-label="Refresh Good Repos status"
+                  className="h-8 w-8 p-0"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="text-xs">Re-scan the vault + publish history</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading Good Repos status">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+              <CardContent className="space-y-3 p-5">
+                <div className="h-9 w-9 rounded-lg bg-zinc-200 animate-pulse dark:bg-zinc-800" />
+                <div className="h-7 w-20 rounded bg-zinc-200 animate-pulse dark:bg-zinc-800" />
+                <div className="h-3 w-32 rounded bg-zinc-200/70 animate-pulse dark:bg-zinc-800/70" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* No vault detected */}
+      {!loading && !status && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-[12.5px] leading-relaxed text-amber-800 dark:text-amber-200">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              No local vault detected on this machine — the dashboard runs without your real Obsidian vault. Events
+              reported by the app still land here; use <strong>Simulate event</strong> to try the timeline. On the
+              machine that runs GitCurator, this card shows the live directory scan of{" "}
+              <code className="font-mono">vault_path</code>.
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Stat cards + public repo card */}
+      {!loading && status && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            {
+              label: "curated repos",
+              value: status.entries,
+              hint: `scanned from the vault${status.generated ? ` · ${status.generated}` : ""}`,
+              icon: <Archive className="h-5 w-5" />,
+              accent: "text-amber-600 dark:text-amber-400 bg-amber-500/15 ring-amber-500/30",
+            },
+            {
+              label: "categories",
+              value: status.categories,
+              hint: "AI → Skills → … directory tree",
+              icon: <Layers className="h-5 w-5" />,
+              accent: "text-violet-600 dark:text-violet-400 bg-violet-500/15 ring-violet-500/30",
+            },
+            {
+              label: "publishes",
+              value: stats?.total ?? 0,
+              hint: `${stats?.published ?? 0} published · ${stats?.skipped ?? 0} no-op · ${stats?.failed ?? 0} failed`,
+              icon: <Rocket className="h-5 w-5" />,
+              accent: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 ring-emerald-500/30",
+            },
+          ].map((s) => (
+            <Card
+              key={s.label}
+              className="group border-zinc-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <CardContent className="p-5">
+                <div className="flex items-center justify-between">
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-lg ring-1 ${s.accent}`} aria-hidden="true">
+                    {s.icon}
+                  </span>
+                  <CountUp value={s.value} />
+                </div>
+                <p className="mt-3 text-[12px] font-medium text-zinc-500 dark:text-zinc-400">{s.label}</p>
+                <p className="mt-1 text-[11.5px] text-zinc-400 dark:text-zinc-500">{s.hint}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Public repo + category tree */}
+      {!loading && status && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-transparent bg-white dark:bg-zinc-900/60">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-2">
+                <Github className="h-4 w-4 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-50">
+                  {cfg?.repoName || status.repoName || "good-repos"}
+                </p>
+                <Badge className="border-0 bg-emerald-500/15 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                  PUBLIC
+                </Badge>
+                {cfg && !cfg.enabled && (
+                  <Badge className="border-0 bg-zinc-100 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                    disabled in config
+                  </Badge>
+                )}
+              </div>
+              <a
+                href="https://github.com/assadigit/good-repos"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 font-mono text-[12px] text-amber-700 underline decoration-amber-500/40 underline-offset-2 hover:decoration-amber-500 dark:text-amber-300"
+              >
+                github.com/assadigit/good-repos
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+              <p className="mt-3 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                ✨ A curated directory of good GitHub repositories — auto-maintained by GitCurator. The README is
+                regenerated after every run; the notes live in browsable category folders.
+              </p>
+              <p className="mt-2 text-[11.5px] text-zinc-400 dark:text-zinc-500">
+                {cfg?.autoPush ? "Pushes automatically after every run" : "Local builds only (push disabled in config)"}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
+            <CardContent className="p-5">
+              <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-50">Directory tree</p>
+              <p className="mt-1 text-[12px] text-zinc-500 dark:text-zinc-400">
+                {treeEntries.length} category folder{treeEntries.length === 1 ? "" : "s"} in the vault scan
+              </p>
+              <div className="mt-3 flex max-h-44 flex-wrap gap-1.5 overflow-y-auto custom-scroll pr-1">
+                {treeEntries.map(([cat, count]) => (
+                  <span
+                    key={cat}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-600 transition-colors hover:border-amber-500/40 hover:bg-amber-500/10 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300 dark:hover:bg-amber-500/10"
+                  >
+                    <Tag className="h-3 w-3 text-amber-500" aria-hidden="true" />
+                    {cat}
+                    <span className="text-zinc-400 dark:text-zinc-500">×{count}</span>
+                  </span>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Publish history timeline */}
+      {!loading && (
+        <div>
+          <div className="flex items-center justify-between">
+            <h4 className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-50">Publish history</h4>
+            {events.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onClear}
+                className="h-7 px-2 text-[11.5px] text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400"
+              >
+                <Trash2 className="mr-1 h-3 w-3" /> Clear all
+              </Button>
+            )}
+          </div>
+          {events.length === 0 ? (
+            <p className="mt-2 rounded-lg border border-dashed border-zinc-300 p-4 text-center text-[12px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              No publishes recorded yet — run GitCurator (or simulate an event above) and the directory timeline
+              appears here.
+            </p>
+          ) : (
+            <ol className="relative mt-3 space-y-3 border-l border-zinc-200 pl-5 dark:border-zinc-800" aria-label="Good Repos publish history">
+              {events.map((e, i) => {
+                const tone =
+                  e.status === "published"
+                    ? { dot: "bg-emerald-500", ring: "ring-emerald-500/30", text: "text-emerald-700 dark:text-emerald-300" }
+                    : e.status === "skipped"
+                      ? { dot: "bg-zinc-400 dark:bg-zinc-500", ring: "ring-zinc-400/30", text: "text-zinc-500 dark:text-zinc-400" }
+                      : { dot: "bg-rose-500", ring: "ring-rose-500/30", text: "text-rose-700 dark:text-rose-300" };
+                return (
+                  <li key={e.id} className="relative">
+                    <span
+                      className={`absolute -left-[26px] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ${tone.dot} ${tone.ring} ${
+                        i === 0 ? "animate-pulse" : ""
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px]">
+                      <span className={`font-medium ${tone.text}`}>
+                        {e.status === "published" ? "Published" : e.status === "skipped" ? "No-op" : "Failed"}
+                      </span>
+                      <span className="text-zinc-400 dark:text-zinc-500">
+                        {new Date(e.publishedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      {e.source === "simulate" && (
+                        <Badge className="h-4 border-0 bg-amber-500/15 px-1.5 font-mono text-[9.5px] text-amber-700 dark:text-amber-300">sim</Badge>
+                      )}
+                      {e.source === "demo" && (
+                        <Badge className="h-4 border-0 bg-violet-500/15 px-1.5 font-mono text-[9.5px] text-violet-700 dark:text-violet-300">demo</Badge>
+                      )}
+                      {e.pushed && (
+                        <Badge className="h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[9.5px] text-emerald-700 dark:text-emerald-300">pushed</Badge>
+                      )}
+                      <button
+                        onClick={() => onDelete(e.id)}
+                        aria-label={`Delete publish event from ${e.publishedAt}`}
+                        className="ml-auto text-zinc-300 transition-colors hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="mt-0.5 font-mono text-[11.5px] text-zinc-500 dark:text-zinc-400">
+                      {e.commitSha ? `${e.commitSha} · ` : ""}{e.commitMessage}
+                    </p>
+                    {(e.status === "published" || e.status === "skipped") && e.status === "published" && (
+                      <p className="mt-0.5 text-[11.5px] text-zinc-400 dark:text-zinc-500">
+                        {e.entries} repos · {e.categories} categories · {e.filesChanged} file(s) · {(e.durationMs / 1000).toFixed(1)}s
+                      </p>
+                    )}
+                    {e.skippedReason && (
+                      <p className="mt-0.5 text-[11.5px] text-zinc-400 dark:text-zinc-500">{e.skippedReason}</p>
+                    )}
+                    {e.error && (
+                      <p className="mt-0.5 text-[11.5px] text-rose-600 dark:text-rose-400">{e.error}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {/* Recovery note */}
+      <p className="text-[11.5px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+        💡 The public directory is derived data — the vault (and its private VaultSeal mirror) remains the source of
+        truth. Delete the good-repos repository and the next run recreates it from the same notes.
+      </p>
+    </div>
+  );
+}
+
 function VaultSealTab({
   data, loading, sealing, simulating, onSealNow, onSimulate, onRefresh, onDelete, onClear,
 }: {
@@ -3078,6 +3411,10 @@ export default function Home() {
   const [vaultSealLoading, setVaultSealLoading] = useState(true);
   const [sealing, setSealing] = useState(false);
   const [simulating, setSimulating] = useState(false);
+  const [goodRepos, setGoodRepos] = useState<GoodReposData | null>(null);
+  const [goodReposLoading, setGoodReposLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [grSimulating, setGrSimulating] = useState(false);
 
   /* Fetch the report */
   useEffect(() => {
@@ -3154,6 +3491,19 @@ export default function Home() {
   useEffect(() => {
     void refreshVaultSeal();
   }, [refreshVaultSeal, reloadKey]);
+
+  const refreshGoodRepos = useCallback(() => {
+    setGoodReposLoading(true);
+    fetch("/api/goodrepos", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => setGoodRepos(data as GoodReposData))
+      .catch(() => setGoodRepos(null))
+      .finally(() => setGoodReposLoading(false));
+  }, []);
+
+  useEffect(() => {
+    void refreshGoodRepos();
+  }, [refreshGoodRepos, reloadKey]);
 
   /* Load persisted checklist (rAF-deferred — after hydration, no mismatch) */
   useEffect(() => {
@@ -3332,6 +3682,104 @@ export default function Home() {
     }
   };
 
+  /* ---------------- Good Repos (v0.0.7) ---------------- */
+
+  const publishGoodReposNow = async () => {
+    setPublishing(true);
+    try {
+      const r = await fetch("/api/goodrepos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "publish-now" }),
+      });
+      if (!r.ok) {
+        const err = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${r.status}`);
+      }
+      const data = (await r.json()) as { event: GoodReposEventRow };
+      const ev = data.event;
+      if (ev.status === "skipped") {
+        toast({
+          title: "Directory unchanged",
+          description: ev.skippedReason ?? "nothing to publish since the last build",
+        });
+      } else {
+        toast({
+          title: "Directory built",
+          description: `${ev.commitSha ? `${ev.commitSha} · ` : ""}${ev.entries} repos across ${ev.categories} categories — the app pushes with its GitHub token`,
+        });
+      }
+      await refreshGoodRepos();
+    } catch (e) {
+      toast({
+        title: "Publish failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const simulateGoodReposEvent = async () => {
+    setGrSimulating(true);
+    try {
+      const r = await fetch("/api/goodrepos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "simulate" }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as { event: GoodReposEventRow };
+      toast({
+        title: "Event simulated",
+        description: `${data.event.commitMessage.slice(0, 64)}${data.event.commitMessage.length > 64 ? "…" : ""}`,
+      });
+      await refreshGoodRepos();
+    } catch (e) {
+      toast({
+        title: "Simulate failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setGrSimulating(false);
+    }
+  };
+
+  const deleteGoodReposEvent = async (id: string) => {
+    try {
+      const r = await fetch(`/api/goodrepos?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await refreshGoodRepos();
+    } catch (e) {
+      toast({
+        title: "Delete failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearGoodReposEvents = async () => {
+    try {
+      const r = await fetch("/api/goodrepos", { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as { deleted: number };
+      toast({
+        title: "Publish history cleared",
+        description: `${data.deleted} event${data.deleted === 1 ? "" : "s"} removed from SQLite.`,
+      });
+      await refreshGoodRepos();
+    } catch (e) {
+      toast({
+        title: "Clear failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
   const toggleChecklistItem = (id: string) => {
     setCheckedItems((prev) => {
       const next = { ...prev, [id]: !prev[id] };
@@ -3424,7 +3872,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.6"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.7"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -3553,7 +4001,7 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
-              Release {report?.version ?? "0.0.6"}
+              Release {report?.version ?? "0.0.7"}
             </Badge>
             <Badge variant="outline" className="max-w-full whitespace-normal break-words border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal text-center leading-snug">
               {report?.codename ?? "UI/UX Overhaul — Fixed Window, AA Contrast, Button Hierarchy"}
@@ -3677,6 +4125,18 @@ export default function Home() {
                       )}
                     </TabsTrigger>
                     <TabsTrigger
+                      value="goodrepos"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-300 data-[state=active]:shadow-none"
+                    >
+                      <Star className="mr-1 h-3.5 w-3.5 sm:mr-1.5" />
+                      <span className="hidden sm:inline">Good&nbsp;</span>Repos
+                      {goodRepos && (
+                        <Badge className="ml-1 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
+                          {goodRepos.status?.entries ?? 0}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger
                       value="risks"
                       className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
@@ -3749,6 +4209,21 @@ export default function Home() {
                         onRefresh={() => void refreshVaultSeal()}
                         onDelete={deleteSealEvent}
                         onClear={clearSealEvents}
+                      />
+                    </motion.div>
+                  </TabsContent>
+                  <TabsContent value="goodrepos" className="mt-0 focus-visible:outline-none">
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+                      <GoodReposTab
+                        data={goodRepos}
+                        loading={goodReposLoading}
+                        publishing={publishing}
+                        simulating={grSimulating}
+                        onPublishNow={publishGoodReposNow}
+                        onSimulate={simulateGoodReposEvent}
+                        onRefresh={() => void refreshGoodRepos()}
+                        onDelete={deleteGoodReposEvent}
+                        onClear={clearGoodReposEvents}
                       />
                     </motion.div>
                   </TabsContent>

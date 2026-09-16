@@ -20,11 +20,11 @@ What this adds to main.py:
 # 1. IMPORTS (add to top of main.py)
 # ========================================
 
-from cloudflare_manager import CloudflareManager
-from cloudflare_gui import CloudflareSettingsPanel
-from gdrive_gui import GDriveSettingsPanel
-from backfill_manager import BackfillManager
-from error_reporter import (
+from gitcurator.cloud.cloudflare_manager import CloudflareManager
+from gitcurator.cloud.cloudflare_gui import CloudflareSettingsPanel
+from gitcurator.cloud.gdrive_gui import GDriveSettingsPanel
+from gitcurator.integrations.backfill_manager import BackfillManager
+from gitcurator.integrations.error_reporter import (
     ErrorReporter,
     SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO, SEVERITY_DEBUG
 )

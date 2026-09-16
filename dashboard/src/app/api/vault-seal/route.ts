@@ -397,7 +397,8 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    const script = path.join(APP_DIR, "vaultseal.py");
+    // v0.0.7: vaultseal.py moved to gitcurator/integrations/ (modular layout)
+    const script = path.join(APP_DIR, "gitcurator", "integrations", "vaultseal.py");
     if (!existsSync(script)) {
       return NextResponse.json({ error: `vaultseal.py not found at ${script}` }, { status: 500 });
     }

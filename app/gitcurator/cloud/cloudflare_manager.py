@@ -53,9 +53,9 @@ except ImportError:
             def emit(self, *a): pass
         return __mock()
 
-from cloudflare_sync import CloudflareSync, build_vault_mirror_entries, build_decommission_events
-from error_reporter import ErrorReporter, SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO, SEVERITY_DEBUG
-from gdrive_backup import GDriveBackup
+from gitcurator.cloud.cloudflare_sync import CloudflareSync, build_vault_mirror_entries, build_decommission_events
+from gitcurator.integrations.error_reporter import ErrorReporter, SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO, SEVERITY_DEBUG
+from gitcurator.cloud.gdrive_backup import GDriveBackup
 
 logger = logging.getLogger(__name__)
 

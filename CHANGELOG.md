@@ -3,6 +3,87 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.7] — Modular Core & Good Repos: Public Directory, Pastel UI
+
+Three user-facing asks, one release: the flat `app/` became a proper Python
+package, every curation run now also publishes a **public** curated directory
+(`good-repos`), and the whole GUI speaks **pastel** (internal `v32.0`).
+
+### Modular package layout (breaking-free)
+- **`app/gitcurator/`** — the seventeen flat modules moved into purposeful
+  subpackages: `core/` (links · storage · note_builder · llm_client),
+  `integrations/` (telegram fetchers · vaultseal · goodrepos ·
+  error_reporter), `cloud/` (cloudflare + gdrive), `gui/` (the PyQt6
+  application), `tools/` (developer utilities) + `constants.py` (shared
+  design tokens + config defaults).
+- **Thin `main.py` launcher** — every historical entry point keeps working
+  unchanged: `python main.py` (GUI), `python main.py --headless …`, and
+  `python -m unittest tests.test_core …` from the app dir.
+- **Path hardening** — `config.json` is now anchored to the app root (was
+  cwd-relative); the Telegram subprocess and `assets/fonts` resolve through
+  the new package layout; fetcher scripts bootstrap `sys.path` themselves so
+  direct execution still works.
+- **CI** — the workflow compiles the 12 audited modules at their new paths
+  and runs all three suites; also fixed a pre-existing YAML typo that had
+  mangled `branches: [main]` into `branches: ain]`.
+
+### GoodRepos — the public curated directory
+- **After every run** (GUI or headless, right after VaultSeal), the curated
+  notes become an emoji-rich README directory — organized like
+  *AI → Skills → …* — with the full notes mirrored into category folders of
+  the **public** `good-repos` GitHub repository. Everyone can browse and
+  benefit from the curation.
+- **README generator** — stats line (`N repos · M categories · Updated`),
+  anchor-verified contents, per-category counts, one line per repo (link,
+  TL;DR, ⭐ stars, 🔧 language, `tags`), GitHub-exact anchor math.
+- **History-preserving publishes** — fetch + `reset --mixed` keeps the
+  remote history; each publish is a real diff; unchanged content is a no-op
+  ("directory unchanged since the last publish").
+- **Config + UI** — `goodrepos` section (enabled / repo_name / auto_push),
+  a Backup-tab group with status line and "Publish Now", theme-aware status
+  colors; standalone CLI (`--vault --repo-name --token --no-push --json
+  --status --dry-run`).
+- **28 new tests** (`tests/test_goodrepos.py`) — scan, README structure,
+  anchors, sorting, idempotency, frontmatter edge cases, config bridge.
+  Total suite: **73 tests**.
+- **Dashboard** — new **Good Repos** tab (live directory scan, category
+  tree, publish timeline, publish-now/simulate via `GET/POST/DELETE
+  /api/goodrepos`) + `GoodReposEvent` Prisma model; the compile gate grew
+  to 12 files.
+
+### Pastel theme (AA-verified)
+- **Light: pastel cream** — `#FBF8F2` window, white sheets, warm-sand
+  borders, plum text; mint filled primary (`#B9E3C9` + deep-forest `#17402B`
+  text, 8.3:1), violet outlined secondary (`#5F54B4`, 6.2:1), pastel-rose
+  danger (`#F6C6CD` + `#5E1120`, 8.8:1), butter warnings, lavender/mint
+  info notes.
+- **Dark: pastel night** — soft plum `#221E2E`/`#2B2639` surfaces, warm
+  white text, lavender `#C4BCF5` accents (8.2:1), pastel mint progress
+  chunk.
+- **30 text pairs verified programmatically** (all ≥ 4.5:1) — pastel fills
+  always carry a deep companion text color; `_btn_style` gained the `text`
+  parameter; `_status_colors()` makes every status label theme-aware.
+- **Verification** — window-composite histograms in both themes (light:
+  white/cream/lavender/mint dominant; dark: plum dominant, zero white
+  leakage), offscreen GUI smoke across all tabs, VLM review 9/10 light.
+
+### Fixes
+- **CI YAML typo** — `branches: ain]` → `branches: [main]` (pre-existing;
+  pushes/tags had still triggered, PRs had not).
+- Duplicate `CONFIG_FILE` definition in the extracted constants (the flat
+  copy silently overrode the anchored one).
+- Dialog header blue `#2196F3` replaced with the violet accent (no-blue
+  rule); remaining zinc literals in dialogs migrated to the pastel family.
+
+### Verification (this release)
+- 73/73 tests (34 + 11 + 28) and 12/12 py_compiles — locally, from the
+  repo mirror, and live through the dashboard gate (`POST /api/verify`).
+- Real public repo created + published end-to-end from the demo vault
+  (7 repos across 7 categories, commit `c958518`), all README entry links
+  verified intact via the GitHub API; idempotent re-publish skips.
+- Offscreen PyQt6 smoke: window, 9 tabs, theme toggle, GoodRepos group;
+  pixel-sampled histograms in both themes; VLM screenshot QA.
+
 ## [0.0.6] — UI/UX Overhaul: Fixed Window, AA Contrast, Button Hierarchy
 
 A full visual-standards pass over the PyQt6 GUI (internal `v31.1`).

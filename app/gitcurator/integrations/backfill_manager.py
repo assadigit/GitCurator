@@ -29,10 +29,16 @@ from typing import List, Dict, Any, Tuple, Optional, Callable
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
-import links as _links
+# v32 — package bootstrap: this script runs as a subprocess (or
+# directly), so put the app/ root back on sys.path for `gitcurator.*`.
+import os as _os, sys as _sys
+_PKG_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+if _PKG_ROOT not in _sys.path:
+    _sys.path.insert(0, _PKG_ROOT)
+from gitcurator.core import links as _links
 
-from cloudflare_sync import CloudflareSync
-from error_reporter import ErrorReporter, SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO
+from gitcurator.cloud.cloudflare_sync import CloudflareSync
+from gitcurator.integrations.error_reporter import ErrorReporter, SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +289,7 @@ class BackfillManager:
         Returns: List of link dicts ready for backfill.
         """
         import re
-        from cloudflare_sync import CloudflareSync
+        from gitcurator.cloud.cloudflare_sync import CloudflareSync
 
         # v30 — delegated to links.py (single source of truth)
         github_pattern = _links.GITHUB_URL_PATTERN

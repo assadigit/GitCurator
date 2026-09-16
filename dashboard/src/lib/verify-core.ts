@@ -14,21 +14,25 @@ import path from "path";
 
 export const APP_DIR = process.env.GITCURATOR_APP_DIR ?? path.join(process.cwd(), "..", "app");
 
-/** The Python files in the compile gate (v0.0.5: +vaultseal.py → 10 files). */
+/** The Python files in the compile gate (v0.0.7: modular package layout —
+ *  the flat app/ became gitcurator/{core,integrations,cloud,gui,tools} →
+ *  12 files, +goodrepos.py). */
 export const PY_FILES = [
   "main.py",
-  "links.py",
-  "storage.py",
-  "note_builder.py",
-  "llm_client.py",
-  "vaultseal.py",
-  "telegram_fetch_worker.py",
-  "telethon_fetcher.py",
-  "backfill_manager.py",
-  "cloudflare_sync.py",
+  "gitcurator/gui/app.py",
+  "gitcurator/core/links.py",
+  "gitcurator/core/storage.py",
+  "gitcurator/core/note_builder.py",
+  "gitcurator/core/llm_client.py",
+  "gitcurator/integrations/vaultseal.py",
+  "gitcurator/integrations/goodrepos.py",
+  "gitcurator/integrations/telegram_fetch_worker.py",
+  "gitcurator/integrations/telethon_fetcher.py",
+  "gitcurator/integrations/backfill_manager.py",
+  "gitcurator/cloud/cloudflare_sync.py",
 ] as const;
 
-export const TEST_MODULES = ["tests.test_core", "tests.test_e2e"] as const;
+export const TEST_MODULES = ["tests.test_core", "tests.test_e2e", "tests.test_goodrepos"] as const;
 
 /* ------------------------------------------------------------------ */
 /* Types (shared shape with the dashboard)                             */

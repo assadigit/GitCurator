@@ -89,19 +89,19 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.6",
-  codename: "UI/UX Overhaul — Fixed Window, AA Contrast, Button Hierarchy",
+  version: "0.0.7",
+  codename: "Modular Core & Good Repos — Public Directory, Pastel UI",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
   metrics: {
-    bugsFixed: 13,
-    testsTotal: 45,
-    testsPassed: 45,
-    mainPyLines: 9203,
-    filesTouched: 17,
-    newModules: 7,
-    testCaughtBugs: 2,
+    bugsFixed: 14,
+    testsTotal: 73,
+    testsPassed: 73,
+    mainPyLines: 9200,
+    filesTouched: 24,
+    newModules: 8,
+    testCaughtBugs: 3,
   },
   severityBreakdown: { critical: 3, high: 5, medium: 2 },
   pipeline: [
@@ -159,6 +159,14 @@ export const releaseReport: ReleaseReport = {
       description:
         "After every run the whole vault is committed + pushed to a private GitHub repo (v0.0.5).",
       hardening: "Nested-repo guard, hygiene .gitignore, token never persisted, skip-when-unchanged.",
+    },
+    {
+      id: 8,
+      name: "GoodRepos",
+      icon: "star",
+      description:
+        "The curated notes become an emoji-rich public README directory (AI → Skills → …) mirrored into category folders of github.com/assadigit/good-repos (v0.0.7).",
+      hardening: "Pure stdlib, history-preserving publish (fetch + reset --mixed), token never persisted, skip-when-unchanged.",
     },
   ],
   fixes: [
@@ -342,6 +350,12 @@ export const releaseReport: ReleaseReport = {
     "UI/UX overhaul (v0.0.6): pixel-sampled screenshots in BOTH themes — secondary buttons, sheets, header boxes and inputs verified dark (#27272A) in dark mode; the rgba-compositing bug was caught by VLM review and fixed with solid theme-aware panels",
     "UI/UX overhaul (v0.0.6): WCAG-AA tokens verified (#047857 7.4:1, #4338CA 7.9:1, #B91C1C 6.5:1); pending badge neutral zinc; >10-item batch confirmation gate wired into all six batch entry points",
     "UI/UX overhaul (v0.0.6): VLM screenshot review scored the dark theme 10/10 for consistency after the fix — no light boxes remain",
+    "Modular layout (v0.0.7): the flat app/ became gitcurator/{core,integrations,cloud,gui,tools} + a thin main.py launcher — python main.py (GUI), --headless, and python -m unittest all keep working unchanged; 73/73 tests green after the move",
+    "GoodRepos (v0.0.7): LIVE end-to-end — public repo github.com/assadigit/good-repos created via the API and published from the demo vault (7 repos across 7 categories, commit c958518, all 7 README entries verified with intact links via the GitHub API)",
+    "GoodRepos idempotency: a second publish with unchanged notes skips ('directory unchanged since the last publish') — verified live",
+    "GoodRepos config bridge + post-run hooks: GUI Backup tab group + headless _on_finished mirror the VaultSeal pattern (QThread, never blocks, never raises)",
+    "Pastel retheme (v0.0.7): 30 text pairs AA-verified programmatically (all ≥ 4.5:1) — pastel fills carry deep companion text (mint #B9E3C9 + #17402B 8.3:1, rose #F6C6CD + #5E1120 8.8:1)",
+    "Pastel verification: window-composite histograms in BOTH themes — light dominated by white sheets + cream #FBF8F2 + lavender/mint washes; dark dominated by plum #2B2639 with zero white leakage; VLM review scored light 9/10",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -357,8 +371,11 @@ export const releaseReport: ReleaseReport = {
       "New pure-stdlib core — headlessly testable, zero GUI coupling",
       "VaultSeal (v0.0.5): every curation run seals the vault to a private GitHub repo — full history, restore with git clone, zero-config",
       "UI/UX overhaul (v0.0.6): fixed window + per-tab scroll + 3-variant button hierarchy + overflow More menu — WCAG-AA contrast throughout",
+      "Modular package (v0.0.7): gitcurator/{core,integrations,cloud,gui,tools} — every module in its place, pure-stdlib core + integrations stay pip-free for CI",
+      "GoodRepos (v0.0.7): every curation run also regenerates the PUBLIC curated directory — an emoji README everyone can browse, with the notes mirrored into category folders",
+      "Pastel theme (v0.0.7): cream day / plum night with mint-violet-rose pastel actions — AA contrast preserved on every text pair",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
-      "GitHub Actions CI runs the full 45-test gate on every push, tag and PR",
+      "GitHub Actions CI runs the full 73-test gate (12 py_compiles) on every push, tag and PR",
     ],
     weaknessesFixed: [
       "Non-atomic note/banner/config writes → tempfile + os.replace everywhere",

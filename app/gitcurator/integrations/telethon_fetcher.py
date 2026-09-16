@@ -67,7 +67,13 @@ from typing import List, Dict, Optional, Any, Callable
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
-import links as _links
+# v32 — package bootstrap: this script runs as a subprocess (or
+# directly), so put the app/ root back on sys.path for `gitcurator.*`.
+import os as _os, sys as _sys
+_PKG_ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+if _PKG_ROOT not in _sys.path:
+    _sys.path.insert(0, _PKG_ROOT)
+from gitcurator.core import links as _links
 
 from telethon import TelegramClient, errors
 from telethon.tl.types import Message
