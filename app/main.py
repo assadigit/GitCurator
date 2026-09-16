@@ -28,7 +28,7 @@ because the problem is in the asyncio/threading layer, not the GUI layer.
 """
 
 # === VERSION STAMP - printed at import so you can verify the right file loads ===
-__VERSION__ = "31.0 (VaultSeal: post-run vault backup to a private GitHub mirror — vaultseal.py; hygiene .gitignore; token never persisted; core extraction lineage v30)"
+__VERSION__ = "31.1 (UI/UX overhaul: fixed 1000×750 window + per-tab scroll; one growable results region per tab; WCAG-AA tokens #047857/#4338CA/#B91C1C; 3-variant button hierarchy + overflow More menu; theme toggle in Settings; progress bar only-while-running with 'Processing X of Y — repo'; >10-item batch confirmations; labeled proxy status; ⏳ pending icons; 📡 Sources tab; core extraction lineage v30)"
 import sys as _sys
 print(f"[main] LOADED version {__VERSION__} from {__file__}", file=_sys.stderr, flush=True)
 # === END VERSION STAMP ===
@@ -141,30 +141,44 @@ except ImportError:
 # with both the light and the dark theme.
 # ----------------------------------------------------------------------------
 # ============================================================================
-# Design System — Indigo Professional (1 primary + 1 CTA + Zinc neutrals)
+# Design System — 1 CTA + 1 secondary + zinc neutrals (WCAG AA)
 # ============================================================================
-# PRIMARY: Indigo — used for all primary actions (buttons, tabs, progress, focus)
-# CTA:     Emerald — used ONLY for the most important action (Start Processing)
-# NEUTRAL: Zinc — used for all secondary actions and UI chrome
-# SEMANTIC: Red/Amber/Emerald — used ONLY in the log panel, never in UI chrome
+# PRIMARY (filled):      Emerald-700 #047857 — white text 7.4:1 (AA). Exactly
+#                         ONE filled primary button per tab (Start Processing,
+#                         Process All, Find by Marker, …).
+# SECONDARY (outlined):  Indigo-700 #4338CA — white text on fill 7.9:1 (AA).
+# DANGER (filled):       Red-700 #B91C1C — white text 6.5:1 (AA). Destructive
+#                         actions ONLY (Stop, Remove, Undo).
+# NEUTRAL: Zinc — muted text, borders, tertiary utilities.
+# SEMANTIC: Red/Amber/Emerald — log panel + status text only, never chrome.
+#
+# Design tokens (v31.1 — UI/UX spec):
+#   * Spacing scale (px): 4, 8, 16, 24, 32, 48 — every margin/padding/radius
+#     gap comes from this set (the 7px focus padding is the 8px token minus
+#     the 1px wider focus border, so content never shifts on focus).
+#   * Type scale — exactly four sizes: section/dialog titles 16px,
+#     labels+buttons 13px, body text 12px, mono (log/results) 12px.
+#   * Focus outline: 2px solid + 2px offset in the secondary accent on every
+#     interactive element (buttons, inputs, combos, checks, radios).
 COLORS = {
-    # Primary (Indigo) — main actions, tabs, progress, focus
-    'primary':        '#6366F1',  # Indigo-500
-    'primary_hover':  '#4F46E5',  # Indigo-600
-    'primary_dark':   '#818CF8',  # Indigo-400 (for dark mode accents)
+    # Primary action (Emerald-700) — FILLED primary buttons only
+    'cta':            '#047857',  # Emerald-700 (white text 7.4:1, AA)
+    'cta_hover':      '#065F46',  # Emerald-800
 
-    # CTA (Emerald) — ONLY for Start Processing / Process Queue
-    'cta':            '#10B981',  # Emerald-500
-    'cta_hover':      '#059669',  # Emerald-600
+    # Secondary/read action (Indigo-700) — OUTLINED secondary buttons
+    'primary':        '#4338CA',  # Indigo-700 (white on fill 7.9:1, AA)
+    'primary_hover':  '#3730A3',  # Indigo-800
+    'primary_dark':   '#818CF8',  # Indigo-400 (dark-mode outline text/accent)
 
-    # Neutral (Zinc) — secondary buttons, muted text, borders
+    # Neutral (Zinc) — muted text, borders
     'neutral':        '#71717A',  # Zinc-500
     'neutral_hover':  '#52525B',  # Zinc-600
 
-    # Semantic (log panel only)
-    'error':          '#EF4444',  # Red-500
-    'warning':        '#F59E0B',  # Amber-500
-    'success':        '#10B981',  # Emerald-500 (same as CTA)
+    # Semantic (destructive + log panel only)
+    'error':          '#B91C1C',  # Red-700 (white text 6.5:1, AA)
+    'error_hover':    '#991B1B',  # Red-800
+    'warning':        '#B45309',  # Amber-700
+    'success':        '#047857',  # Emerald-700
 
     # Backgrounds
     'bg_light':       '#FAFAFA',  # Zinc-50 (warm white)
@@ -3622,6 +3636,118 @@ class MainWindow(QMainWindow):
                   file=_sys.stderr, flush=True)
         return len(loaded_families) > 0
 
+    # ------------------------------------------------------------------
+    # v31.1 — UI/UX spec helpers: 3-variant button hierarchy + per-tab
+    # scrollable containers for the fixed 1000×750 window.
+    # ------------------------------------------------------------------
+    def _accent(self) -> str:
+        """Secondary accent (Indigo) tuned for the active theme:
+        #4338CA on light, #818CF8 on dark (outline text/border contrast)."""
+        return COLORS['primary_dark'] if getattr(self, '_dark_mode', False) else COLORS['primary']
+
+    def _panel_bg(self) -> str:
+        """Solid panel/sheet color for the active theme. Used instead of
+        `transparent`/rgba backgrounds — Qt's QSS composits semi-transparent
+        widget backgrounds over a LIGHT base, which breaks dark mode."""
+        return '#27272A' if getattr(self, '_dark_mode', False) else '#FFFFFF'
+
+    def _panel_bg_alt(self) -> str:
+        """Muted/disabled panel color for the active theme."""
+        return '#18181B' if getattr(self, '_dark_mode', False) else '#F4F4F5'
+
+    def _btn_kind_style(self, kind: str) -> str:
+        """Stylesheet for one of the THREE action-button variants:
+          'primary'   — filled emerald-700, white text (max ONE per tab)
+          'secondary' — outlined indigo (theme-aware), transparent bg
+          'danger'    — filled red-700, white text (destructive only)
+          'ghost'     — small quiet utility (log-panel controls only)
+        """
+        if kind == 'secondary':
+            c = self._accent()
+            bg = self._panel_bg()
+            bg_alt = self._panel_bg_alt()
+            return f"""
+                QPushButton {{
+                    background-color: {bg};
+                    color: {c};
+                    border: 1px solid {c};
+                    font-weight: 600;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{ background-color: {c}; color: white; }}
+                QPushButton:pressed {{ background-color: {COLORS['primary_hover']}; color: white; }}
+                QPushButton:disabled {{ color: #A1A1AA; border-color: {bg_alt}; background-color: {bg}; }}
+            """
+        if kind == 'danger':
+            return self._btn_style(COLORS['error'], COLORS['error_hover'])
+        if kind == 'ghost':
+            bg = '#27272A' if getattr(self, '_dark_mode', False) else '#FAFAFA'
+            hover_bg = '#3F3F46' if getattr(self, '_dark_mode', False) else '#F4F4F5'
+            hover_fg = '#E4E4E7' if getattr(self, '_dark_mode', False) else '#3F3F46'
+            return f"""
+                QPushButton {{
+                    background-color: {bg};
+                    color: #71717A;
+                    border: none;
+                    font-weight: 500;
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{ background-color: {hover_bg}; color: {hover_fg}; }}
+                QPushButton:pressed {{ background-color: {hover_bg}; }}
+                QPushButton:disabled {{ color: #A1A1AA; }}
+            """
+        # default: 'primary' — filled emerald-700
+        return self._btn_style(COLORS['cta'], COLORS['cta_hover'])
+
+    def _style_btn(self, btn, kind: str):
+        """Apply a design-system variant to a persistent window button and
+        track it so the variants can be re-applied when the theme flips
+        (outline text/border is theme-aware)."""
+        if not hasattr(self, '_ds_buttons'):
+            self._ds_buttons = []
+        self._ds_buttons = [(b, k) for (b, k) in self._ds_buttons if b is not btn]
+        self._ds_buttons.append((btn, kind))
+        btn.setStyleSheet(self._btn_kind_style(kind))
+        return btn
+
+    def _refresh_button_styles(self):
+        """Re-apply tracked button variants after a theme change."""
+        for btn, kind in getattr(self, '_ds_buttons', []):
+            try:
+                btn.setStyleSheet(self._btn_kind_style(kind))
+            except RuntimeError:
+                pass  # widget already destroyed
+
+    def _wrap_scroll(self, content: QWidget) -> QScrollArea:
+        """Wrap a tab's content in a scrollable container.
+
+        The window is fixed at 1000×750, so any tab whose natural content is
+        taller than the tab pane scrolls instead of stretching. Content always
+        starts at the same top position and keeps its natural height (no
+        padded/fixed-height containers). The content widget carries the
+        `tab_sheet` object name so the theme QSS paints it a solid sheet
+        color (never a transparent/rgba fill — see _panel_bg)."""
+        content.setObjectName("tab_sheet")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        return scroll
+
+    def _confirm_batch(self, count: int, source: str) -> bool:
+        """v31.1 safety gate: confirm before starting any batch operation on
+        MORE THAN 10 items, stating the exact item count."""
+        if count <= 10:
+            return True
+        return self._show_custom_question(
+            "Confirm Large Batch",
+            f"This will process {count} items ({source}).\n\nContinue?"
+        )
+
     def _btn_style(self, color: str, hover: str, variant: str = 'solid') -> str:
         """Return a QSS stylesheet for a colored button.
 
@@ -3631,19 +3757,21 @@ class MainWindow(QMainWindow):
         - 'ghost':    Transparent bg, gray text (TERTIARY/utility actions)
         """
         if variant == 'outline':
+            bg = self._panel_bg()
+            bg_alt = self._panel_bg_alt()
             return f"""
                 QPushButton {{
-                    background-color: transparent;
+                    background-color: {bg};
                     color: {color};
                     border: 1px solid {color};
                     font-weight: 600;
-                    padding: 8px 20px;
+                    padding: 8px 16px;
                     border-radius: 6px;
                     font-size: 13px;
                 }}
                 QPushButton:hover {{ background-color: {color}; color: white; }}
                 QPushButton:pressed {{ background-color: {hover}; color: white; }}
-                QPushButton:disabled {{ color: #A1A1AA; border-color: #E4E4E7; background: transparent; }}
+                QPushButton:disabled {{ color: #A1A1AA; border-color: {bg_alt}; background-color: {bg}; }}
             """
         elif variant == 'ghost':
             return f"""
@@ -3652,9 +3780,9 @@ class MainWindow(QMainWindow):
                     color: #71717A;
                     border: none;
                     font-weight: 500;
-                    padding: 8px 16px;
+                    padding: 4px 8px;
                     border-radius: 6px;
-                    font-size: 13px;
+                    font-size: 12px;
                 }}
                 QPushButton:hover {{ background-color: #F4F4F5; color: #3F3F46; }}
                 QPushButton:pressed {{ background-color: #E4E4E7; }}
@@ -3666,7 +3794,7 @@ class MainWindow(QMainWindow):
                     background-color: {color};
                     color: white;
                     font-weight: bold;
-                    padding: 10px 24px;
+                    padding: 8px 24px;
                     border: none;
                     border-radius: 6px;
                 font-size: 13px;
@@ -3706,14 +3834,18 @@ class MainWindow(QMainWindow):
         # the global stylesheet's `font-family: 'Inter'` resolves correctly.
         self._load_fonts()
         self.setWindowTitle("GitHub Project Curator 🚀")
+        # v31.1 UI spec: ONE fixed window size used for every tab — the window
+        # never resizes when the user switches tabs (preserves the user's
+        # spatial memory of where controls sit).
         self.setGeometry(100, 100, 1000, 750)
+        self.setFixedSize(1000, 750)
 
         central = QWidget()
         self.setCentralWidget(central)
         # Vertical layout: controls on top, log on bottom (3:4 landscape ratio)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(5)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
 
@@ -3721,7 +3853,7 @@ class MainWindow(QMainWindow):
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(5)
+        left_layout.setSpacing(8)
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
@@ -3740,18 +3872,18 @@ class MainWindow(QMainWindow):
         creds_layout.addRow("Phone:", self.phone)
         creds_layout.addRow("GitHub Token (optional):", self.github_token)
 
-        # Test button
-        test_telegram_btn = QPushButton("🔗 Test Telegram & GitHub")
-        test_telegram_btn.clicked.connect(self.test_telegram_github)
-        creds_layout.addRow("", test_telegram_btn)
+        # v31.1: '🔗 Test Telegram & GitHub' moved to the global 'More'
+        # overflow menu (infrequent actions: export / verify / retry /
+        # recategorize / test).
 
         # About Me Wizard button — generates about_me.md to give the LLM context
         about_me_btn = QPushButton("📝 About Me Wizard")
         about_me_btn.clicked.connect(self.show_about_me_wizard)
         about_me_btn.setToolTip("Generate about_me.md to give the LLM context about who you are")
+        self._style_btn(about_me_btn, 'secondary')
         creds_layout.addRow("", about_me_btn)
 
-        self.tab_widget.addTab(creds_tab, "🔑 Credentials")
+        self.tab_widget.addTab(self._wrap_scroll(creds_tab), "🔑 Credentials")
 
         # ---- Tab 2: Proxy ----
         proxy_tab = QWidget()
@@ -3769,11 +3901,9 @@ class MainWindow(QMainWindow):
         proxy_layout.addRow("Host:", self.proxy_host)
         proxy_layout.addRow("Port:", self.proxy_port)
 
-        test_proxy_btn = QPushButton("🌐 Test Proxy Connection")
-        test_proxy_btn.clicked.connect(self.test_proxy)
-        proxy_layout.addRow("", test_proxy_btn)
+        # v31.1: '🌐 Test Proxy Connection' moved to the global 'More' menu.
 
-        self.tab_widget.addTab(proxy_tab, "🌐 Proxy")
+        self.tab_widget.addTab(self._wrap_scroll(proxy_tab), "🌐 Proxy")
 
         # ---- Tab 3: Vault ----
         vault_tab = QWidget()
@@ -3786,19 +3916,21 @@ class MainWindow(QMainWindow):
         vault_buttons = QHBoxLayout()
         browse_btn = QPushButton("📂 Browse...")
         browse_btn.clicked.connect(self.browse_vault)
+        self._style_btn(browse_btn, 'secondary')
         remove_btn = QPushButton("🗑️ Remove")
         remove_btn.clicked.connect(self.remove_vault)
+        self._style_btn(remove_btn, 'danger')
         vault_buttons.addWidget(browse_btn)
         vault_buttons.addWidget(remove_btn)
+        vault_buttons.addStretch()
 
-        test_vault_btn = QPushButton("✅ Validate Vault")
-        test_vault_btn.clicked.connect(self.test_vault)
+        # v31.1: '✅ Validate Vault' moved to the global 'More' menu.
 
+        vault_layout.setSpacing(8)
         vault_layout.addWidget(QLabel("Select your Obsidian vault:"))
         vault_layout.addWidget(self.vault_combo)
         vault_layout.addLayout(vault_buttons)
-        vault_layout.addWidget(test_vault_btn)
-        self.tab_widget.addTab(vault_tab, "📁 Vault")
+        self.tab_widget.addTab(self._wrap_scroll(vault_tab), "📁 Vault")
 
         # ---- Tab 4: Ollama / Cloud LLM ----
         # v26 — Fix 4: tab now hosts TWO providers. Radio buttons at the top
@@ -3854,18 +3986,18 @@ class MainWindow(QMainWindow):
 
         refresh_models_btn = QPushButton("🔄 Refresh Models")
         refresh_models_btn.clicked.connect(self.refresh_ollama_models)
+        self._style_btn(refresh_models_btn, 'secondary')
         model_row.addWidget(refresh_models_btn)
         ollama_form.addRow("Model:", model_row)
 
-        # Buttons: test, start server, pull model
+        # Buttons: start server (the Ollama test action lives in the global
+        # 'More' overflow menu — v31.1 button-hierarchy spec).
         ollama_buttons = QHBoxLayout()
-        test_ollama_btn = QPushButton("🧠 Test Ollama")
-        test_ollama_btn.clicked.connect(self.test_ollama)
-        ollama_buttons.addWidget(test_ollama_btn)
-
         start_ollama_btn = QPushButton("🚀 Start Ollama Server")
         start_ollama_btn.clicked.connect(self.start_ollama_server)
+        self._style_btn(start_ollama_btn, 'secondary')
         ollama_buttons.addWidget(start_ollama_btn)
+        ollama_buttons.addStretch()
         ollama_form.addRow("", ollama_buttons)
         ollama_layout.addWidget(self.ollama_group)
 
@@ -3885,10 +4017,7 @@ class MainWindow(QMainWindow):
         self.cloud_model.setPlaceholderText("gpt-4o-mini")
         cloud_form.addRow("Model:", self.cloud_model)
 
-        cloud_test_btn = QPushButton("🔌 Test Connection")
-        cloud_test_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
-        cloud_test_btn.clicked.connect(self.test_cloud_llm)
-        cloud_form.addRow("", cloud_test_btn)
+        # v31.1: '🔌 Test Connection' moved to the global 'More' menu.
         ollama_layout.addWidget(self.cloud_group)
 
         # --- Toggle visibility based on selected provider ---
@@ -3900,13 +4029,14 @@ class MainWindow(QMainWindow):
         # Apply initial state (must be after both groups are constructed).
         _toggle_llm_provider()
 
-        ollama_layout.addStretch()
-        self.tab_widget.addTab(ollama_tab, "🧠 LLM")
+        # v31.1: no filler stretch — content keeps its natural height at the
+        # top of the scrollable tab; the window never resizes.
+        self.tab_widget.addTab(self._wrap_scroll(ollama_tab), "🧠 LLM")
 
         # ---- Tab: Input Mode (PRIMARY TAB — shown first on launch) ----
         input_tab = QWidget()
         input_layout = QVBoxLayout(input_tab)
-        input_layout.setSpacing(10)
+        input_layout.setSpacing(8)
 
         # --- Mode selector row: compact radio buttons + help button ---
         mode_row = QHBoxLayout()
@@ -3984,13 +4114,16 @@ class MainWindow(QMainWindow):
         hash_row.addWidget(self.marker_hash, 1)
         gen_hash_btn = QPushButton("🎲 Generate")
         gen_hash_btn.clicked.connect(self.generate_marker_hash)
+        self._style_btn(gen_hash_btn, 'secondary')
         hash_row.addWidget(gen_hash_btn)
         copy_hash_btn = QPushButton("📋 Copy")
         copy_hash_btn.clicked.connect(self.copy_marker_hash)
+        self._style_btn(copy_hash_btn, 'secondary')
         hash_row.addWidget(copy_hash_btn)
         find_by_hash_btn = QPushButton("🔍 Find by Marker")
         find_by_hash_btn.clicked.connect(self.find_by_marker)
-        find_by_hash_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        # v31.1: the Input tab's ONE filled primary button.
+        self._style_btn(find_by_hash_btn, 'primary')
         hash_row.addWidget(find_by_hash_btn)
         marker_layout.addLayout(hash_row)
         # Advanced: custom keywords toggle (expands to show keyword fields)
@@ -4006,6 +4139,7 @@ class MainWindow(QMainWindow):
         self.keyword_end.setPlaceholderText("End keyword")
         find_by_kw_btn = QPushButton("🔍 Find by Keywords")
         find_by_kw_btn.clicked.connect(self.find_keyword_ids)
+        self._style_btn(find_by_kw_btn, 'secondary')
         kw_row.addWidget(self.keyword_start)
         kw_row.addWidget(self.keyword_end)
         kw_row.addWidget(find_by_kw_btn)
@@ -4032,12 +4166,15 @@ class MainWindow(QMainWindow):
         self.import_file.setPlaceholderText("Path to .txt file")
         import_btn = QPushButton("📄 Select...")
         import_btn.clicked.connect(self.select_import_file)
+        self._style_btn(import_btn, 'secondary')
         import_layout.addWidget(self.import_file, 1)
         import_layout.addWidget(import_btn)
         self.import_group.setLayout(import_layout)
         input_layout.addWidget(self.import_group)
 
-        self.tab_widget.addTab(input_tab, "📥 Input")
+        # v31.1: every tab scrolls independently inside the fixed window.
+        input_scroll = self._wrap_scroll(input_tab)
+        self.tab_widget.addTab(input_scroll, "📥 Input")
 
         # ---- Tab: Dashboard (added last; remains the last tab after Input is moved to 0) ----
         dash_tab = QWidget()
@@ -4045,42 +4182,43 @@ class MainWindow(QMainWindow):
 
         dash_btn_row = QHBoxLayout()
         self.refresh_dash_btn = QPushButton("🔄 Refresh Dashboard")
-        self.refresh_dash_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        # v31.1: the Dashboard tab's ONE filled primary button.
+        self._style_btn(self.refresh_dash_btn, 'primary')
         self.refresh_dash_btn.clicked.connect(self.update_dashboard)
         dash_btn_row.addWidget(self.refresh_dash_btn)
 
         # v22 Feature 6: Batch Undo — deletes the .md files written by the
         # most recent batch (listed in `<vault>/_undo_last_batch.txt`).
         self.undo_batch_btn = QPushButton("↩️ Undo Last Batch")
-        self.undo_batch_btn.setStyleSheet(self._btn_style(COLORS['error'], '#B91C1C', variant='outline'))
+        # v31.1: filled danger — destructive action (deletes the last
+        # batch's note files).
+        self._style_btn(self.undo_batch_btn, 'danger')
         self.undo_batch_btn.clicked.connect(self.undo_last_batch)
         dash_btn_row.addWidget(self.undo_batch_btn)
 
-        # v23 — No Link Left Behind: manual verification button. Reads the
-        # manifest, checks every GitHub link has a non-empty note file, and
-        # every non-GitHub link is in the inbox table. Shows a detailed
-        # report in the dashboard text area.
-        self.verify_vault_btn = QPushButton("🔍 Verify Vault")
-        self.verify_vault_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], variant='outline'))
-        self.verify_vault_btn.clicked.connect(self.verify_vault)
-        dash_btn_row.addWidget(self.verify_vault_btn)
+        # v31.1: '🔍 Verify Vault' moved to the global 'More' overflow menu.
 
         dash_btn_row.addStretch()
         dash_layout.addLayout(dash_btn_row)
 
+        # v31.1: the results panel is the tab's ONE growable region — it fills
+        # the leftover vertical space and scrolls independently (the global
+        # QSS already renders read-only QTextEdit in Consolas 12px mono).
         self.dashboard_text = QTextEdit()
         self.dashboard_text.setReadOnly(True)
-        self.dashboard_text.setFont(QFont("Consolas", 9))
         self.dashboard_text.setPlaceholderText("Click 'Refresh Dashboard' to scan the vault and view statistics.")
+        self.dashboard_text.setMinimumHeight(120)
         dash_layout.addWidget(self.dashboard_text)
+        dash_layout.setStretchFactor(self.dashboard_text, 1)
 
-        self.tab_widget.addTab(dash_tab, "📊 Dashboard")
+        self.tab_widget.addTab(self._wrap_scroll(dash_tab), "📊 Dashboard")
 
         # ---- Tab: Bot Queue ----
         # Dedicated Telegram bot inbox — forward repos to your bot, the app
         # reads them via Telethon (no external backend needed).
         bot_tab = QWidget()
         bot_layout = QVBoxLayout(bot_tab)
+        bot_layout.setSpacing(8)
 
         bot_header = QLabel(
             "🤖 Bot Queue\n"
@@ -4088,7 +4226,10 @@ class MainWindow(QMainWindow):
             "Click 'Check Queue' to fetch pending repos, then 'Process All'."
         )
         bot_header.setWordWrap(True)
-        bot_header.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px;")
+        # v31.1: solid theme-aware callout (objectName rule in the theme QSS
+        # paints it #F4F4F5 in light / #27272A in dark — rgba fills break
+        # dark mode in Qt's QSS compositor).
+        bot_header.setObjectName("info_header")
         bot_layout.addWidget(bot_header)
 
         # Bot username + token inputs
@@ -4110,24 +4251,29 @@ class MainWindow(QMainWindow):
         token_row2.addWidget(save_token_btn)
         bot_layout.addLayout(token_row2)
 
-        # Queue controls
+        # Queue controls — v31.1 three-variant hierarchy: ONE filled primary
+        # (Process All) + outlined secondary actions. Infrequent actions
+        # (export / verify / retry) moved to the global 'More' menu.
         queue_btn_row = QHBoxLayout()
         self.check_queue_btn = QPushButton("📬 Check Queue")
-        self.check_queue_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        self._style_btn(self.check_queue_btn, 'secondary')
         self.check_queue_btn.clicked.connect(self.check_bot_queue)
         queue_btn_row.addWidget(self.check_queue_btn)
 
-        # Pending badge (appears after Check Queue, shows repos not yet in vault)
+        # Pending badge (appears after Check Queue, shows repos not yet in
+        # the vault). v31.1: zinc — a pending COUNT is not an error; red is
+        # reserved for actual failures (WCAG-safe neutral).
         self.pending_badge = QLabel("")
         self.pending_badge.setStyleSheet(
-            "background-color: #EF4444; color: white; padding: 2px 8px; "
-            "border-radius: 10px; font-size: 11px; font-weight: bold;"
+            "background-color: #52525B; color: white; padding: 4px 8px; "
+            "border-radius: 10px; font-size: 12px; font-weight: bold;"
         )
         self.pending_badge.setVisible(False)
         queue_btn_row.addWidget(self.pending_badge)
 
         process_queue_btn = QPushButton("🚀 Process All")
-        process_queue_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
+        # v31.1: the Bot tab's ONE filled primary button.
+        self._style_btn(process_queue_btn, 'primary')
         process_queue_btn.clicked.connect(self.process_bot_queue)
         queue_btn_row.addWidget(process_queue_btn)
 
@@ -4136,7 +4282,7 @@ class MainWindow(QMainWindow):
         # after each verified-clean batch). Lets the user run incremental
         # batches without re-processing already-handled repos.
         process_new_btn = QPushButton("📬 Process New")
-        process_new_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        self._style_btn(process_new_btn, 'secondary')
         process_new_btn.setToolTip(
             "Fetch only messages newer than the last successfully-processed batch.\n"
             "Use this for daily incremental runs — skips already-processed repos."
@@ -4146,7 +4292,7 @@ class MainWindow(QMainWindow):
 
         # Mark All Read — hidden by default, appears only after verify passes
         self.mark_all_read_btn = QPushButton("✓ Mark All as Read")
-        self.mark_all_read_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], variant='outline'))
+        self._style_btn(self.mark_all_read_btn, 'secondary')
         self.mark_all_read_btn.clicked.connect(self.clear_bot_queue)
         self.mark_all_read_btn.setVisible(False)
         self.mark_all_read_btn.setToolTip(
@@ -4156,43 +4302,23 @@ class MainWindow(QMainWindow):
         )
         queue_btn_row.addWidget(self.mark_all_read_btn)
 
-        # Export ALL links from bot for manual verification
-        export_links_btn = QPushButton("📋 Export All Links")
-        export_links_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='ghost'))
-        export_links_btn.clicked.connect(self.export_all_bot_links)
-        queue_btn_row.addWidget(export_links_btn)
+        # v26 — Fix 6: '✅ Verify All Processed', '📋 Export All Links' and
+        # '🔄 Retry Failed' moved to the global 'More' overflow menu (v31.1).
 
-        # v26 — Fix 6: Verify All Processed — fetches ALL links from the bot
-        # and checks each GitHub URL against the VaultIndex. Does NOT process
-        # anything — just reports how many are already in the vault and how
-        # many are still missing.
-        verify_all_btn = QPushButton("✅ Verify All Processed")
-        verify_all_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], variant='outline'))
-        verify_all_btn.setToolTip(
-            "Fetch ALL links from the bot and check each GitHub URL against the vault.\n"
-            "Reports how many are already processed vs. missing. Does NOT process anything."
-        )
-        verify_all_btn.clicked.connect(self.verify_all_bot_links)
-        queue_btn_row.addWidget(verify_all_btn)
-
-        # v22 Feature 4: Retry Failed — reprocess URLs that errored out in a
-        # previous run (tracked in the failed_repos SQLite table).
-        retry_failed_btn = QPushButton("🔄 Retry Failed")
-        retry_failed_btn.setStyleSheet(self._btn_style(COLORS['error'], '#B91C1C', variant='outline'))
-        retry_failed_btn.clicked.connect(self.retry_failed_repos)
-        queue_btn_row.addWidget(retry_failed_btn)
-
+        queue_btn_row.addStretch()
         bot_layout.addLayout(queue_btn_row)
 
-        # Queue display
+        # Queue display — the tab's ONE growable region: fills the leftover
+        # vertical space, scrolls independently, no fixed-height cap.
         bot_layout.addWidget(QLabel("Pending Repos:"))
         self.queue_display = QTextEdit()
         self.queue_display.setReadOnly(True)
-        self.queue_display.setMaximumHeight(150)
+        self.queue_display.setMinimumHeight(120)
         self.queue_display.setPlaceholderText("Click 'Check Queue' to fetch pending repos from your bot...")
         bot_layout.addWidget(self.queue_display)
+        bot_layout.setStretchFactor(self.queue_display, 1)
 
-        self.tab_widget.addTab(bot_tab, "🤖 Bot")
+        self.tab_widget.addTab(self._wrap_scroll(bot_tab), "🤖 Bot")
 
         # ---- Tab: Sources (RSS/Reddit) ----
         # Lets the user fetch GitHub URLs from RSS feeds or Reddit .json
@@ -4202,12 +4328,13 @@ class MainWindow(QMainWindow):
         sources_layout = QVBoxLayout(sources_tab)
 
         sources_label = QLabel(
-            "🌐 Additional Sources\n"
+            "📡 Additional Sources\n"
             "Fetch GitHub URLs from RSS feeds or Reddit (no API key needed).\n"
             "Reddit uses the free .json endpoint (e.g. https://reddit.com/r/programming.json)"
         )
         sources_label.setWordWrap(True)
-        sources_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px;")
+        # v31.1: solid theme-aware callout (see info_header in the theme QSS).
+        sources_label.setObjectName("info_header")
         sources_layout.addWidget(sources_label)
 
         # URL input
@@ -4218,23 +4345,29 @@ class MainWindow(QMainWindow):
         url_row.addWidget(self.sources_url, 1)
 
         fetch_sources_btn = QPushButton("🔍 Fetch URLs")
+        self._style_btn(fetch_sources_btn, 'secondary')
         fetch_sources_btn.clicked.connect(self.fetch_from_sources)
         url_row.addWidget(fetch_sources_btn)
         sources_layout.addLayout(url_row)
 
-        # Results area
+        # Results area — the tab's ONE growable region (fills leftover
+        # space, scrolls independently, no fixed-height cap).
         sources_layout.addWidget(QLabel("Fetched GitHub URLs:"))
         self.sources_results = QTextEdit()
         self.sources_results.setReadOnly(True)
-        self.sources_results.setMaximumHeight(150)
+        self.sources_results.setMinimumHeight(120)
         sources_layout.addWidget(self.sources_results)
+        sources_layout.setStretchFactor(self.sources_results, 1)
 
-        # Process button
+        # Process button — the Sources tab's ONE filled primary button.
         process_sources_btn = QPushButton("🚀 Process Fetched URLs")
+        self._style_btn(process_sources_btn, 'primary')
         process_sources_btn.clicked.connect(self.process_sources_urls)
         sources_layout.addWidget(process_sources_btn)
 
-        self.tab_widget.addTab(sources_tab, "🌐 Sources")
+        # v31.1: 📡 (feeds) — Proxy keeps 🌐. Two different destinations no
+        # longer share one icon.
+        self.tab_widget.addTab(self._wrap_scroll(sources_tab), "📡 Sources")
 
         # ---- Tab: Backup (local folder + timestamped zip) ----
         backup_tab = self._create_backup_tab()
@@ -4245,80 +4378,95 @@ class MainWindow(QMainWindow):
         bot_idx = self.tab_widget.indexOf(self.findChild(QWidget, "bot_tab")) if self.findChild(QWidget, "bot_tab") else -1
         if bot_idx > 0:
             self.tab_widget.tabBar().moveTab(bot_idx, 0)
-        # Move Input tab to position 1
-        input_idx = self.tab_widget.indexOf(input_tab)
+        # Move Input tab to position 1 (v31.1: tabs wrap in QScrollArea, so
+        # look up the scroll container, not the inner content widget)
+        input_idx = self.tab_widget.indexOf(input_scroll)
         if input_idx > 1:
             self.tab_widget.tabBar().moveTab(input_idx, 1)
         self.tab_widget.setCurrentIndex(0)  # Bot tab is primary
 
         left_layout.addWidget(self.tab_widget)
 
-        # Action buttons (outside tabs, always visible)
+        # Action bar (outside tabs, always visible) — v31.1 hierarchy: ONE
+        # filled primary (Start), ONE filled danger (Stop), ONE 'More'
+        # overflow menu holding the infrequent actions (export / verify /
+        # retry / recategorize / test), plus the labeled proxy status dot.
         action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
         self.start_btn = QPushButton("🚀 Start Processing")
-        self.start_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
+        self._style_btn(self.start_btn, 'primary')
         self.start_btn.clicked.connect(self.start_processing)
 
         self.stop_btn = QPushButton("🛑 Stop")
-        self.stop_btn.setStyleSheet(self._btn_style(COLORS['error'], '#B91C1C', variant='outline'))
+        self._style_btn(self.stop_btn, 'danger')
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_processing)
 
-        self.test_all_btn = QPushButton("🔗 Test All")
-        self.test_all_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover'], variant='outline'))
-        self.test_all_btn.clicked.connect(self.test_all)
-
-        # Preview button (in the action row, not the Input tab)
-        self.preview_btn = QPushButton("👁️ Preview")
-        self.preview_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='ghost'))
-        self.preview_btn.clicked.connect(self.preview_messages)
-
         action_layout.addWidget(self.start_btn)
         action_layout.addWidget(self.stop_btn)
-        action_layout.addSpacing(16)  # visual separation between processing and utility
-        action_layout.addWidget(self.test_all_btn)
-        action_layout.addWidget(self.preview_btn)
+        action_layout.addSpacing(16)  # visual separation: run controls | utilities
 
-        # Dashboard button (opens Cloudflare dashboard in browser)
-        self.dashboard_link_btn = QPushButton("📊 Dashboard")
-        self.dashboard_link_btn.setFixedHeight(36)
-        self.dashboard_link_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover'], variant='outline'))
-        self.dashboard_link_btn.clicked.connect(self._open_dashboard_browser)
-        action_layout.addWidget(self.dashboard_link_btn)
+        # ---- 'More' overflow menu (v31.1: one menu for infrequent actions) ----
+        self.more_btn = QToolButton()
+        self.more_btn.setText("More ▾")
+        self.more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.more_btn.setToolTip("Tests, verification, export, retry and settings")
+        more_menu = QMenu(self.more_btn)
+        more_menu.addAction("🔗 Test All Connections", self.test_all)
+        more_menu.addSeparator()
+        more_menu.addAction("🔑 Test Telegram & GitHub", self.test_telegram_github)
+        more_menu.addAction("🌐 Test Proxy Connection", self.test_proxy)
+        more_menu.addAction("🧠 Test Ollama", self.test_ollama)
+        more_menu.addAction("🔌 Test Cloud API", self.test_cloud_llm)
+        more_menu.addSeparator()
+        more_menu.addAction("✅ Validate Vault", self.test_vault)
+        more_menu.addAction("🔍 Verify Vault", self.verify_vault)
+        more_menu.addAction("📁 Recategorize Notes", self.recategorize_notes)
+        more_menu.addSeparator()
+        more_menu.addAction("✅ Verify All Processed", self.verify_all_bot_links)
+        more_menu.addAction("📋 Export All Links", self.export_all_bot_links)
+        more_menu.addAction("🔄 Retry Failed", self.retry_failed_repos)
+        self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
+        self.backup_export_btn.triggered.connect(self._backup_export_zip)
+        more_menu.addSeparator()
+        more_menu.addAction("👁️ Preview Messages", self.preview_messages)
+        more_menu.addAction("📊 Open Dashboard", self._open_dashboard_browser)
+        # Settings submenu — the dark-mode toggle is a display preference,
+        # not a batch action, so it lives under Settings (v31.1 spec).
+        settings_menu = more_menu.addMenu("⚙️ Settings")
+        self.theme_btn = settings_menu.addAction("🌙 Dark Mode")
+        self.theme_btn.setCheckable(True)
+        self.theme_btn.setChecked(bool(self.config.get('dark_mode', False)))
+        self.theme_btn.triggered.connect(self.toggle_theme)
+        self.more_btn.setMenu(more_menu)
+        self._style_btn(self.more_btn, 'secondary')
+        action_layout.addWidget(self.more_btn)
 
-        # Theme toggle (light <-> dark)
-        self.theme_btn = QPushButton("🌙 Dark")
-        self.theme_btn.setFixedHeight(36)
-        self.theme_btn.setMinimumWidth(80)
-        self.theme_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='ghost'))
-        self.theme_btn.clicked.connect(self.toggle_theme)
-        action_layout.addWidget(self.theme_btn)
-
-        # Recategorize notes (opens table dialog to bulk-reassign categories)
-        self.recategorize_btn = QPushButton("📁 Recategorize")
-        self.recategorize_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='ghost'))
-        self.recategorize_btn.clicked.connect(self.recategorize_notes)
-        action_layout.addWidget(self.recategorize_btn)
-
-        # v22 Feature 7: Proxy Health Monitor — small colored dot that
-        # reflects whether the configured proxy is reachable. Updated every
-        # 60 seconds by a QTimer (see __init__ end). Non-blocking: the
-        # check uses a 2s socket timeout and runs on the GUI thread (the
-        # socket.connect_ex call returns immediately if the host is down).
+        # v22 Feature 7: Proxy Health Monitor — small colored dot + TEXT label
+        # (v31.1: color alone never conveys state — WCAG 1.4.1) that reflect
+        # whether the configured proxy is reachable. Updated every 60 seconds
+        # by a QTimer (see __init__ end). Non-blocking: the check uses a 2s
+        # socket timeout and runs on the GUI thread.
         self.proxy_status_label = QLabel("⚪")
-        self.proxy_status_label.setFixedSize(20, 20)
+        self.proxy_status_label.setFixedSize(16, 16)
         self.proxy_status_label.setToolTip("Proxy status — checking...")
         self.proxy_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         action_layout.addWidget(self.proxy_status_label)
+        self.proxy_status_text = QLabel("Checking…")
+        self.proxy_status_text.setToolTip("Proxy status — checking...")
+        action_layout.addWidget(self.proxy_status_text)
 
         action_layout.addStretch()
         left_layout.addLayout(action_layout)
 
-        # Progress bar — compact, hidden until processing starts
+        # Progress bar — determinate, visible ONLY while a batch job runs
+        # (v31.1 spec); labeled "Processing X of Y — repo-name" via
+        # update_progress()/update_status().
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("Ready")
         self.progress_bar.setFixedHeight(20)
         self.progress_bar.setTextVisible(True)
+        self.progress_bar.setVisible(False)
         left_layout.addWidget(self.progress_bar)
 
         # NO addStretch() here — removes the white space in the middle.
@@ -4332,7 +4480,7 @@ class MainWindow(QMainWindow):
         # Log toggle button (shown in the action row, toggles log visibility)
         self.log_toggle_btn = QPushButton("📋 Show Log")
         self.log_toggle_btn.setFixedHeight(28)
-        self.log_toggle_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='ghost'))
+        self._style_btn(self.log_toggle_btn, 'ghost')
         self.log_toggle_btn.setCheckable(True)
         left_layout.addWidget(self.log_toggle_btn)
 
@@ -4360,7 +4508,7 @@ class MainWindow(QMainWindow):
         self.log_filter_success.clicked.connect(lambda: self._set_log_filter("success"))
 
         for btn in [self.log_filter_all, self.log_filter_errors, self.log_filter_warnings, self.log_filter_success]:
-            btn.setStyleSheet("padding: 3px 10px; font-size: 11px;")
+            btn.setStyleSheet("padding: 4px 8px; font-size: 12px;")
             log_header.addWidget(btn)
 
         log_header.addStretch()
@@ -4377,14 +4525,15 @@ class MainWindow(QMainWindow):
         clear_log_btn.setFixedWidth(35)
         clear_log_btn.setToolTip("Clear log")
         clear_log_btn.clicked.connect(self._clear_log)
-        clear_log_btn.setStyleSheet("padding: 3px; font-size: 12px;")
+        clear_log_btn.setStyleSheet("padding: 4px; font-size: 12px;")
         log_header.addWidget(clear_log_btn)
 
         log_group_layout.addLayout(log_header)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setFont(QFont("Consolas", 9))
+        # Mono 12px comes from the global QSS (QTextEdit:read-only) — the
+        # log panel is the window's ONE growable region and always scrolls.
         self.log_text.setMinimumHeight(150)  # ensure log is always visible
         log_group_layout.addWidget(self.log_text)
         log_group.setLayout(log_group_layout)
@@ -4420,11 +4569,12 @@ class MainWindow(QMainWindow):
         self.apply_light_theme()
 
         # If the user previously enabled dark mode, re-apply it now (overrides
-        # the light theme set above) and flip the toggle button label.
+        # the light theme set above) and sync the Settings-menu check state.
         if self.config.get('dark_mode', False):
             self._dark_mode = True
             self.apply_dark_theme()
-            self.theme_btn.setText("☀️ Light")
+            self.theme_btn.setChecked(True)
+            self._refresh_button_styles()  # outlined variant is theme-aware
 
         # Auto-check bot queue on startup (after proxy validation)
         from PyQt6.QtCore import QTimer
@@ -4456,61 +4606,94 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.ColorRole.Button, QColor(0xFF, 0xFF, 0xFF))
         palette.setColor(QPalette.ColorRole.ButtonText, QColor(0x1A, 0x1A, 0x1A))
         palette.setColor(QPalette.ColorRole.BrightText, QColor(0xDC, 0x26, 0x26))
-        # 30% primary — blue-600 #6366F1
-        palette.setColor(QPalette.ColorRole.Link, QColor(0x25, 0x63, 0xEB))
-        palette.setColor(QPalette.ColorRole.Highlight, QColor(0x25, 0x63, 0xEB))
+        # 30% accent — indigo-700 #4338CA (v31.1; the QSS below carries the
+        # visible accent — this palette entry covers native palettes)
+        palette.setColor(QPalette.ColorRole.Link, QColor(0x43, 0x38, 0xCA))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(0x43, 0x38, 0xCA))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0xFF, 0xFF, 0xFF))
         self.setPalette(palette)
 
-        # Global app stylesheet — UI/UX Pro Max design system (light)
+        # Global app stylesheet — UI/UX Pro Max design system (light), v31.1
+        # tokens: indigo-700 accent #4338CA, 8px spacing scale (4/8/16/24/32/48),
+        # 4-size type scale (16 titles / 13 labels+buttons / 12 body / 12 mono),
+        # 2px focus outlines on every interactive element.
         self.setStyleSheet("""
             QMainWindow { background-color: #FAFAFA; }
             QWidget { font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1A1A1A; }
             QTabWidget::pane { border: 1px solid #E4E4E7; border-radius: 8px; top: -1px; background: #FFFFFF; }
-            QTabBar::tab { background: #F4F4F5; border: none; border-bottom: 3px solid transparent; padding: 10px 20px; margin-right: 2px; font-weight: 500; color: #71717A; }
-            QTabBar::tab:selected { background: #FFFFFF; border-bottom: 3px solid #6366F1; color: #6366F1; }
+            QTabBar::tab { background: #F4F4F5; border: none; border-bottom: 3px solid transparent; padding: 8px 16px; margin-right: 2px; font-weight: 500; color: #71717A; }
+            QTabBar::tab:selected { background: #FFFFFF; border-bottom: 3px solid #4338CA; color: #4338CA; }
             QTabBar::tab:hover:!selected { background: #E4E4E7; color: #3F3F46; }
-            QGroupBox { font-weight: 600; border: 1px solid #E4E4E7; border-radius: 8px; margin-top: 12px; padding-top: 16px; background: #FFFFFF; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; color: #3F3F46; }
-            QLineEdit { padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; selection-background-color: #6366F1; selection-color: #FFFFFF; }
-            QLineEdit:focus { border: 2px solid #6366F1; padding: 7px 11px; }
+            QGroupBox { font-weight: 600; font-size: 16px; border: 1px solid #E4E4E7; border-radius: 8px; margin-top: 16px; padding: 16px 8px 8px 8px; background: #FFFFFF; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #3F3F46; }
+            QLineEdit { padding: 8px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; selection-background-color: #4338CA; selection-color: #FFFFFF; }
+            QLineEdit:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #4338CA; outline-offset: 2px; }
             QLineEdit:disabled { background: #F4F4F5; color: #9CA3AF; }
-            QComboBox { padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; selection-background-color: #6366F1; selection-color: #FFFFFF; }
-            QComboBox:focus { border: 2px solid #6366F1; padding: 7px 11px; }
+            QComboBox { padding: 8px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; selection-background-color: #4338CA; selection-color: #FFFFFF; }
+            QComboBox:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #4338CA; outline-offset: 2px; }
             QComboBox:disabled { background: #F4F4F5; color: #9CA3AF; }
-            QComboBox QAbstractItemView { background: #FFFFFF; color: #1A1A1A; selection-background-color: #6366F1; selection-color: #FFFFFF; border: 1px solid #E4E4E7; outline: none; }
+            QComboBox QAbstractItemView { background: #FFFFFF; color: #1A1A1A; selection-background-color: #4338CA; selection-color: #FFFFFF; border: 1px solid #E4E4E7; outline: none; }
             QCheckBox { spacing: 8px; color: #3F3F46; }
+            QCheckBox:focus { outline: 2px solid #4338CA; outline-offset: 2px; }
             QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #D1D5DB; border-radius: 4px; background: #FFFFFF; }
-            QCheckBox::indicator:checked { background: #6366F1; border-color: #6366F1; }
-            QCheckBox::indicator:hover { border-color: #6366F1; }
-            QPushButton { padding: 10px 24px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; font-weight: bold; color: #1A1A1A; }
+            QCheckBox::indicator:checked { background: #4338CA; border-color: #4338CA; }
+            QCheckBox::indicator:hover { border-color: #4338CA; }
+            QPushButton { padding: 8px 16px; border: 1px solid #D1D5DB; border-radius: 6px; background: #FFFFFF; font-weight: bold; color: #1A1A1A; }
             QPushButton:hover { background: #F4F4F5; border-color: #9CA3AF; }
             QPushButton:pressed { background: #E4E4E7; }
             QPushButton:disabled { color: #9CA3AF; background: #F4F4F5; border-color: #E4E4E7; }
-            QPushButton:focus { outline: 2px solid #6366F1; outline-offset: 2px; }
-            QTextEdit { border: 1px solid #E4E4E7; border-radius: 8px; background: #FAFAFA; padding: 8px; selection-background-color: #6366F1; selection-color: #FFFFFF; }
+            QPushButton:focus { outline: 2px solid #4338CA; outline-offset: 2px; }
+            QToolButton { padding: 8px 16px; border: 1px solid #4338CA; border-radius: 6px; background-color: #FFFFFF; color: #4338CA; font-weight: 600; font-size: 13px; }
+            QToolButton:hover { background-color: #4338CA; color: #FFFFFF; }
+            QToolButton:pressed { background-color: #3730A3; color: #FFFFFF; }
+            QToolButton:focus { outline: 2px solid #4338CA; outline-offset: 2px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
+            QMenu { background-color: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 8px; padding: 8px 0; }
+            QMenu::item { padding: 8px 24px; color: #1A1A1A; }
+            QMenu::item:selected { background: #4338CA; color: #FFFFFF; }
+            QMenu::separator { height: 1px; background: #E4E4E7; margin: 8px 0; }
+            QMenu::item:disabled { color: #9CA3AF; }
+            QScrollArea { border: none; background-color: #FFFFFF; }
+            QWidget#tab_sheet { background-color: #FFFFFF; }
+            QLabel#info_header { background-color: #F4F4F5; border-radius: 4px; padding: 8px; font-size: 12px; }
+            QLabel#info_note { background-color: #ECFDF5; border-radius: 4px; padding: 8px; font-size: 12px; }
+            QLabel#info_note_indigo { background-color: #EEF2FF; border-radius: 4px; padding: 8px; font-size: 12px; }
+            QTextEdit { border: 1px solid #E4E4E7; border-radius: 8px; background: #FAFAFA; padding: 8px; selection-background-color: #4338CA; selection-color: #FFFFFF; }
             QTextEdit:read-only { font-family: 'Consolas', 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 12px; }
-            QTextEdit:focus { border: 2px solid #6366F1; padding: 7px; }
+            QTextEdit:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #4338CA; outline-offset: 2px; }
             QProgressBar { border: none; border-radius: 6px; background: #E4E4E7; text-align: center; height: 24px; font-size: 12px; color: #3F3F46; }
-            QProgressBar::chunk { background: #6366F1; border-radius: 6px; }
+            QProgressBar::chunk { background: #4338CA; border-radius: 6px; }
             QLabel { color: #1A1A1A; }
+            QLabel#proxy_status_text { color: #52525B; font-size: 12px; }
             QRadioButton { spacing: 8px; padding: 2px; color: #3F3F46; }
+            QRadioButton:focus { outline: 2px solid #4338CA; outline-offset: 2px; }
             QRadioButton::indicator { width: 16px; height: 16px; border: 2px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; }
-            QRadioButton::indicator:checked { border-color: #6366F1; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #6366F1, stop:0.5 #6366F1, stop:0.5 transparent, stop:1 transparent); }
-            QRadioButton::indicator:hover { border-color: #6366F1; }
+            QRadioButton::indicator:checked { border-color: #4338CA; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #4338CA, stop:0.5 #4338CA, stop:0.5 transparent, stop:1 transparent); }
+            QRadioButton::indicator:hover { border-color: #4338CA; }
+            QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #D1D5DB; border-radius: 4px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #9CA3AF; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+            QScrollBar:horizontal { background: transparent; height: 8px; margin: 0; }
+            QScrollBar::handle:horizontal { background: #D1D5DB; border-radius: 4px; min-width: 24px; }
+            QScrollBar::handle:horizontal:hover { background: #9CA3AF; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { height: 0; width: 0; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
         """)
 
     def apply_dark_theme(self):
         """Set a dark theme palette + stylesheet.
 
-        UI/UX Pro Max design system (v19.0) — dark variant:
+        UI/UX Pro Max design system (v19.0) — dark variant, v31.1 tokens:
           - Background: #18181B (zinc-900)
           - Cards / inputs: #27272A (zinc-800)
           - Borders: #3F3F46 (zinc-700) / #52525B (zinc-600 for inputs)
           - Text: #E4E4E7 (zinc-200)
           - Muted text: #A1A1AA (zinc-400) / #71717A (zinc-500)
-          - Primary accent: #6366F1 (blue-600) with #818CF8 (blue-400) for
-            hover/selected text in dark mode (better contrast against #27272A).
+          - Fills/selection: indigo-700 #4338CA (white text 7.9:1);
+            indigo-400 #818CF8 for tab underline/selected text and focus
+            outline (better contrast against #27272A than indigo-700).
         """
         palette = QPalette()
         palette.setColor(QPalette.ColorRole.Window, QColor(0x18, 0x18, 0x1B))
@@ -4522,48 +4705,76 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.ColorRole.Text, QColor(0xE4, 0xE4, 0xE7))
         palette.setColor(QPalette.ColorRole.Button, QColor(0x27, 0x27, 0x2A))
         palette.setColor(QPalette.ColorRole.ButtonText, QColor(0xE4, 0xE4, 0xE7))
-        palette.setColor(QPalette.ColorRole.BrightText, QColor(0xEF, 0x44, 0x44))
+        palette.setColor(QPalette.ColorRole.BrightText, QColor(0xB9, 0x1C, 0x1C))
         palette.setColor(QPalette.ColorRole.Link, QColor(0x60, 0xA5, 0xFA))
         palette.setColor(QPalette.ColorRole.Highlight, QColor(0x25, 0x63, 0xEB))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0xFF, 0xFF, 0xFF))
         self.setPalette(palette)
 
-        # Global app stylesheet — UI/UX Pro Max design system (dark)
+        # Global app stylesheet — UI/UX Pro Max design system (dark), v31.1
         self.setStyleSheet("""
             QMainWindow { background-color: #18181B; }
             QWidget { font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #E4E4E7; }
             QTabWidget::pane { border: 1px solid #3F3F46; border-radius: 8px; top: -1px; background: #27272A; }
-            QTabBar::tab { background: #27272A; border: none; border-bottom: 3px solid transparent; padding: 10px 20px; margin-right: 2px; font-weight: 500; color: #A1A1AA; }
-            QTabBar::tab:selected { background: #3F3F46; border-bottom: 3px solid #6366F1; color: #818CF8; }
+            QTabBar::tab { background: #27272A; border: none; border-bottom: 3px solid transparent; padding: 8px 16px; margin-right: 2px; font-weight: 500; color: #A1A1AA; }
+            QTabBar::tab:selected { background: #3F3F46; border-bottom: 3px solid #818CF8; color: #818CF8; }
             QTabBar::tab:hover:!selected { background: #3F3F46; color: #D4D4D8; }
-            QGroupBox { font-weight: 600; border: 1px solid #3F3F46; border-radius: 8px; margin-top: 12px; padding-top: 16px; background: #27272A; color: #E4E4E7; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; color: #D4D4D8; }
-            QLineEdit { padding: 8px 12px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; color: #E4E4E7; selection-background-color: #6366F1; selection-color: #FFFFFF; }
-            QLineEdit:focus { border: 2px solid #6366F1; padding: 7px 11px; }
+            QGroupBox { font-weight: 600; font-size: 16px; border: 1px solid #3F3F46; border-radius: 8px; margin-top: 16px; padding: 16px 8px 8px 8px; background: #27272A; color: #E4E4E7; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #D4D4D8; }
+            QLineEdit { padding: 8px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; color: #E4E4E7; selection-background-color: #4338CA; selection-color: #FFFFFF; }
+            QLineEdit:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #818CF8; outline-offset: 2px; }
             QLineEdit:disabled { background: #18181B; color: #71717A; }
-            QComboBox { padding: 8px 12px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; color: #E4E4E7; selection-background-color: #6366F1; selection-color: #FFFFFF; }
-            QComboBox:focus { border: 2px solid #6366F1; padding: 7px 11px; }
+            QComboBox { padding: 8px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; color: #E4E4E7; selection-background-color: #4338CA; selection-color: #FFFFFF; }
+            QComboBox:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #818CF8; outline-offset: 2px; }
             QComboBox:disabled { background: #18181B; color: #71717A; }
-            QComboBox QAbstractItemView { background: #27272A; color: #E4E4E7; selection-background-color: #6366F1; selection-color: #FFFFFF; border: 1px solid #3F3F46; outline: none; }
+            QComboBox QAbstractItemView { background: #27272A; color: #E4E4E7; selection-background-color: #4338CA; selection-color: #FFFFFF; border: 1px solid #3F3F46; outline: none; }
             QCheckBox { spacing: 8px; color: #D4D4D8; }
+            QCheckBox:focus { outline: 2px solid #818CF8; outline-offset: 2px; }
             QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #52525B; border-radius: 4px; background: #27272A; }
-            QCheckBox::indicator:checked { background: #6366F1; border-color: #6366F1; }
+            QCheckBox::indicator:checked { background: #4338CA; border-color: #4338CA; }
             QCheckBox::indicator:hover { border-color: #818CF8; }
-            QPushButton { padding: 10px 24px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; font-weight: bold; color: #E4E4E7; }
+            QPushButton { padding: 8px 16px; border: 1px solid #52525B; border-radius: 6px; background: #27272A; font-weight: bold; color: #E4E4E7; }
             QPushButton:hover { background: #3F3F46; border-color: #71717A; }
             QPushButton:pressed { background: #27272A; }
             QPushButton:disabled { color: #71717A; background: #18181B; border-color: #27272A; }
             QPushButton:focus { outline: 2px solid #818CF8; outline-offset: 2px; }
-            QTextEdit { border: 1px solid #3F3F46; border-radius: 8px; background: #18181B; padding: 8px; color: #E4E4E7; selection-background-color: #6366F1; selection-color: #FFFFFF; }
+            QToolButton { padding: 8px 16px; border: 1px solid #818CF8; border-radius: 6px; background-color: #27272A; color: #818CF8; font-weight: 600; font-size: 13px; }
+            QToolButton:hover { background-color: #4338CA; color: #FFFFFF; border-color: #4338CA; }
+            QToolButton:pressed { background-color: #3730A3; color: #FFFFFF; }
+            QToolButton:focus { outline: 2px solid #818CF8; outline-offset: 2px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
+            QMenu { background-color: #27272A; border: 1px solid #3F3F46; border-radius: 8px; padding: 8px 0; }
+            QMenu::item { padding: 8px 24px; color: #E4E4E7; }
+            QMenu::item:selected { background: #4338CA; color: #FFFFFF; }
+            QMenu::separator { height: 1px; background: #3F3F46; margin: 8px 0; }
+            QMenu::item:disabled { color: #71717A; }
+            QScrollArea { border: none; background-color: #27272A; }
+            QWidget#tab_sheet { background-color: #27272A; }
+            QLabel#info_header { background-color: #27272A; border-radius: 4px; padding: 8px; font-size: 12px; color: #D4D4D8; }
+            QLabel#info_note { background-color: #152822; border-radius: 4px; padding: 8px; font-size: 12px; color: #D4D4D8; }
+            QLabel#info_note_indigo { background-color: #1E1B4B; border-radius: 4px; padding: 8px; font-size: 12px; color: #D4D4D8; }
+            QTextEdit { border: 1px solid #3F3F46; border-radius: 8px; background: #18181B; padding: 8px; color: #E4E4E7; selection-background-color: #4338CA; selection-color: #FFFFFF; }
             QTextEdit:read-only { font-family: 'Consolas', 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 12px; }
-            QTextEdit:focus { border: 2px solid #6366F1; padding: 7px; }
+            QTextEdit:focus { border: 2px solid #4338CA; padding: 7px; outline: 2px solid #818CF8; outline-offset: 2px; }
             QProgressBar { border: none; border-radius: 6px; background: #3F3F46; text-align: center; height: 24px; font-size: 12px; color: #E4E4E7; }
-            QProgressBar::chunk { background: #6366F1; border-radius: 6px; }
+            QProgressBar::chunk { background: #4338CA; border-radius: 6px; }
             QLabel { color: #E4E4E7; }
+            QLabel#proxy_status_text { color: #A1A1AA; font-size: 12px; }
             QRadioButton { spacing: 8px; padding: 2px; color: #D4D4D8; }
+            QRadioButton:focus { outline: 2px solid #818CF8; outline-offset: 2px; }
             QRadioButton::indicator { width: 16px; height: 16px; border: 2px solid #52525B; border-radius: 8px; background: #27272A; }
-            QRadioButton::indicator:checked { border-color: #6366F1; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #6366F1, stop:0.5 #6366F1, stop:0.5 transparent, stop:1 transparent); }
+            QRadioButton::indicator:checked { border-color: #4338CA; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #818CF8, stop:0.5 #818CF8, stop:0.5 transparent, stop:1 transparent); }
             QRadioButton::indicator:hover { border-color: #818CF8; }
+            QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #3F3F46; border-radius: 4px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #52525B; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+            QScrollBar:horizontal { background: transparent; height: 8px; margin: 0; }
+            QScrollBar::handle:horizontal { background: #3F3F46; border-radius: 4px; min-width: 24px; }
+            QScrollBar::handle:horizontal:hover { background: #52525B; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { height: 0; width: 0; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
         """)
 
     def toggle_theme(self):
@@ -4571,12 +4782,14 @@ class MainWindow(QMainWindow):
         self._dark_mode = not getattr(self, '_dark_mode', False)
         if self._dark_mode:
             self.apply_dark_theme()
-            self.theme_btn.setText("☀️ Light")
             self.log_message("🌙 Dark mode enabled", "info")
         else:
             self.apply_light_theme()
-            self.theme_btn.setText("🌙 Dark")
             self.log_message("☀️ Light mode enabled", "info")
+        # Sync the Settings-menu check state and re-apply the (theme-aware)
+        # outlined variants on the persistent window buttons.
+        self.theme_btn.setChecked(self._dark_mode)
+        self._refresh_button_styles()
         self.save_config()  # persist the theme choice
 
     # ------------------------------------------------------------------
@@ -5666,6 +5879,7 @@ class MainWindow(QMainWindow):
             if not proxy.get('enabled'):
                 self.proxy_status_label.setText("⚪")
                 self.proxy_status_label.setToolTip("Proxy disabled")
+                self._set_proxy_status_text("Idle", "Proxy disabled")
                 return
             host = proxy.get('host', '127.0.0.1') or '127.0.0.1'
             try:
@@ -5685,15 +5899,26 @@ class MainWindow(QMainWindow):
             if result == 0:
                 self.proxy_status_label.setText("🟢")
                 self.proxy_status_label.setToolTip(f"Proxy OK ({host}:{port})")
+                self._set_proxy_status_text("Connected", f"Proxy OK ({host}:{port})")
             else:
                 self.proxy_status_label.setText("🔴")
                 self.proxy_status_label.setToolTip(f"Proxy unreachable ({host}:{port})")
+                self._set_proxy_status_text("Error", f"Proxy unreachable ({host}:{port})")
         except Exception:
             try:
                 self.proxy_status_label.setText("🔴")
                 self.proxy_status_label.setToolTip("Proxy check failed")
+                self._set_proxy_status_text("Error", "Proxy check failed")
             except Exception:
                 pass
+
+    def _set_proxy_status_text(self, state: str, tooltip: str):
+        """v31.1 (WCAG 1.4.1): the status DOT is always accompanied by a TEXT
+        label — color alone never conveys state ("Connected/Idle/Error")."""
+        if not hasattr(self, 'proxy_status_text'):
+            return
+        self.proxy_status_text.setText(state)
+        self.proxy_status_text.setToolTip(tooltip)
 
     def _acquire_telegram_lock(self) -> bool:
         """Try to acquire the Telegram busy lock. Returns True if acquired,
@@ -5744,7 +5969,7 @@ class MainWindow(QMainWindow):
             text_color = "#1A1A1A"
             help_bg = "#F4F4F5"
             border_color = "#D1D5DB"
-            focus_color = "#6366F1"
+            focus_color = "#4338CA"  # v31.1: indigo-700 (was indigo-500)
 
         dialog.setStyleSheet(f"""
             QDialog {{ background-color: {bg_color}; }}
@@ -5853,6 +6078,10 @@ class MainWindow(QMainWindow):
             self.mode_telegram.isChecked(),
             self.mode_import.isChecked(),
         ]):
+            # v31.1 safety gate: confirm before large batches (>10 items).
+            if not self._confirm_batch(len(bot_urls), "the bot queue"):
+                self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
+                return
             self.log_message(f"🚀 Processing {len(bot_urls)} repos from bot queue...", "info")
             # v23 — pass bot_source=True so the manifest records the source
             # as 'bot' and Phase 5 auto-mark-read can fire on success. Also
@@ -5901,6 +6130,10 @@ class MainWindow(QMainWindow):
                     urls = result.get('urls', [])
                     if not urls:
                         self.log_message("No GitHub URLs found in that message.", "warning")
+                        return
+                    # v31.1 safety gate (exact item count stated).
+                    if not self._confirm_batch(len(urls), "the single message fetch"):
+                        self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
                         return
                     self._start_worker_with_urls(urls)
                 else:
@@ -6041,6 +6274,11 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.progress_bar.setValue(0)
+        # v31.1 spec: the determinate progress bar is visible ONLY while a
+        # batch job runs — show it now, label it with the current item as
+        # the batch progresses (update_progress / update_status).
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setFormat("Processing…")
         self.log_text.clear()
         # Track processing start time for elapsed display
         self._processing_start_time = datetime.now()
@@ -6092,26 +6330,28 @@ class MainWindow(QMainWindow):
             self.stop_btn.setEnabled(False)
 
     def update_progress(self, current, total):
-        """Update the progress bar value and show an `X/Y` count in its text.
+        """Update the progress bar value and show `Processing X of Y` in its
+        text (v31.1 spec: 'Processing 7 of 30 — repo-name').
 
         The format string is intentionally short so it fits on the narrow
         progress bar; the human-readable status (current repo name) is set
         separately by `update_status` which overwrites this format with a
-        longer `X/Y — owner/repo` string while a repo is being processed.
+        longer `Processing X of Y — owner/repo` string while a repo is being
+        processed.
         """
         if total > 0:
             self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(current)
-        # Show "X/Y" format in the progress bar
+        # Show "Processing X of Y" format in the progress bar
         if total > 0:
-            self.progress_bar.setFormat(f"{current}/{total}")
+            self.progress_bar.setFormat(f"Processing {current} of {total}")
         else:
             self.progress_bar.setFormat("Ready")
 
     def update_status(self, text):
         """Show the current status text in the progress bar's format string.
 
-        Format: `X/Y — owner/repo (elapsed)`
+        Format: `Processing X of Y — owner/repo (elapsed)`
         Elapsed time is calculated from `self._processing_start_time`.
         """
         # Status shown in progress bar format (status label removed)
@@ -6133,11 +6373,29 @@ class MainWindow(QMainWindow):
                     repo_name = f"{parts[0]}/{parts[1]}"
                     current = self.progress_bar.value()
                     total = self.progress_bar.maximum()
-                    self.progress_bar.setFormat(f"{current}/{total} — {repo_name[:40]}{elapsed_str}")
+                    self.progress_bar.setFormat(f"Processing {current} of {total} — {repo_name[:40]}{elapsed_str}")
                     return
             self.progress_bar.setFormat(f"Processing: {text[:60]}{elapsed_str}")
         else:
             self.progress_bar.setFormat("Ready")
+
+    def _log_html_colors(self) -> Dict[str, str]:
+        """v31.1: log text colors matched to the ACTIVE theme so every level
+        passes AA contrast on its own background (dark shades on the light
+        log, light shades on the dark log)."""
+        if getattr(self, '_dark_mode', False):
+            return {
+                "error":   "#F87171",  # Red-400 on zinc-900
+                "warning": "#FBBF24",  # Amber-400 on zinc-900
+                "success": "#34D399",  # Emerald-400 on zinc-900
+                "info":    "#A1A1AA",  # Zinc-400 on zinc-900
+            }
+        return {
+            "error":   "#B91C1C",  # Red-700 (6.5:1 on white)
+            "warning": "#B45309",  # Amber-700 (4.7:1 on white)
+            "success": "#047857",  # Emerald-700 (7.4:1 on white)
+            "info":    "#52525B",  # Zinc-600 (7.1:1 on white)
+        }
 
     def log_message(self, msg, level="info"):
         """Append a colored line to the GUI log and auto-scroll to the bottom.
@@ -6171,14 +6429,9 @@ class MainWindow(QMainWindow):
         if len(self._all_log_entries) > 1000:
             self._all_log_entries = self._all_log_entries[-1000:]
 
-        # HTML colors chosen to be readable on BOTH light and dark backgrounds.
-        html_color_map = {
-            "error":   "#EF4444",  # Red-500 (semantic)
-            "warning": "#F59E0B",  # Amber-500 (semantic)
-            "success": "#10B981",  # Emerald-500 (semantic, same as CTA)
-            "info":    "#71717A",  # Zinc-500 (neutral)
-        }
-        html_color = html_color_map.get(level, "#9E9E9E")
+        # HTML colors chosen to be readable on the ACTIVE theme background
+        # (v31.1: theme-aware — dark shades in light mode, light in dark).
+        html_color = self._log_html_colors().get(level, "#71717A")
 
         # Apply current filter — skip rendering if the entry doesn't match.
         if self._log_filter != "all" and level != self._log_filter:
@@ -6293,12 +6546,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, '_all_log_entries'):
             self._all_log_entries = []
 
-        html_color_map = {
-            "error":   "#EF4444",  # Red-500
-            "warning": "#F59E0B",  # Amber-500
-            "success": "#10B981",  # Emerald-500
-            "info":    "#71717A",  # Zinc-500
-        }
+        # v31.1: theme-aware log colors (see _log_html_colors).
+        html_color_map = self._log_html_colors()
 
 
         # Suppress auto-scroll flicker while we rebuild the log.
@@ -6855,6 +7104,10 @@ class MainWindow(QMainWindow):
         if not urls:
             self.log_message("No URLs to process. Fetch from a source first.", "warning")
             return
+        # v31.1 safety gate: confirm before large batches (>10 items).
+        if not self._confirm_batch(len(urls), "the fetched sources"):
+            self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
+            return
         self.log_message(f"🚀 Processing {len(urls)} URLs from sources...", "info")
         self._start_worker_with_urls(urls)
 
@@ -6947,19 +7200,20 @@ class MainWindow(QMainWindow):
                 # Store ONLY pending URLs for processing (Q9: progress bar shows only new repos)
                 self._bot_queue_urls = pending_urls
 
-                # Update pending badge (Q15)
+                # Update pending badge (Q15). v31.1: zinc + ⏳ — a pending
+                # count is routine, NOT an error; red is reserved for failures.
                 if pending_urls:
-                    self.pending_badge.setText(f"📬 {len(pending_urls)} pending")
+                    self.pending_badge.setText(f"⏳ {len(pending_urls)} pending")
                     self.pending_badge.setStyleSheet(
-                        "background-color: #EF4444; color: white; padding: 2px 8px; "
-                        "border-radius: 10px; font-size: 11px; font-weight: bold;"
+                        "background-color: #52525B; color: white; padding: 4px 8px; "
+                        "border-radius: 10px; font-size: 12px; font-weight: bold;"
                     )
                     self.pending_badge.setVisible(True)
                 else:
                     self.pending_badge.setText("✅ 0 pending")
                     self.pending_badge.setStyleSheet(
-                        "background-color: #10B981; color: white; padding: 2px 8px; "
-                        "border-radius: 10px; font-size: 11px; font-weight: bold;"
+                        "background-color: #047857; color: white; padding: 4px 8px; "
+                        "border-radius: 10px; font-size: 12px; font-weight: bold;"
                     )
                     self.pending_badge.setVisible(True)
 
@@ -6969,7 +7223,7 @@ class MainWindow(QMainWindow):
                 display += f"Total GitHub URLs in bot:  {len(all_urls)}\n"
                 display += f"✅ Already in vault:        {in_vault_count}\n"
                 display += f"🗑️ Decommissioned (404):    {decommissioned_count}\n"
-                display += f"❌ Pending (not in vault):  {len(pending_urls)}\n"
+                display += f"⏳ Pending (not in vault):  {len(pending_urls)}\n"
                 display += f"🔗 Non-GitHub links:        {len(non_github)}\n"
                 if getattr(self, '_bot_queue_duplicates', 0) > 0:
                     display += f"🔄 Duplicates removed:      {self._bot_queue_duplicates}\n"
@@ -7014,6 +7268,10 @@ class MainWindow(QMainWindow):
         urls = getattr(self, '_bot_queue_urls', [])
         if not urls:
             self.log_message("No repos in queue. Click 'Check Queue' first.", "warning")
+            return
+        # v31.1 safety gate: confirm before large batches (>10 items).
+        if not self._confirm_batch(len(urls), "the bot queue"):
+            self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
             return
         self.log_message(f"🚀 Processing {len(urls)} repos from bot queue...", "info")
         # Process the URLs using the existing pipeline. v23 — pass
@@ -7153,6 +7411,10 @@ class MainWindow(QMainWindow):
             # Start the worker. processing_finished will advance
             # last_processed_msg_id to self._pending_last_processed_update
             # ONLY if Phase 5 CLEAR passes (all links verified).
+            # v31.1 safety gate: confirm before large batches (>10 items).
+            if not self._confirm_batch(len(urls), "the new bot messages"):
+                self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
+                return
             self._start_worker_with_urls(
                 urls,
                 bot_source=True,
@@ -7272,7 +7534,7 @@ class MainWindow(QMainWindow):
         just reports:
           - Total GitHub links in bot
           - Found in vault ✅
-          - Missing from vault ❌ (with the list of missing URLs)
+          - Missing from vault ⏳ (with the list of missing URLs)
 
         The report is shown in the Bot tab's ``queue_display`` text area so
         the user can review it without switching tabs. The whole method is
@@ -7391,8 +7653,9 @@ class MainWindow(QMainWindow):
                             github_missing.append(url)
 
                     # v29.7 — Log the missing URLs so user knows exactly what to process
+                    # v31.1: ⏳ — missing-from-vault is PENDING work, not a failure.
                     if github_missing:
-                        self.log_message(f"❌ {len(github_missing)} missing GitHub link(s):", "warning")
+                        self.log_message(f"⏳ {len(github_missing)} missing GitHub link(s):", "warning")
                         for i, url in enumerate(github_missing, 1):
                             self.log_message(f"   {i}. {url}", "info")
 
@@ -7403,7 +7666,7 @@ class MainWindow(QMainWindow):
                     lines.append(f"Total GitHub links in bot:      {len(urls)}")
                     lines.append(f"✅ Found in vault:              {github_in_vault}")
                     lines.append(f"🗑️ Decommissioned (404):        {github_decommissioned}")
-                    lines.append(f"❌ Missing from vault:          {len(github_missing)}")
+                    lines.append(f"⏳ Missing from vault:          {len(github_missing)}")
                     lines.append(f"🔗 Non-GitHub links:            {len(non_github)}")
                     lines.append("")
                     lines.append("ALL GITHUB LINKS — DETAILED CHECK:")
@@ -7416,7 +7679,7 @@ class MainWindow(QMainWindow):
                                 lines.append(f"  {i:3d}. ✅ {url}")
                                 lines.append(f"       → {note_name}")
                             else:
-                                lines.append(f"  {i:3d}. ❌ {url}")
+                                lines.append(f"  {i:3d}. ⏳ {url}")
                         except Exception:
                             lines.append(f"  {i:3d}. ❌ {url} (check error)")
                     lines.append("-" * 60)
@@ -7443,7 +7706,7 @@ class MainWindow(QMainWindow):
                             f.write(f"| Metric | Count |\n|--------|-------|\n")
                             f.write(f"| 📬 Total GitHub links in bot | {len(urls)} |\n")
                             f.write(f"| ✅ Found in vault | {github_in_vault} |\n")
-                            f.write(f"| ❌ Missing from vault | {len(github_missing)} |\n")
+                            f.write(f"| ⏳ Missing from vault | {len(github_missing)} |\n")
                             f.write(f"| 🔗 Non-GitHub links | {len(non_github)} |\n\n")
                             f.write(f"## 📋 Detailed Check\n\n")
                             f.write(f"| # | Status | URL | Note |\n")
@@ -7455,7 +7718,7 @@ class MainWindow(QMainWindow):
                                         note_name = os.path.basename(note_path) if note_path else "?"
                                         f.write(f"| {i} | ✅ | {url} | {note_name} |\n")
                                     else:
-                                        f.write(f"| {i} | ❌ | {url} | — |\n")
+                                        f.write(f"| {i} | ⏳ | {url} | — |\n")
                                 except Exception:
                                     f.write(f"| {i} | ❌ | {url} | error |\n")
                             f.write(f"\n---\n*Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
@@ -7583,7 +7846,9 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
 
         # Header
-        header = QLabel(f"❌ {len(missing_urls)} GitHub link(s) are missing from the vault.\n"
+        # v31.1: ⏳ — missing links are PENDING work awaiting a user
+        # decision, not a failure.
+        header = QLabel(f"⏳ {len(missing_urls)} GitHub link(s) are missing from the vault.\n"
                         f"For each URL, choose an action:")
         header.setWordWrap(True)
         layout.addWidget(header)
@@ -7595,11 +7860,14 @@ class MainWindow(QMainWindow):
             url_list.addItem(url)
         layout.addWidget(url_list)
 
-        # Action buttons
+        # Action buttons — v31.1 hierarchy: ONE filled primary (Process
+        # Selected), outlined secondary (Mark as Processed / Mark ALL), ONE
+        # filled danger (Decommission).
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
 
         process_btn = QPushButton("🚀 Process Selected")
-        process_btn.setStyleSheet(f"background: #10B981; color: white; border: none;")
+        process_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
         def do_process():
             if url_list.currentRow() < 0:
                 return
@@ -7610,7 +7878,7 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(process_btn)
 
         mark_processed_btn = QPushButton("✅ Mark as Processed")
-        mark_processed_btn.setStyleSheet(f"background: #6366F1; color: white; border: none;")
+        mark_processed_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover'], variant='outline'))
         def do_mark_processed():
             if url_list.currentRow() < 0:
                 return
@@ -7634,7 +7902,7 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(mark_processed_btn)
 
         decomm_btn = QPushButton("🗑️ Decommission")
-        decomm_btn.setStyleSheet(f"background: #EF4444; color: white; border: none;")
+        decomm_btn.setStyleSheet(self._btn_style(COLORS['error'], COLORS['error_hover']))
         def do_decomm():
             if url_list.currentRow() < 0:
                 return
@@ -7655,7 +7923,7 @@ class MainWindow(QMainWindow):
 
         # Mark all as processed
         mark_all_btn = QPushButton("✅ Mark ALL as Processed")
-        mark_all_btn.setStyleSheet(f"background: #4F46E5; color: white; border: none;")
+        mark_all_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
         def do_mark_all():
             try:
                 cache = CacheDB()
@@ -7677,6 +7945,7 @@ class MainWindow(QMainWindow):
 
         # Close button
         close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='outline'))
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
 
@@ -7751,6 +8020,11 @@ class MainWindow(QMainWindow):
         urls = [row[0] for row in failed if row and row[0]]
         if not urls:
             self.log_message("✓ No failed repos to retry.", "success")
+            return
+
+        # v31.1 safety gate: confirm before large batches (>10 items).
+        if not self._confirm_batch(len(urls), "the retry queue"):
+            self.log_message("⏹️ Retry cancelled — nothing was processed.", "warning")
             return
 
         self.log_message(f"🔄 Retrying {len(urls)} previously-failed repos...", "info")
@@ -7856,7 +8130,7 @@ class MainWindow(QMainWindow):
         header.addWidget(icon_label)
 
         title_label = QLabel(title_text)
-        title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {title_color}; background: transparent;")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_color}; background: transparent;")
         header.addWidget(title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -7911,7 +8185,7 @@ class MainWindow(QMainWindow):
         header.addWidget(icon_label)
         title_label = QLabel(title)
         title_color = "#EA580C" if not is_dark else "#FB923C"  # orange
-        title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {title_color}; background: transparent;")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_color}; background: transparent;")
         header.addWidget(title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -7929,7 +8203,7 @@ class MainWindow(QMainWindow):
         no_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(no_btn)
         yes_btn = QPushButton("Yes")
-        yes_btn.setStyleSheet(self._btn_style(COLORS['error'], '#B91C1C'))
+        yes_btn.setStyleSheet(self._btn_style(COLORS['error'], COLORS['error_hover']))
         yes_btn.clicked.connect(dialog.accept)
         btn_row.addWidget(yes_btn)
         layout.addLayout(btn_row)
@@ -7937,6 +8211,19 @@ class MainWindow(QMainWindow):
         self._animate_dialog(dialog)
         result = dialog.exec()
         return result == QDialog.DialogCode.Accepted
+
+    def _schedule_progress_hide(self, delay_ms: int = 2500):
+        """v31.1 spec: the progress bar is visible ONLY while a batch job
+        runs — after a finish/failure we flash the result briefly, then hide.
+        Guarded so a freshly-started batch is never hidden by a stale timer."""
+        QTimer.singleShot(delay_ms, self._hide_progress_bar)
+
+    def _hide_progress_bar(self):
+        if not self.start_btn.isEnabled():
+            return  # a NEW batch is already running — keep the bar visible
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setFormat("Ready")
+        self.progress_bar.setValue(0)
 
     def processing_finished(self, success, message):
         self.start_btn.setEnabled(True)
@@ -7979,6 +8266,7 @@ class MainWindow(QMainWindow):
             # Hint: new messages may have arrived during processing
             self.log_message("💡 Tip: New messages may have arrived during processing — click Check Queue again.", "info")
             self.progress_bar.setFormat(f"✅ Done{elapsed_str}")
+            self._schedule_progress_hide()
 
             # v23 — Phase 5: CLEAR — only mark bot messages as read if ALL
             # links verified (no failures, no pending/processing leftovers).
@@ -8070,6 +8358,7 @@ class MainWindow(QMainWindow):
         else:
             self.log_message(f"❌ {message}", "error")
             self.progress_bar.setFormat("❌ Failed")
+            self._schedule_progress_hide()
             self._show_custom_message_box("Processing Error", message, success=False)
 
     def _on_disk_full(self, path):
@@ -8211,7 +8500,7 @@ class MainWindow(QMainWindow):
         retry_with_btn = QPushButton("🔁 Retry With ▾")
         retry_with_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
         stop_btn = QPushButton("⏹ Stop Batch")
-        stop_btn.setStyleSheet(self._btn_style(COLORS['error'], '#B91C1C', variant='outline'))
+        stop_btn.setStyleSheet(self._btn_style(COLORS['error'], COLORS['error_hover'], variant='outline'))
         btn_row.addWidget(skip_btn)
         btn_row.addWidget(retry_same_btn)
         btn_row.addWidget(retry_with_btn)
@@ -8296,14 +8585,14 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         tab.setObjectName("backup_tab")
         layout = QVBoxLayout(tab)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         # ---- Backup Status ----
         status_group = QGroupBox("💾 Vault Backup")
         status_layout = QVBoxLayout(status_group)
 
         self.backup_status_label = QLabel("● Disabled")
-        self.backup_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #EF4444;")
+        self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
         status_layout.addWidget(self.backup_status_label)
 
         self.backup_enabled_check = QCheckBox("Enable auto-backup after each batch")
@@ -8316,7 +8605,7 @@ class MainWindow(QMainWindow):
             "your backups upload to the cloud automatically. Zero setup, no OAuth needed."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("padding: 6px; background: rgba(16, 185, 129, 0.05); border-radius: 4px; font-size: 11px;")
+        info_label.setObjectName("info_note")
         status_layout.addWidget(info_label)
 
         # Backup folder picker
@@ -8344,22 +8633,20 @@ class MainWindow(QMainWindow):
         max_row.addStretch()
         status_layout.addLayout(max_row)
 
-        # Action buttons
+        # Action buttons — v31.1 hierarchy: ONE filled primary (Backup Now)
+        # + outlined secondary (Restore). '📤 Export ZIP' lives in the global
+        # 'More' overflow menu (export = infrequent action).
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         self.backup_now_btn = QPushButton("💾 Backup Now")
-        self.backup_now_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
+        self._style_btn(self.backup_now_btn, 'primary')
         self.backup_now_btn.clicked.connect(self._backup_now)
         btn_row.addWidget(self.backup_now_btn)
 
         self.backup_restore_btn = QPushButton("📂 Restore")
-        self.backup_restore_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover'], variant='outline'))
+        self._style_btn(self.backup_restore_btn, 'secondary')
         self.backup_restore_btn.clicked.connect(self._backup_restore)
         btn_row.addWidget(self.backup_restore_btn)
-
-        self.backup_export_btn = QPushButton("📤 Export ZIP (timestamped)")
-        self.backup_export_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='outline'))
-        self.backup_export_btn.clicked.connect(self._backup_export_zip)
-        btn_row.addWidget(self.backup_export_btn)
 
         btn_row.addStretch()
         status_layout.addLayout(btn_row)
@@ -8394,16 +8681,18 @@ class MainWindow(QMainWindow):
             "automatically. Runs even after failed batches; an unchanged vault is a no-op."
         )
         seal_info.setWordWrap(True)
-        seal_info.setStyleSheet("padding: 6px; background: rgba(16, 185, 129, 0.05); border-radius: 4px; font-size: 11px;")
+        seal_info.setObjectName("info_note")
         seal_layout.addWidget(seal_info)
 
         self.vaultseal_status_label = QLabel("● —")
-        self.vaultseal_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #71717A;")
+        self.vaultseal_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #71717A;")
         seal_layout.addWidget(self.vaultseal_status_label)
 
         seal_btn_row = QHBoxLayout()
         self.vaultseal_now_btn = QPushButton("🛡️ Seal Now")
-        self.vaultseal_now_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
+        # v31.1: Backup Now is the Backup tab's ONE filled primary — Seal Now
+        # is the outlined secondary path.
+        self._style_btn(self.vaultseal_now_btn, 'secondary')
         self.vaultseal_now_btn.clicked.connect(self._vaultseal_now)
         seal_btn_row.addWidget(self.vaultseal_now_btn)
         seal_btn_row.addStretch()
@@ -8422,7 +8711,7 @@ class MainWindow(QMainWindow):
             "It's served by your Cloudflare Worker — no separate deployment needed."
         )
         dash_info.setWordWrap(True)
-        dash_info.setStyleSheet("padding: 6px; background: rgba(99, 102, 241, 0.05); border-radius: 4px; font-size: 11px;")
+        dash_info.setObjectName("info_note_indigo")
         dash_layout.addWidget(dash_info)
 
         dash_row = QHBoxLayout()
@@ -8433,13 +8722,15 @@ class MainWindow(QMainWindow):
         dash_row.addWidget(self.dash_worker_url_input, 1)
 
         open_dash_btn = QPushButton("📊 Open Dashboard")
+        self._style_btn(open_dash_btn, 'secondary')
         open_dash_btn.clicked.connect(self._open_dashboard_from_backup_tab)
         dash_row.addWidget(open_dash_btn)
         dash_layout.addLayout(dash_row)
 
         layout.addWidget(dash_group)
 
-        layout.addStretch()
+        # v31.1: no filler stretch — the tab scrolls naturally inside the
+        # fixed 1000×750 window (content starts at the top, natural height).
         return tab
 
     def _backup_browse_folder(self):
@@ -8478,16 +8769,16 @@ class MainWindow(QMainWindow):
         if backup_enabled and backup_folder:
             if os.path.isdir(backup_folder):
                 self.backup_status_label.setText("● Ready")
-                self.backup_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #10B981;")
+                self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #047857;")
             else:
                 self.backup_status_label.setText("● Folder not found")
-                self.backup_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #EF4444;")
+                self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
         elif backup_enabled:
             self.backup_status_label.setText("● No folder selected")
-            self.backup_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #F59E0B;")
+            self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #B45309;")
         else:
             self.backup_status_label.setText("● Disabled")
-            self.backup_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #EF4444;")
+            self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #B91C1C;")
 
     def _backup_now(self):
         """Create a local backup now."""
@@ -8652,16 +8943,16 @@ class MainWindow(QMainWindow):
         has_vault = bool(self.config.get('vault_path'))
         has_token = bool((self.config.get('github_token') or '').strip())
         if not enabled:
-            text, color = "● Disabled", "#EF4444"
+            text, color = "● Disabled", "#B91C1C"
         elif not has_vault:
-            text, color = "● No vault selected", "#F59E0B"
+            text, color = "● No vault selected", "#B45309"
         elif not has_token:
-            text, color = "● Local-only (no GitHub token — commits, no push)", "#F59E0B"
+            text, color = "● Local-only (no GitHub token — commits, no push)", "#B45309"
         else:
-            text, color = "● Ready — auto-seal after every run", "#10B981"
+            text, color = "● Ready — auto-seal after every run", "#047857"
         self.vaultseal_status_label.setText(text)
         self.vaultseal_status_label.setStyleSheet(
-            f"font-size: 14px; font-weight: bold; color: {color};")
+            f"font-size: 13px; font-weight: bold; color: {color};")
 
     def _backup_export_zip(self):
         """Export a timestamped ZIP to a user-chosen location."""

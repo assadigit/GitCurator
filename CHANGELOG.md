@@ -3,6 +3,67 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.6] — UI/UX Overhaul: Fixed Window, AA Contrast, Button Hierarchy
+
+A full visual-standards pass over the PyQt6 GUI (internal `v31.1`).
+No business logic, API calls, or file paths were changed — presentation
+layer only.
+
+### Window & Layout
+- **Fixed 1000×750 window** — one size for every tab; the window never
+  resizes when switching tabs (preserves spatial memory).
+- **Every tab scrolls independently** — each tab's content is wrapped in a
+  `QScrollArea` starting at the same top position at its natural height.
+  No padded/fixed-height containers, no filler stretches.
+- **Exactly one growable region per tab** — the results/list/log panel
+  (Bot queue, Dashboard stats, Sources results, and the global log).
+  Removed the old 150px height caps; controls stay content-sized.
+
+### Color & Contrast (WCAG AA)
+- Primary action fill `#10B981` → **`#047857`** (white text 7.4:1).
+- Secondary/read action `#6366F1` → **`#4338CA`** (7.9:1).
+- Destructive `#EF4444` → **`#B91C1C`** (6.5:1).
+- Red removed from non-error elements — the pending-count badge is now
+  neutral zinc (a pending count is routine, not an error).
+- Log text colors are theme-aware (dark shades on light, light shades on
+  dark) so every level stays readable in both themes.
+
+### Button Hierarchy
+- **Three variants only** — filled primary (max one per tab), outlined
+  secondary, filled danger. Plus a quiet ghost for log-panel utilities.
+- **Overflow "More" menu** (single) — tests, verification, export, retry,
+  recategorize and preview moved out of the action bar (Hick's law).
+- **Dark-mode toggle moved into a Settings submenu** — a display
+  preference no longer sits beside batch-job triggers.
+
+### System Status & Safety
+- **Determinate progress bar, visible only while a batch runs** —
+  labeled `Processing X of Y — owner/repo`; hidden at rest.
+- **Large-batch confirmation** — any batch >10 items asks for exact-count
+  confirmation first (bot queue, Process New, sources, retry, fetches).
+- **Labeled proxy status** — the dot is now paired with a text label
+  (`Connected` / `Idle` / `Error`) per WCAG 1.4.1.
+
+### Design Tokens
+- **Spacing scale 4/8/16/24/32/48px** applied across QSS and layouts.
+- **Type scale of four sizes** — 16px section/dialog titles, 13px
+  labels/buttons, 12px body, 12px mono for log/results.
+
+### Accessibility
+- **2px focus outlines (2px offset)** on every interactive element
+  (buttons, inputs, combos, checks, radios) in both themes.
+
+### Microcopy & Icons
+- Routine **pending counts use ⏳**; ❌ is reserved for actual failures.
+- **Sources tab now uses 📡** (Proxy keeps 🌐) — two destinations no
+  longer share one icon.
+
+### Notes
+- Dark mode fixed for real: semi-transparent (rgba) widget fills were
+  composited over a light base by Qt's QSS engine — replaced with solid
+  theme-aware panels (`tab_sheet` / `info_header` / `info_note` rules).
+- Outlined variants re-apply on theme switch via a tracked button list.
+
 ## [0.0.5] — VaultSeal: Automatic Vault Backup
 
 Obsidian's free tier has no sync. GitCurator now closes that gap itself:

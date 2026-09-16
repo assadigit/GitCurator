@@ -4,8 +4,8 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.5` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** v30.x hardening sprint complete — 45/45 automated tests green · VaultSeal vault backup shipped.
+**Version:** `0.0.6` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Status:** UI/UX overhaul shipped — fixed 1000×750 window, WCAG-AA tokens, 3-variant button hierarchy · 45/45 automated tests green.
 
 ---
 
@@ -34,6 +34,27 @@
 5. **Seal** — the whole vault is committed and pushed to a **private GitHub
    repository** after every run (`vaultseal.py`) — Obsidian's free tier has no
    sync, VaultSeal is the safety net.
+
+## UI standards (v0.0.6)
+
+The desktop GUI follows a small, explicit set of visual rules:
+
+- **Fixed 1000×750 window** — never resizes between tabs; every tab scrolls
+  independently and starts at the same top position at its natural height.
+- **One growable region per tab** — the results/list/log panel absorbs the
+  leftover vertical space; forms and buttons stay content-sized.
+- **Three button variants** — filled emerald primary (exactly one per tab),
+  outlined indigo secondary, filled red danger; everything infrequent
+  (tests, verify, export, retry, recategorize) lives in the **More ⋯ menu**.
+- **WCAG-AA colors** — `#047857` / `#4338CA` / `#B91C1C` fills; red only
+  for errors; pending counts are neutral zinc with a ⏳ icon.
+- **Status always labeled** — the proxy dot reads `Connected / Idle / Error`;
+  the progress bar appears only while a batch runs
+  (`Processing X of Y — owner/repo`), and batches over 10 items confirm
+  their exact count first.
+- **Design tokens** — 4/8/16/24/32/48px spacing scale; type scale of four
+  sizes (16 titles / 13 labels / 12 body / 12 mono); 2px focus outlines
+  on every interactive element, both themes.
 
 ## VaultSeal — automatic vault backup (v0.0.5)
 
