@@ -35,6 +35,7 @@ import type { VerifyResult } from "@/lib/verify-core";
 import type { TimingInsight, TimingSample } from "@/lib/insights";
 import type { HistoryData, HistoryRun } from "@/app/api/history/route";
 import type { ReleasesData } from "@/app/api/releases/route";
+import type { VaultSealData, VaultSealEventRow } from "@/app/api/vault-seal/route";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -54,7 +55,7 @@ const PRIORITY_STYLES: Record<Priority, string> = {
 };
 
 const STAGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  send: Send, link: Link2, github: Github, brain: Brain, "file-text": FileText, vault: Vault,
+  send: Send, link: Link2, github: Github, brain: Brain, "file-text": FileText, vault: Vault, lock: Lock,
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium"];
@@ -2629,6 +2630,426 @@ function ReleasesTab({ data, loading }: { data: ReleasesData | null; loading: bo
 }
 
 /* ------------------------------------------------------------------ */
+/* VaultSeal tab (v0.0.5 — automatic post-run vault backup)            */
+/* ------------------------------------------------------------------ */
+
+const SEAL_STATUS_STYLES: Record<VaultSealEventRow["status"], { label: string; cls: string; dot: string }> = {
+  sealed: { label: "Sealed", cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-400" },
+  skipped: { label: "Skipped", cls: "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-300", dot: "bg-zinc-400" },
+  failed: { label: "Failed", cls: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300", dot: "bg-rose-400" },
+};
+
+const SEAL_SOURCE_STYLES: Record<VaultSealEventRow["source"], string> = {
+  app: "border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300",
+  demo: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  simulate: "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+};
+
+const SEAL_STEPS: Array<{ icon: React.ComponentType<{ className?: string }>; title: string; text: string }> = [
+  { icon: CheckCircle2, title: "Run finishes", text: "GUI or headless — even failed batches: notes written before a failure are exactly what you want backed up." },
+  { icon: Lock, title: "git commit", text: "add -A + a \"seal:\" commit in the vault's own repo. Unchanged vault = no-op, zero noise." },
+  { icon: Github, title: "Push (private)", text: "One-time token URL — the remote stays token-less, the token is never written to .git/config." },
+  { icon: RotateCcw, title: "Restore anytime", text: "git clone — the full vault at any point in its history. Obsidian opens the clone directly." },
+];
+
+const SEAL_EXCLUDED = ["workspace.json", "workspace-mobile.json", ".obsidian/cache", ".trash/", "__pycache__/", ".DS_Store", "*.tmp", "*.bak"];
+
+function VaultSealTab({
+  data, loading, sealing, simulating, onSealNow, onSimulate, onRefresh, onDelete, onClear,
+}: {
+  data: VaultSealData | null;
+  loading: boolean;
+  sealing: boolean;
+  simulating: boolean;
+  onSealNow: () => void;
+  onSimulate: () => void;
+  onRefresh: () => void;
+  onDelete: (id: string) => void;
+  onClear: () => void;
+}) {
+  const vault = data?.vault ?? null;
+  const cfg = data?.config ?? null;
+  const events = data?.events ?? [];
+  const stats = data?.stats ?? null;
+  const active = cfg?.enabled ?? true;
+  const lastEvent = events.find((e) => e.status === "sealed") ?? null;
+
+  return (
+    <div className="space-y-6">
+      {/* Header + actions */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400"
+            aria-hidden="true"
+          >
+            <Lock className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              VaultSeal — post-run vault backup
+            </h3>
+            <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Obsidian&apos;s free tier has no sync. After every curation run — 1 repo or 100 — the whole vault is
+              committed and pushed to a <span className="font-medium text-zinc-700 dark:text-zinc-200">private</span> GitHub
+              repository. Restore is <code className="font-mono text-[12px] text-emerald-700 dark:text-emerald-300">git clone</code>:
+              the full vault at any point in its history.
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  onClick={onSealNow}
+                  disabled={sealing || !vault?.exists}
+                  className="h-8 border-emerald-600/40 bg-emerald-600 px-3 text-[12px] font-medium text-white shadow-none hover:bg-emerald-700"
+                >
+                  {sealing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Lock className="mr-1.5 h-3.5 w-3.5" />}
+                  Seal vault now
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="max-w-xs text-xs">
+                  Runs the real app/vaultseal.py — a local commit in the vault repo. Pushing stays the app&apos;s job
+                  (the dashboard holds no GitHub token by design).
+                </span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onSimulate}
+                  disabled={simulating}
+                  className="h-8 px-3 text-[12px]"
+                >
+                  {simulating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />}
+                  Simulate event
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="text-xs">Record a plausible seal — try the timeline without touching a vault.</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRefresh}
+                  aria-label="Refresh VaultSeal status"
+                  className="h-8 w-8 p-0"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="text-xs">Re-read the vault git state + seal history</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading VaultSeal status">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+              <CardContent className="space-y-3 p-5">
+                <div className="h-9 w-9 rounded-lg bg-zinc-200 animate-pulse dark:bg-zinc-800" />
+                <div className="h-7 w-20 rounded bg-zinc-200 animate-pulse dark:bg-zinc-800" />
+                <div className="h-3 w-32 rounded bg-zinc-200/70 animate-pulse dark:bg-zinc-800/70" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* No vault detected */}
+      {!loading && !vault && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-[12.5px] leading-relaxed text-amber-800 dark:text-amber-200">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              No local vault detected on this machine — the dashboard runs without your real Obsidian vault. Events
+              reported by the app still land here; use <strong>Simulate event</strong> to try the timeline. On the
+              machine that runs GitCurator, this card shows live git state of <code className="font-mono">vault_path</code>.
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Stat cards + how-it-works */}
+      {vault && (
+        <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Protection */}
+            <motion.div variants={fadeUp}>
+              <Card className="h-full border-zinc-200 bg-white transition-all hover:-translate-y-0.5 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400"
+                      aria-hidden="true"
+                    >
+                      <ShieldCheck className="h-[18px] w-[18px]" />
+                    </span>
+                    {active ? (
+                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10.5px] text-emerald-700 dark:text-emerald-300">
+                        <span className="mr-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden="true" />
+                        Active
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-zinc-300 bg-zinc-200/60 font-mono text-[10.5px] text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400">
+                        Standby
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-4 font-mono text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 dark:text-zinc-50">
+                    {stats ? <CountUp value={stats.sealed} /> : "—"}
+                    <span className="ml-1.5 text-sm font-normal text-zinc-500">seals</span>
+                  </p>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    {active ? "auto-seal after every run · no-op when unchanged" : "enable in the app's Backup tab (config: vaultseal.enabled)"}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                      {cfg?.autoPush ? "push on" : "local-only"}
+                    </span>
+                    <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                      {vault.repoName ?? (cfg?.repoName || "repo: auto-named")}
+                    </span>
+                    <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                      private
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Vault contents */}
+            <motion.div variants={fadeUp}>
+              <Card className="h-full border-zinc-200 bg-white transition-all hover:-translate-y-0.5 hover:border-teal-500/40 hover:shadow-lg hover:shadow-teal-500/5 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10 text-teal-600 ring-1 ring-teal-500/20 dark:text-teal-400"
+                      aria-hidden="true"
+                    >
+                      <Vault className="h-[18px] w-[18px]" />
+                    </span>
+                    <span className="font-mono text-[10.5px] text-zinc-400">{vault.dirtyCount === 0 ? "in sync" : vault.dirtyCount !== null ? `${vault.dirtyCount} uncommitted` : ""}</span>
+                  </div>
+                  <p className="mt-4 font-mono text-2xl font-semibold tabular-nums tracking-tight text-zinc-900 dark:text-zinc-50">
+                    {vault.notesCount ?? "—"}
+                    <span className="ml-1.5 text-sm font-normal text-zinc-500">notes</span>
+                  </p>
+                  <p className="mt-1 text-[11.5px] text-zinc-500 dark:text-zinc-400">
+                    {vault.totalFiles ?? "—"} files · {formatBytes(vault.sizeBytes ?? 0)} · {vault.isGitRepo ? "own git repo" : "not a repo yet — one seal bootstraps it"}
+                  </p>
+                  <p className="mt-3 flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {vault.lastCommit ? (
+                      <>last commit {timeAgo(vault.lastCommit.date)} — <span className="truncate font-mono text-emerald-700 dark:text-emerald-300">{vault.lastCommit.subject}</span></>
+                    ) : (
+                      "no commits yet"
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Last seal */}
+            <motion.div variants={fadeUp} className="sm:col-span-2 lg:col-span-1">
+              <Card className="h-full border-zinc-200 bg-white transition-all hover:-translate-y-0.5 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400"
+                      aria-hidden="true"
+                    >
+                      <GitCommitHorizontal className="h-[18px] w-[18px]" />
+                    </span>
+                    {lastEvent && (
+                      <Badge
+                        variant="outline"
+                        className={lastEvent.pushed
+                          ? "border-emerald-500/30 bg-emerald-500/10 font-mono text-[10.5px] text-emerald-700 dark:text-emerald-300"
+                          : "border-amber-500/30 bg-amber-500/10 font-mono text-[10.5px] text-amber-700 dark:text-amber-300"}
+                      >
+                        <ArrowUpRight className="mr-1 h-3 w-3" aria-hidden="true" />
+                        {lastEvent.pushed ? "pushed" : "local"}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-4 font-mono text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    {stats?.lastSealedAt ? timeAgo(stats.lastSealedAt) : "never"}
+                    <span className="ml-1.5 text-sm font-normal text-zinc-500">sealed</span>
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-[11.5px] text-zinc-500 dark:text-zinc-400">
+                    {lastEvent?.commitMessage ?? "no seal recorded yet — run the app or press Seal vault now"}
+                  </p>
+                  <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {lastEvent?.commitSha && (
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-700 dark:text-emerald-300">
+                        {lastEvent.commitSha}
+                      </span>
+                    )}
+                    {lastEvent && <span>+{lastEvent.filesChanged} file{lastEvent.filesChanged === 1 ? "" : "s"} · {formatDuration(lastEvent.durationMs)}</span>}
+                  </p>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+
+          {/* How a seal works */}
+          <motion.div variants={fadeUp}>
+            <Card className="border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                  <Sparkles className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                  How a seal works
+                </CardTitle>
+                <CardDescription>
+                  Triggered automatically after every run — GUI and headless. Machine-specific state never leaves the
+                  machine; the token never lands in .git/config.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {SEAL_STEPS.map((step, i) => (
+                    <li
+                      key={step.title}
+                      className="group rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 transition-colors hover:border-emerald-500/30 hover:bg-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-emerald-500/30"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-300" aria-hidden="true">
+                          {i + 1}
+                        </span>
+                        <step.icon className="h-3.5 w-3.5 text-zinc-400 transition-colors group-hover:text-emerald-500" aria-hidden="true" />
+                        <span className="text-[12.5px] font-semibold text-zinc-800 dark:text-zinc-100">{step.title}</span>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">{step.text}</p>
+                    </li>
+                  ))}
+                </ol>
+                <div className="mt-4 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  <span className="mr-1">Sealed out automatically:</span>
+                  {SEAL_EXCLUDED.map((x) => (
+                    <span key={x} className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                      {x}
+                    </span>
+                  ))}
+                  {vault.gitignoreOk === false && (
+                    <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-300">
+                      hygiene lines missing — one seal adds them
+                    </Badge>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Seal history */}
+      <Card className="border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Seal history</CardTitle>
+            {stats && (
+              <Badge variant="outline" className="font-mono text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400">
+                {stats.total} event{stats.total === 1 ? "" : "s"} · {stats.sealed} sealed · {stats.skipped} skipped{stats.failed > 0 ? ` · ${stats.failed} failed` : ""}
+              </Badge>
+            )}
+          </div>
+          {events.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onClear}
+              className="h-7 px-2 text-[11px] text-zinc-500 hover:border-rose-500/40 hover:text-rose-600 dark:text-zinc-400 dark:hover:text-rose-400"
+            >
+              <Trash2 className="mr-1 h-3 w-3" aria-hidden="true" /> Clear
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {events.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-[12.5px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              No seals recorded yet — run GitCurator (the post-run hook fires automatically) or press{" "}
+              <span className="font-medium text-zinc-700 dark:text-zinc-200">Seal vault now</span>.
+            </div>
+          ) : (
+            <ul className="max-h-96 divide-y divide-zinc-100 overflow-y-auto custom-scroll dark:divide-zinc-800/70" role="list">
+              {events.map((ev) => (
+                <li key={ev.id} className="group flex flex-wrap items-center gap-x-3 gap-y-1.5 py-3 pr-1">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${SEAL_STATUS_STYLES[ev.status].dot}`} aria-hidden="true" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={`font-mono text-[10.5px] ${SEAL_STATUS_STYLES[ev.status].cls}`}>
+                        {SEAL_STATUS_STYLES[ev.status].label}
+                      </Badge>
+                      <span className="min-w-0 truncate font-mono text-[12px] text-zinc-700 dark:text-zinc-200">
+                        {ev.commitMessage}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      <span className="tabular-nums">{formatTimestamp(ev.sealedAt)}</span>
+                      {ev.commitSha && (
+                        <span className="font-mono text-emerald-700 dark:text-emerald-300">{ev.commitSha}</span>
+                      )}
+                      {ev.status === "sealed" && (
+                        <span className="tabular-nums">+{ev.filesChanged} file{ev.filesChanged === 1 ? "" : "s"}</span>
+                      )}
+                      <span className="tabular-nums">{formatDuration(ev.durationMs)}</span>
+                      <Badge variant="outline" className={`text-[10px] ${SEAL_SOURCE_STYLES[ev.source]}`}>
+                        {ev.source}
+                      </Badge>
+                      {ev.pushed ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                          <ArrowUpRight className="h-3 w-3" aria-hidden="true" />pushed
+                        </span>
+                      ) : (
+                        <span>local</span>
+                      )}
+                      {ev.repoName && <span className="font-mono">{ev.repoName}</span>}
+                      {ev.skippedReason && <span className="italic">{ev.skippedReason}</span>}
+                      {ev.error && <span className="text-rose-600 dark:text-rose-400">{ev.error}</span>}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(ev.id)}
+                    aria-label={`Delete seal event from ${formatTimestamp(ev.sealedAt)}`}
+                    className="rounded p-1 text-zinc-300 transition-colors hover:bg-rose-500/10 hover:text-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/40 dark:text-zinc-600 dark:hover:text-rose-400"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-3 flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            <RotateCcw className="h-3 w-3 shrink-0" aria-hidden="true" />
+            Recovery: <code className="font-mono text-zinc-500 dark:text-zinc-400">git clone &lt;repo&gt;</code> — the vault at any point in its history; Obsidian opens the clone directly.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -2651,6 +3072,12 @@ export default function Home() {
   // Releases & repository state (v0.0.2 — best-effort, like history)
   const [releases, setReleases] = useState<ReleasesData | null>(null);
   const [releasesLoading, setReleasesLoading] = useState(true);
+
+  // VaultSeal state (v0.0.5 — automatic vault backup)
+  const [vaultSeal, setVaultSeal] = useState<VaultSealData | null>(null);
+  const [vaultSealLoading, setVaultSealLoading] = useState(true);
+  const [sealing, setSealing] = useState(false);
+  const [simulating, setSimulating] = useState(false);
 
   /* Fetch the report */
   useEffect(() => {
@@ -2711,6 +3138,22 @@ export default function Home() {
       .finally(() => { if (!cancelled) setReleasesLoading(false); });
     return () => { cancelled = true; };
   }, [reloadKey]);
+
+  /* Load VaultSeal status & history (v0.0.5) — best-effort */
+  const refreshVaultSeal = useCallback(() => {
+    return fetch("/api/vault-seal")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<VaultSealData>;
+      })
+      .then((data) => setVaultSeal(data))
+      .catch(() => { /* vault seal panel is best-effort */ })
+      .finally(() => setVaultSealLoading(false));
+  }, []);
+
+  useEffect(() => {
+    void refreshVaultSeal();
+  }, [refreshVaultSeal, reloadKey]);
 
   /* Load persisted checklist (rAF-deferred — after hydration, no mismatch) */
   useEffect(() => {
@@ -2793,6 +3236,102 @@ export default function Home() {
     }
   };
 
+  /* v0.0.5 — VaultSeal actions */
+  const sealVaultNow = async () => {
+    setSealing(true);
+    try {
+      const r = await fetch("/api/vault-seal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "seal-now" }),
+      });
+      const data = (await r.json()) as { event?: VaultSealEventRow; error?: string };
+      if (!r.ok || !data.event) throw new Error(data.error ?? `HTTP ${r.status}`);
+      const ev = data.event;
+      if (ev.status === "skipped") {
+        toast({
+          title: "Vault unchanged",
+          description: ev.skippedReason ?? "Nothing new to seal — the vault matches the last commit.",
+        });
+      } else if (ev.status === "failed") {
+        toast({ title: "Seal failed", description: ev.error ?? "unknown error", variant: "destructive" });
+      } else {
+        toast({
+          title: "Vault sealed",
+          description: `${ev.commitSha ? `${ev.commitSha} · ` : ""}+${ev.filesChanged} file(s) committed locally — the app pushes with its GitHub token`,
+        });
+      }
+      await refreshVaultSeal();
+    } catch (e) {
+      toast({
+        title: "Seal failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSealing(false);
+    }
+  };
+
+  const simulateSealEvent = async () => {
+    setSimulating(true);
+    try {
+      const r = await fetch("/api/vault-seal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "simulate" }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as { event: VaultSealEventRow };
+      toast({
+        title: "Event simulated",
+        description: `${data.event.commitMessage.slice(0, 64)}${data.event.commitMessage.length > 64 ? "…" : ""}`,
+      });
+      await refreshVaultSeal();
+    } catch (e) {
+      toast({
+        title: "Simulate failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  const deleteSealEvent = async (id: string) => {
+    try {
+      const r = await fetch(`/api/vault-seal?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await refreshVaultSeal();
+    } catch (e) {
+      toast({
+        title: "Delete failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearSealEvents = async () => {
+    try {
+      const r = await fetch("/api/vault-seal", { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as { deleted: number };
+      toast({
+        title: "Seal history cleared",
+        description: `${data.deleted} event${data.deleted === 1 ? "" : "s"} removed from SQLite.`,
+      });
+      await refreshVaultSeal();
+    } catch (e) {
+      toast({
+        title: "Clear failed",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
   const toggleChecklistItem = (id: string) => {
     setCheckedItems((prev) => {
       const next = { ...prev, [id]: !prev[id] };
@@ -2819,6 +3358,7 @@ export default function Home() {
       liveVerification: verify.result,
       verificationHistory: history,
       releases,
+      vaultSeal,
     };
     try {
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -2884,7 +3424,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.4"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.5"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -3013,10 +3553,10 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
-              Release {report?.version ?? "0.0.4"}
+              Release {report?.version ?? "0.0.5"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              {report?.codename ?? "Provenance & CI History"}
+              {report?.codename ?? "VaultSeal — Vault Backup"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>
@@ -3058,7 +3598,7 @@ export default function Home() {
 
               <section aria-label="Detailed report">
                 <Tabs defaultValue="fixes" className="w-full">
-                  <TabsList className="mb-5 h-auto w-full grid grid-cols-4 gap-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-1 custom-scroll sm:flex sm:w-fit sm:justify-start sm:overflow-x-auto">
+                  <TabsList className="mb-5 h-auto w-full grid grid-cols-3 gap-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-1 custom-scroll sm:flex sm:w-fit sm:justify-start sm:overflow-x-auto">
                     <TabsTrigger
                       value="fixes"
                       className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
@@ -3125,6 +3665,18 @@ export default function Home() {
                       )}
                     </TabsTrigger>
                     <TabsTrigger
+                      value="seal"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                    >
+                      <Lock className="mr-1 h-3.5 w-3.5 sm:mr-1.5" />
+                      <span className="hidden sm:inline">Vault&nbsp;</span>Seal
+                      {vaultSeal && (
+                        <Badge className="ml-1 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
+                          {vaultSeal.stats.total}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger
                       value="risks"
                       className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
@@ -3185,6 +3737,21 @@ export default function Home() {
                       <ReleasesTab data={releases} loading={releasesLoading} />
                     </motion.div>
                   </TabsContent>
+                  <TabsContent value="seal" className="mt-0 focus-visible:outline-none">
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+                      <VaultSealTab
+                        data={vaultSeal}
+                        loading={vaultSealLoading}
+                        sealing={sealing}
+                        simulating={simulating}
+                        onSealNow={sealVaultNow}
+                        onSimulate={simulateSealEvent}
+                        onRefresh={() => void refreshVaultSeal()}
+                        onDelete={deleteSealEvent}
+                        onClear={clearSealEvents}
+                      />
+                    </motion.div>
+                  </TabsContent>
                   <TabsContent value="risks" className="mt-0 focus-visible:outline-none">
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
                       <RisksTab risks={report.risks} />
@@ -3205,7 +3772,8 @@ export default function Home() {
             <code className="font-mono text-zinc-500">/api/report</code> · live gate
             <code className="font-mono text-zinc-500">/api/verify</code> · history + timing insights
             <code className="font-mono text-zinc-500">/api/history</code> · repo + releases
-            <code className="font-mono text-zinc-500">/api/releases</code>
+            <code className="font-mono text-zinc-500">/api/releases</code> · vault backup
+            <code className="font-mono text-zinc-500">/api/vault-seal</code>
           </p>
           <p className="flex items-center gap-1.5">
             <ArrowRight className="h-3 w-3" aria-hidden="true" />

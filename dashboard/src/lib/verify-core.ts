@@ -12,22 +12,16 @@ import path from "path";
  * time, so nothing node-side ever reaches the client bundle.
  */
 
-/**
- * Location of the Python application inside this repository.
- *
- * The dashboard normally runs from `dashboard/` (`bun run dev`), so the app
- * tree is the sibling `../app` directory. GITCURATOR_APP_DIR overrides this
- * for non-standard layouts (absolute or relative path).
- */
 export const APP_DIR = process.env.GITCURATOR_APP_DIR ?? path.join(process.cwd(), "..", "app");
 
-/** The Python files touched by the v30/v30.1 releases (compile gate). */
+/** The Python files in the compile gate (v0.0.5: +vaultseal.py → 10 files). */
 export const PY_FILES = [
   "main.py",
   "links.py",
   "storage.py",
   "note_builder.py",
   "llm_client.py",
+  "vaultseal.py",
   "telegram_fetch_worker.py",
   "telethon_fetcher.py",
   "backfill_manager.py",

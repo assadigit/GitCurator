@@ -3,6 +3,75 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.5] — VaultSeal: Automatic Vault Backup
+
+Obsidian's free tier has no sync. GitCurator now closes that gap itself:
+after every curation run — 1 new project or 100 — the whole vault is
+committed and pushed to a **private GitHub repository**. Restore is plain
+`git clone`: the full vault at any point in its history.
+
+### Python application (`app/`)
+- **NEW `vaultseal.py`** (pure stdlib, 547 lines) — the VaultSeal engine:
+  - `VaultSeal.seal()` — git init (when needed) → managed `.gitignore`
+    hygiene → `git add -A` → `seal:` commit → one-time-token-URL push.
+    Never raises (a backup failure must never fail the run it protects);
+    skip-when-unchanged; failed pushes keep the local commit.
+  - **Nested-repo guard** — a vault inside another git repository (a
+    dotfiles tree, a synced workspace…) bootstraps its OWN repo: git's
+    `add -A` is repo-wide from subdirectories since git 2.0, so without
+    the guard a parent's files would be sealed. Caught live during QA
+    (the sandbox workspace itself) and fixed with a toplevel comparison;
+    regression-tested.
+  - **Hygiene** — `workspace.json`, `workspace-mobile.json`,
+    `.obsidian/cache`, `.trash/`, `__pycache__/`, OS noise sealed OUT via
+    an idempotently-merged managed `.gitignore` block.
+  - **Credential hygiene** — the token lives only in memory: API calls +
+    one-time push URLs. The remote stays token-less, `.git/config` never
+    sees the token, and it is never logged.
+  - Repo bootstrap over the GitHub API — resolves the login from the
+    token, reuses an existing private repo or creates it (described as
+    "VaultSeal — automatic Obsidian vault backup (GitCurator)").
+- **Post-run hook wired into both surfaces**: the PyQt6 GUI
+  (`processing_finished` → background `VaultSealWorker` QThread, mirrors
+  the v29.4 BackupWorker pattern) and the headless CLI (`_on_finished`,
+  before the exit print). Runs for FAILED batches too — notes written
+  before a mid-run failure are exactly what you want backed up; an
+  unchanged vault is a no-op.
+- **Backup tab (GUI)** — new "🛡️ VaultSeal — GitHub Mirror" group: enable
+  checkbox, push toggle, repo-name override ("auto" = derived from the
+  vault folder), live status line (Ready / Local-only / Disabled), and a
+  manual **Seal Now** button that exercises the exact post-run path.
+- **Config** — new `vaultseal` section (`enabled` / `repo_name` /
+  `auto_push`), merge-safe through the v30 `merge_config` machinery.
+- Internal lineage bumped to **v31.0**; compile gate + CI now cover 10
+  modules (`+vaultseal.py`). 45/45 tests still green (2.3s).
+
+### Verification dashboard (`dashboard/`)
+- **NEW GET/POST/DELETE `/api/vault-seal`** — live git state of the vault
+  (own-repo detection, dirty count, notes/files/size, last commit, remote,
+  hygiene check), the app's `vaultseal` config section (token never
+  returned), the persisted seal history + stats; `seal-now` runs the REAL
+  `app/vaultseal.py` (local commit — the dashboard holds no GitHub token
+  by design), `simulate` records a plausible event, `record` persists
+  results reported by the app.
+- **NEW Prisma model `VaultSealEvent`** (sealedAt, status
+  sealed/skipped/failed, commit sha/message, files, pushed, repo,
+  provenance source app/demo/simulate, duration).
+- **NEW Vault Seal tab (9th)** — protection/vault/last-seal stat cards
+  (CountUp, hover lift), a "how a seal works" 4-step walkthrough with
+  hygiene chips, and the seal history timeline with per-event badges
+  (status, source, pushed), delete + clear, and the git-clone recovery
+  note. Mobile tab grid now 3×3.
+- Export JSON includes the VaultSeal snapshot; footer lists
+  `/api/vault-seal`; version strings bumped to 0.0.5.
+
+### Verified live
+- A real demo vault was sealed to the private
+  `github.com/assadigit/GitCurator-Vault`: initial 12-file seal,
+  incremental 1-file fast-forward push, and a no-op skip — all confirmed
+  over the GitHub API. The workspace-junk first attempt (pre-guard) was
+  force-replaced with clean history; no credentials were ever in it.
+
 ## [0.0.4] — Provenance & CI History
 
 Verification runs now carry their origin, and the CI pipeline gets a

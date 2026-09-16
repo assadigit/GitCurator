@@ -15,17 +15,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitCurator v0.0.4 — Release & Audit Dashboard",
+  title: "GitCurator v0.0.5 — Release & Audit Dashboard",
   description:
-    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.4 Provenance & CI History: 13 fixes shipped, 45/45 tests, live verification gate with persisted history (manual/startup/scheduled provenance), drift detection, per-case timing insights, live repository status, CI run history and downloadable zip backups.",
-  keywords: ["GitCurator", "GitHub", "Obsidian", "Ollama", "Telegram", "audit", "reliability", "Python", "PyQt6"],
+    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.5 VaultSeal: 13 fixes shipped, 45/45 tests, live verification gate with persisted history, drift detection, timing insights, repository & release console with CI history — plus VaultSeal: every curation run backs the whole Obsidian vault up to a private GitHub repository.",
+  keywords: ["GitCurator", "GitHub", "Obsidian", "Ollama", "Telegram", "audit", "reliability", "Python", "PyQt6", "vault backup", "VaultSeal"],
   authors: [{ name: "Z.ai Team" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "GitCurator v0.0.4 — Release & Audit Dashboard",
-    description: "13 fixes shipped, 45/45 tests, live verification gate, persisted history with run provenance, drift detection, repository & release console with CI history",
+    title: "GitCurator v0.0.5 — Release & Audit Dashboard",
+    description: "13 fixes shipped, 45/45 tests, live verification gate, VaultSeal automatic vault backup to a private GitHub repo, repository & release console with CI history",
     siteName: "Z.ai",
     type: "website",
   },

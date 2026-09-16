@@ -36,3 +36,30 @@ model VerificationRun {
 
   @@index([ranAt])
 }
+
+/// v0.0.5 — one row per VaultSeal execution (post-run vault backup to
+/// the private GitHub mirror). Powers the Vault Seal tab: protection
+/// status, seal history timeline, and per-event outcomes.
+model VaultSealEvent {
+  id            String   @id @default(cuid())
+  sealedAt      DateTime @default(now())
+  /// "sealed" (a commit was created) | "skipped" (vault unchanged /
+  /// disabled — a healthy no-op) | "failed" (error, commit may be local-only)
+  status        String
+  commitMessage String
+  commitSha     String?
+  filesChanged  Int      @default(0)
+  pushed        Boolean  @default(false)
+  repoName      String?
+  repoUrl       String?
+  repoPrivate   Boolean  @default(true)
+  /// who produced the event: "app" (a real GitCurator run — GUI or
+  /// headless), "demo" (dashboard-triggered local seal via app/vaultseal.py),
+  /// "simulate" (plausible fake, for trying the timeline without a vault)
+  source        String   @default("app")
+  skippedReason String?
+  error         String?
+  durationMs    Int      @default(0)
+
+  @@index([sealedAt])
+}

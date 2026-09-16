@@ -28,7 +28,7 @@ because the problem is in the asyncio/threading layer, not the GUI layer.
 """
 
 # === VERSION STAMP - printed at import so you can verify the right file loads ===
-__VERSION__ = "30.0 (core extraction: links/storage/note_builder/llm_client; merge-save; timeouts; atomic writes; headless unblocked; model persistence)"
+__VERSION__ = "31.0 (VaultSeal: post-run vault backup to a private GitHub mirror — vaultseal.py; hygiene .gitignore; token never persisted; core extraction lineage v30)"
 import sys as _sys
 print(f"[main] LOADED version {__VERSION__} from {__file__}", file=_sys.stderr, flush=True)
 # === END VERSION STAMP ===
@@ -64,6 +64,7 @@ import links as _links
 import storage as _storage
 import note_builder as _note_builder
 import llm_client as _llm_client
+import vaultseal as _vaultseal
 
 # Third-party imports - with graceful handling
 try:
@@ -215,7 +216,17 @@ CONFIG_EXAMPLE = {
     "gdrive_token_expiry": 0,
     "gdrive_folder_id": "",
     "gdrive_max_backups": 10,
-    "gdrive_redirect_port": 8765
+    "gdrive_redirect_port": 8765,
+    # v31 — VaultSeal: automatic post-run vault backup to a PRIVATE GitHub
+    # repository. Obsidian's free tier has no sync — after every curation
+    # run (1 repo or 100) the whole vault is committed and pushed. Restore
+    # is plain git clone; machine state (workspace.json, .trash) is
+    # excluded automatically. See vaultseal.py.
+    "vaultseal": {
+        "enabled": True,     # seal after every run (unchanged vault = no-op)
+        "repo_name": "",      # empty = derived from the vault folder name
+        "auto_push": True    # push to GitHub (needs github_token)
+    }
 }
 
 # Category folder mapping
@@ -5545,6 +5556,20 @@ class MainWindow(QMainWindow):
             "backup_enabled": getattr(self, 'backup_enabled_check', None) and self.backup_enabled_check.isChecked() if hasattr(self, 'backup_enabled_check') else self.config.get('backup_enabled', False),
             "backup_folder": getattr(self, 'backup_folder_input', QLineEdit()).text().strip() if hasattr(self, 'backup_folder_input') else self.config.get('backup_folder', ''),
             "backup_max": self.config.get('backup_max', 10),
+            # v31 — VaultSeal (GitHub mirror of the vault). Defensive hasattr
+            # pattern: the widgets live in the Backup tab and always exist by
+            # the time the main window saves — but never bet on widget order.
+            "vaultseal": {
+                "enabled": (self.vaultseal_enabled_check.isChecked()
+                            if hasattr(self, 'vaultseal_enabled_check')
+                            else (self.config.get('vaultseal') or {}).get('enabled', True)),
+                "auto_push": (self.vaultseal_push_check.isChecked()
+                              if hasattr(self, 'vaultseal_push_check')
+                              else (self.config.get('vaultseal') or {}).get('auto_push', True)),
+                "repo_name": (self.vaultseal_repo_input.text().strip()
+                              if hasattr(self, 'vaultseal_repo_input')
+                              else (self.config.get('vaultseal') or {}).get('repo_name', '')),
+            },
         }
 
         # Merge UI values into the EXISTING config — unknown keys survive,
@@ -7926,6 +7951,18 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.log_message(f"⚠️ Auto-backup failed: {e}", "warning")
 
+        # v31 — VaultSeal: seal the vault into its private GitHub mirror.
+        # Deliberately runs for FAILED batches too: a mid-run failure may
+        # still have written notes, and those are exactly what we want
+        # backed up. An unchanged vault is a no-op ("vault unchanged since
+        # the last seal"). Never blocks the GUI — runs in a QThread.
+        try:
+            vs_cfg = self.config.get('vaultseal') or {}
+            if vs_cfg.get('enabled', True) and self.config.get('vault_path'):
+                self._start_vault_seal()
+        except Exception as seal_err:
+            self.log_message(f"⚠️ VaultSeal could not start: {seal_err}", "warning")
+
         # Calculate total elapsed time
         elapsed_str = ""
         if hasattr(self, '_processing_start_time'):
@@ -8329,6 +8366,53 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(status_group)
 
+        # ---- VaultSeal (v31): automatic GitHub mirror ----
+        seal_group = QGroupBox("🛡️ VaultSeal — GitHub Mirror")
+        seal_layout = QVBoxLayout(seal_group)
+
+        self.vaultseal_enabled_check = QCheckBox("Seal the vault to a private GitHub repo after every run")
+        self.vaultseal_enabled_check.setChecked((self.config.get('vaultseal') or {}).get('enabled', True))
+        self.vaultseal_enabled_check.toggled.connect(self._vaultseal_refresh_status)
+        seal_layout.addWidget(self.vaultseal_enabled_check)
+
+        self.vaultseal_push_check = QCheckBox("Push to GitHub (uses the GitHub token from Settings)")
+        self.vaultseal_push_check.setChecked((self.config.get('vaultseal') or {}).get('auto_push', True))
+        seal_layout.addWidget(self.vaultseal_push_check)
+
+        repo_row = QHBoxLayout()
+        repo_row.addWidget(QLabel("Backup repo:"))
+        self.vaultseal_repo_input = QLineEdit()
+        self.vaultseal_repo_input.setPlaceholderText("auto — derived from the vault folder name")
+        self.vaultseal_repo_input.setText((self.config.get('vaultseal') or {}).get('repo_name', ''))
+        repo_row.addWidget(self.vaultseal_repo_input, 1)
+        seal_layout.addLayout(repo_row)
+
+        seal_info = QLabel(
+            "💡 Obsidian's free tier has no sync. VaultSeal commits the whole vault after\n"
+            "every run and pushes it to a PRIVATE repository — full history, restore\n"
+            "with git clone. Machine state (workspace.json, .trash) is excluded\n"
+            "automatically. Runs even after failed batches; an unchanged vault is a no-op."
+        )
+        seal_info.setWordWrap(True)
+        seal_info.setStyleSheet("padding: 6px; background: rgba(16, 185, 129, 0.05); border-radius: 4px; font-size: 11px;")
+        seal_layout.addWidget(seal_info)
+
+        self.vaultseal_status_label = QLabel("● —")
+        self.vaultseal_status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #71717A;")
+        seal_layout.addWidget(self.vaultseal_status_label)
+
+        seal_btn_row = QHBoxLayout()
+        self.vaultseal_now_btn = QPushButton("🛡️ Seal Now")
+        self.vaultseal_now_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover']))
+        self.vaultseal_now_btn.clicked.connect(self._vaultseal_now)
+        seal_btn_row.addWidget(self.vaultseal_now_btn)
+        seal_btn_row.addStretch()
+        seal_layout.addLayout(seal_btn_row)
+
+        layout.addWidget(seal_group)
+
+        self._vaultseal_refresh_status()
+
         # ---- Dashboard Link ----
         dash_group = QGroupBox("📊 Dashboard")
         dash_layout = QVBoxLayout(dash_group)
@@ -8375,6 +8459,15 @@ class MainWindow(QMainWindow):
         except ValueError:
             self.config['backup_max'] = 10
         self.config['cloudflare_worker_url'] = self.dash_worker_url_input.text().strip().rstrip('/')
+        # v31 — VaultSeal settings (Backup tab)
+        vs = self.config.get('vaultseal')
+        if not isinstance(vs, dict):
+            vs = {}
+        if hasattr(self, 'vaultseal_enabled_check'):
+            vs['enabled'] = self.vaultseal_enabled_check.isChecked()
+            vs['auto_push'] = self.vaultseal_push_check.isChecked()
+            vs['repo_name'] = self.vaultseal_repo_input.text().strip()
+        self.config['vaultseal'] = vs
         self.save_config()
 
     def _backup_refresh_status(self):
@@ -8486,6 +8579,89 @@ class MainWindow(QMainWindow):
         else:
             self.log_message(f"❌ Backup failed: {message}", "error")
             self._show_custom_message_box("Backup Failed", message, success=False)
+
+    # ========================================================================
+    # v31 — VaultSeal (post-run vault backup to a private GitHub repo)
+    # ========================================================================
+
+    def _start_vault_seal(self):
+        """Seal the vault in a background thread: commit + best-effort push.
+
+        Mirrors the v29.4 BackupWorker pattern — the GUI never blocks on git
+        or the network; the result lands in the log panel and refreshes the
+        Backup tab status label.
+        """
+        run_summary = {}
+        try:
+            run_summary = {
+                "processed": int(getattr(self.worker, 'processed', 0) or 0),
+                "total": int(getattr(self.worker, 'total', 0) or 0),
+            }
+        except Exception:
+            run_summary = {}
+
+        class VaultSealWorker(QThread):
+            done = pyqtSignal(bool, str)
+
+            def __init__(self, config, summary):
+                super().__init__()
+                self.config = config
+                self.summary = summary
+
+            def run(self):
+                try:
+                    result = _vaultseal.seal_from_config(
+                        self.config, run_summary=self.summary)
+                    self.done.emit(result.ok, result.describe())
+                except Exception as e:  # belt & suspenders — seal() never raises
+                    self.done.emit(False, str(e))
+
+        self.log_message("🛡️ VaultSeal: sealing vault → private GitHub mirror…", "info")
+        self._vaultseal_worker = VaultSealWorker(self.config, run_summary)
+        self._vaultseal_worker.done.connect(self._vault_seal_result)
+        self._vaultseal_worker.start()
+
+    def _vault_seal_result(self, ok, message):
+        if hasattr(self, 'vaultseal_now_btn'):
+            self.vaultseal_now_btn.setEnabled(True)
+            self.vaultseal_now_btn.setText("🛡️ Seal Now")
+        icon = "✅" if ok else "⚠️"
+        level = "success" if ok else "warning"
+        self.log_message(f"{icon} VaultSeal: {message}", level)
+        self._vaultseal_refresh_status()
+
+    def _vaultseal_now(self):
+        """Manual seal — the exact code path the post-run hook uses."""
+        self._backup_save_config()
+        if not self.config.get('vault_path'):
+            self._show_custom_message_box("No Vault", "Set a vault path first (📁 Vault tab).", success=False)
+            return
+        if hasattr(self, 'vaultseal_now_btn'):
+            self.vaultseal_now_btn.setEnabled(False)
+            self.vaultseal_now_btn.setText("Sealing…")
+        self._start_vault_seal()
+
+    def _vaultseal_refresh_status(self):
+        """Cheap status line — config only, no git subprocesses."""
+        if not hasattr(self, 'vaultseal_status_label'):
+            return
+        if hasattr(self, 'vaultseal_enabled_check'):
+            enabled = self.vaultseal_enabled_check.isChecked()
+        else:
+            enabled = (self.config.get('vaultseal') or {}).get('enabled', True)
+        has_vault = bool(self.config.get('vault_path'))
+        has_token = bool((self.config.get('github_token') or '').strip())
+        if not enabled:
+            text, color = "● Disabled", "#EF4444"
+        elif not has_vault:
+            text, color = "● No vault selected", "#F59E0B"
+        elif not has_token:
+            text, color = "● Local-only (no GitHub token — commits, no push)", "#F59E0B"
+        else:
+            text, color = "● Ready — auto-seal after every run", "#10B981"
+        self.vaultseal_status_label.setText(text)
+        self.vaultseal_status_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {color};")
 
     def _backup_export_zip(self):
         """Export a timestamped ZIP to a user-chosen location."""
@@ -8848,6 +9024,19 @@ def run_headless(args):
         print(f"[{timestamp}] [{level}] {msg}")
 
     def _on_finished(success, message):
+        # v31 — VaultSeal: post-run vault backup (best-effort, never raises,
+        # runs before the exit print so it can never be cut off). Runs for
+        # failed batches too — notes written before a mid-run failure are
+        # exactly what we want backed up.
+        try:
+            vs_summary = {
+                "processed": int(getattr(worker, 'processed', 0) or 0),
+                "total": int(getattr(worker, 'total', 0) or 0),
+            }
+            vs_result = _vaultseal.seal_from_config(config, run_summary=vs_summary)
+            print(f"[headless] VaultSeal: {vs_result.describe()}")
+        except Exception as seal_err:
+            print(f"[headless] VaultSeal error: {seal_err}")
         if success:
             print(f"[headless] DONE: {message}")
         else:

@@ -4,8 +4,8 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.3` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** v30.x hardening sprint complete — 45/45 automated tests green.
+**Version:** `0.0.5` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Status:** v30.x hardening sprint complete — 45/45 automated tests green · VaultSeal vault backup shipped.
 
 ---
 
@@ -31,6 +31,36 @@
    each repository (all calls timeout-wrapped; failures degrade gracefully).
 4. **Write** — sanitized, structured Obsidian notes (frontmatter + banners)
    land in your vault via atomic tempfile + `os.replace` writes.
+5. **Seal** — the whole vault is committed and pushed to a **private GitHub
+   repository** after every run (`vaultseal.py`) — Obsidian's free tier has no
+   sync, VaultSeal is the safety net.
+
+## VaultSeal — automatic vault backup (v0.0.5)
+
+Obsidian's free mode has no sync and no off-site backup. VaultSeal closes
+that gap: after **every** curation run — 1 new project or 100 — the whole
+vault is committed and pushed to a private GitHub repository. Restore is
+plain `git clone`: the full vault at any point in its history, and Obsidian
+opens the clone directly.
+
+- **Zero-config** — on by default (`vaultseal.enabled`), reuses your
+  `github_token`, derives the repo name from the vault folder, and creates
+  the private repo on the first seal if it doesn't exist.
+- **Hygiene** — machine-specific state (`workspace.json`, `.trash/`, OS
+  noise) is excluded via a managed `.gitignore` block, merged idempotently.
+- **Never dangerous** — a vault nested inside another git repository
+  bootstraps its own repo (a parent's files can never be sealed); an
+  unchanged vault is a no-op; a failed push keeps the local commit.
+- **Credential hygiene** — the token is used only for API calls and one-time
+  push URLs; it is never written to `.git/config`, never persisted, never
+  logged.
+- **Runs for failed batches too** — notes written before a mid-run failure
+  are exactly what you want backed up.
+
+Manual seal / status: `python app/vaultseal.py --vault <path> [--token
+$GITHUB_TOKEN]` · configure in the GUI's Backup tab or `config.json`
+(`vaultseal` section). The dashboard's **Vault Seal** tab shows live vault
+state and the seal history (`GET /api/vault-seal`).
 
 ## Repository layout
 
@@ -39,6 +69,7 @@
 | `app/` | The Python application: PyQt6 GUI + headless CLI (start with `app/README.md`) |
 | `app/main.py` | Orchestrator, GUI, worker threads, headless runner |
 | `app/links.py` · `storage.py` · `note_builder.py` · `llm_client.py` | Pure-stdlib testable core |
+| `app/vaultseal.py` | Post-run vault backup to a private GitHub repo (v0.0.5) |
 | `app/tests/` | 34 unit tests + 11 end-to-end tests (fake Ollama + fake GitHub) |
 | `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
 | `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
@@ -71,7 +102,11 @@ The dashboard expects the Python app at `../app` (override with
 (manual button, server-startup pass or the 6-hour scheduler) — flags code
 drift between runs, and reports live repository/release status
 (`GET /api/releases` — last commit, tags, dirty files, CHANGELOG, zip
-backups, and the last 10 GitHub Actions runs).
+backups, and the last 10 GitHub Actions runs). The **Vault Seal** tab
+(`GET /api/vault-seal`) shows the live git state of your vault and the
+seal history; "Seal vault now" runs the real `app/vaultseal.py` (local
+commit — pushing stays the app's job; the dashboard holds no GitHub token
+by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
 
 ## Versioning
 

@@ -89,8 +89,8 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.4",
-  codename: "Provenance & CI History",
+  version: "0.0.5",
+  codename: "VaultSeal — Vault Backup",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
@@ -98,9 +98,9 @@ export const releaseReport: ReleaseReport = {
     bugsFixed: 13,
     testsTotal: 45,
     testsPassed: 45,
-    mainPyLines: 9014,
-    filesTouched: 16,
-    newModules: 6,
+    mainPyLines: 9203,
+    filesTouched: 17,
+    newModules: 7,
     testCaughtBugs: 2,
   },
   severityBreakdown: { critical: 3, high: 5, medium: 2 },
@@ -151,6 +151,14 @@ export const releaseReport: ReleaseReport = {
       description:
         "Atomic note writes (tempfile + os.replace), category folders, banner assets.",
       hardening: "Crashes can never leave truncated notes marked as processed.",
+    },
+    {
+      id: 7,
+      name: "VaultSeal",
+      icon: "lock",
+      description:
+        "After every run the whole vault is committed + pushed to a private GitHub repo (v0.0.5).",
+      hardening: "Nested-repo guard, hygiene .gitignore, token never persisted, skip-when-unchanged.",
     },
   ],
   fixes: [
@@ -316,7 +324,7 @@ export const releaseReport: ReleaseReport = {
     },
   ],
   verification: [
-    "python -m py_compile — clean on all 9 core Python files",
+    "python -m py_compile — clean on all 10 core Python files (v0.0.5: +vaultseal.py)",
     "python -m unittest tests.test_core tests.test_e2e — 45/45 OK in 0.22s (34 unit + 11 e2e)",
     "Live gate: POST /api/verify re-runs compile + both suites on demand (~2.6s), per-suite AND per-case timing (tests/timing_runner.py)",
     "Every run is persisted to SQLite (Prisma) with a sha256 code fingerprint + per-file hashes — History shows trends, pass-rate stats and WHICH files drifted",
@@ -327,6 +335,9 @@ export const releaseReport: ReleaseReport = {
     "Actions status in the dashboard (v0.0.3): /api/releases reads the newest workflow run (optional read-only GITCURATOR_GH_TOKEN) — passing / running / failing chip links straight to the run",
     "Run provenance (v0.0.4): every persisted run records who triggered it — manual button, server-startup pass or the 6-hour scheduler — shown as badges + source-split chips in the History tab and a source column in the CSV export",
     "CI run history strip (v0.0.4): /api/releases returns the last 10 Actions runs — the Releases tab renders the full run strip with a pass-rate summary, each chip linking to its run on GitHub",
+    "VaultSeal (v0.0.5): LIVE end-to-end — a real demo vault sealed to the private github.com/assadigit/GitCurator-Vault (initial 12-file seal, incremental 1-file fast-forward push, no-op skip), verified via the GitHub API",
+    "VaultSeal regression guard: a vault nested inside another git repository bootstraps its OWN repo — the parent's files can never be sealed (git add -A is repo-wide from subdirectories since git 2.0; caught live during QA and fixed)",
+    "VaultSeal credential hygiene: remote stays token-less, .git/config greps clean, one-time token URLs only",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -340,6 +351,7 @@ export const releaseReport: ReleaseReport = {
       "Vault index dedup (filesystem as ground truth, beats SQLite cache drift)",
       "Batch undo snapshots; OneDrive/Dropbox-friendly local backups",
       "New pure-stdlib core — headlessly testable, zero GUI coupling",
+      "VaultSeal (v0.0.5): every curation run seals the vault to a private GitHub repo — full history, restore with git clone, zero-config",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
       "GitHub Actions CI runs the full 45-test gate on every push, tag and PR",
     ],
@@ -432,7 +444,7 @@ export const releaseReport: ReleaseReport = {
       id: "live-verification",
       label: "Run live verification — all green",
       detail:
-        "POST /api/verify (or the Tests/History tab button) must show 9/9 compiles and 45/45 tests passing before you ship — and the History tab must show no code drift for the newest run.",
+        "POST /api/verify (or the Tests/History tab button) must show 10/10 compiles and 45/45 tests passing before you ship — and the History tab must show no code drift for the newest run.",
       priority: "P1",
       owner: "Dashboard",
     },
