@@ -1,0 +1,1 @@
+python main.py --headless --import-file "urls.txt" --vault "/path/to/vault" --config "config.json"

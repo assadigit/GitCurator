@@ -1,0 +1,33 @@
+// This is our Prisma schema file,
+// learn more about the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// v30.2 — one row per POST /api/verify execution.
+/// Powers the dashboard History tab: run trends, pass-rate stats and
+/// code-drift detection (codeHash fingerprint of the audited Python tree).
+model VerificationRun {
+  id            String   @id @default(cuid())
+  ranAt         DateTime @default(now())
+  ok            Boolean
+  durationMs    Int
+  pythonVersion String
+  testsTotal    Int
+  testsPassed   Int
+  compileOk     Int
+  compileTotal  Int
+  summaryLine   String
+  /// sha256 over the 9 audited .py files — "which code version was verified"
+  codeHash      String
+  /// full VerifyResult JSON snapshot (compile grid + suites + cases)
+  resultJson    String
+
+  @@index([ranAt])
+}

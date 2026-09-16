@@ -1,0 +1,34 @@
+# ── Python (app/) ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+app.lock
+
+# Runtime data — regenerable caches (kept out of git; included in zip backups)
+app/cache.db
+app/error_outbox.db
+
+# ── Node / Next.js (dashboard/) ─────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Dashboard runtime state
+dashboard/db/*.db
+dashboard/dev.log
+dashboard/server.log
+
+# Local env overrides (the dashboard ships a safe default .env)
+.env*.local
+
+# ── OS / editor ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
