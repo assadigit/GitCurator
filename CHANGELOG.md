@@ -3,6 +3,62 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.8] — Resilience Fix Pack: 401 Fallback, Windows-safe MOCs, Visible Theme Toggle
+
+Four fixes driven by a real Windows run (internal `v32.1`): a rejected
+GitHub token no longer kills a batch, quoted LLM categories no longer
+crash the master index, the light/dark toggle is finally *findable*, and
+token health is one click away.
+
+### Bad-credentials fallback (the 401 wall)
+- **Before**: an expired/rotated GitHub token failed *every* repo with a
+  raw `401 {"message": "Bad credentials"}` blob, and the whole batch
+  ended with "7 links need retry" + VaultSeal/GoodRepos both failing to
+  resolve the account.
+- **Now**: the first 401 logs ONE actionable error (token invalid,
+  expired, or rotated + exactly where to fix it), silently drops the
+  token for the rest of the batch (anonymous access, 60 req/h), retries
+  the current repo, and keeps going.
+- **VaultSeal / GoodRepos** messages now name the fix too:
+  "could not resolve the GitHub account for the token (invalid or
+  expired — update the GitHub Token in Settings → Credentials, then
+  'Test GitHub Token')".
+
+### MOC filename sanitizer (Windows `[Errno 22]` crash)
+- The LLM occasionally returns categories with literal quotes or `>`
+  separators (`"Agents_Skills"`, `AI > Skills`). The master-index
+  generator built `_moc/"Agents_Skills".md` — quotes are ILLEGAL in
+  Windows filenames, so index generation died with
+  `[Errno 22] Invalid argument`.
+- **`_safe_moc_name()`** — one canonical sanitizer (`/` `\` → `_`;
+  strips `<>:"|?*` + control chars; collapses whitespace; no trailing
+  dots/spaces) used by BOTH the file writes and the
+  `[[_moc/…|View MOC]]` wiki-links so they always match.
+
+### Always-visible light/dark toggle
+- The theme toggle lived in *More → Settings* — undiscoverable, and with
+  `dark_mode: true` saved the app read as "dark only". There is now a
+  compact **🌙/☀️ icon button in the action row** (38×36, pastel violet
+  on white / lavender on plum, tooltip names the current mode) that
+  flips the full pastel cream/plum theme and persists the choice. The
+  Settings-menu entry stays in sync.
+
+### One-click GitHub token tester
+- **Credentials → "🔑 Test GitHub Token"** validates the token *as
+  typed* (before Save) via `GET /user`: shows the account login on
+  success ("5000 requests/hour enabled"), or an actionable 401/403
+  message on failure — the #1 field error, caught before a batch burns
+  its repos on it.
+
+### Fixes
+- `gui/app.py` 401 branch, `_safe_moc_name` + 3 call sites, `icon` button
+  variant, `theme_toggle_btn` + `_sync_theme_toggle_btn`, `test_github_token`
+- `integrations/vaultseal.py`, `integrations/goodrepos.py` — enriched
+  could-not-resolve messages
+- Gates: 12/12 compiles + **73/73 tests** (live copy *and* repo mirror)
+  + offscreen smoke (both themes, toggle geometry, sanitizer cases
+  including the exact `"Agents_Skills"` crash).
+
 ## [0.0.7] — Modular Core & Good Repos: Public Directory, Pastel UI
 
 Three user-facing asks, one release: the flat `app/` became a proper Python

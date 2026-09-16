@@ -234,9 +234,16 @@ class VaultSeal:
                 return None
             status, payload = self._api("GET", "/user")
             if status != 200:
+                # v32.1: 401 = the token itself is bad (expired / revoked /
+                # rotated) — name the fix instead of a bare status dump.
+                hint = (
+                    " — token invalid or expired; update it in "
+                    "Settings → Credentials → GitHub Token (then 'Test GitHub Token')"
+                    if status == 401 else ""
+                )
                 self._log(
                     f"VaultSeal: could not resolve the GitHub user for the token "
-                    f"({status}: {payload.get('message', 'network error')})",
+                    f"({status}: {payload.get('message', 'network error')}){hint}",
                     "warning",
                 )
                 return None
@@ -316,7 +323,10 @@ class VaultSeal:
             return True, None
         owner = self._owner_login()
         if not owner:
-            return False, "could not resolve the GitHub account for the token"
+            # v32.1: actionable — the token was rejected, not a mystery.
+            return False, ("could not resolve the GitHub account for the token "
+                           "(invalid or expired — update the GitHub Token in "
+                           "Settings → Credentials, then 'Test GitHub Token')")
         repo = self.repo_name or self.default_repo_name() or "gitcurator-vault"
 
         status, payload = self._api("GET", f"/repos/{owner}/{repo}")

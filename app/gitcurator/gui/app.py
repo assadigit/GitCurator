@@ -28,7 +28,7 @@ because the problem is in the asyncio/threading layer, not the GUI layer.
 """
 
 # === VERSION STAMP - printed at import so you can verify the right file loads ===
-__VERSION__ = "32.0 (modular package layout: gitcurator/{core,integrations,cloud,gui,tools}; GoodRepos public directory publisher; pastel theme; single-grow-region layout lineage v31)"
+__VERSION__ = "32.1 (fix pack: 401 bad-credentials fallback — a rejected GitHub token no longer kills the batch; MOC filename sanitizer for Windows-illegal category chars; ALWAYS-VISIBLE light/dark toggle in the action row; one-click GitHub token tester in Credentials; modular lineage v32)"
 import sys as _sys
 print(f"[main] LOADED version {__VERSION__} from {__file__}", file=_sys.stderr, flush=True)
 # === END VERSION STAMP ===
@@ -1039,6 +1039,33 @@ class LinkTracker:
 
 
 # ============================================================================
+# v32.1 — MOC filename sanitizer (Windows crash fix)
+# ============================================================================
+
+def _safe_moc_name(cat: str) -> str:
+    """Sanitize a category name for use as a MOC filename / wiki-link.
+
+    Observed in the wild (user log 2026-09-16): the LLM returned a category
+    like ``"Agents_Skills"`` WITH literal quotes, and the master-index
+    generator built ``_moc/\"Agents_Skills\".md`` — quotes are ILLEGAL in
+    Windows filenames, so ``open()`` died with ``[Errno 22] Invalid
+    argument`` and the whole master index was skipped. ``>`` (category
+    separators like ``AI > Skills``), ``:``, ``|`` etc. are equally fatal.
+
+    One canonical sanitizer keeps the file on disk and the
+    ``[[_moc/...|View MOC]]`` wiki-links pointing at it in sync:
+      - ``/`` and ``\\`` become ``_`` (they would split the path)
+      - every Windows-illegal char is removed (``<>:"|?*`` + control chars)
+      - whitespace collapses to single spaces, no trailing dots/spaces
+      - empty result falls back to ``Uncategorized``
+    """
+    name = (cat or "").replace('/', '_').replace('\\', '_')
+    name = re.sub(r'[<>:"|?*\x00-\x1f]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip(' .')
+    return name or "Uncategorized"
+
+
+# ============================================================================
 # Processing Worker (QThread)
 # ============================================================================
 
@@ -1498,6 +1525,39 @@ class ProcessingWorker(QThread):
                                         self.link_tracker.mark_failed(url, f"GitHub API: {e2}")
                                     except Exception:
                                         pass
+                            self.progress_updated.emit(self._current_position, self.total)
+                            continue
+                    elif e.status == 401 and github_token:
+                        # v32.1 — Fix (bad-credentials spam): the saved GitHub
+                        # token was rejected (expired / revoked / rotated).
+                        # Instead of failing EVERY repo with a raw 401 JSON
+                        # blob, drop the token for the rest of the batch
+                        # (anonymous access, 60 req/h), retry THIS repo, and
+                        # tell the user exactly how to fix it. Logged once.
+                        if not getattr(self, '_gh_token_dropped', False):
+                            self._gh_token_dropped = True
+                            self.log_message.emit(
+                                "🔑 GitHub token rejected (401 Bad credentials) — it is invalid, expired, or was rotated.",
+                                "error",
+                            )
+                            self.log_message.emit(
+                                "   Continuing this batch anonymously (60 requests/hour). "
+                                "Fix: Settings → Credentials → paste a fresh token "
+                                "(github.com/settings/tokens) → 'Test GitHub Token'.",
+                                "warning",
+                            )
+                            github_token = None  # never re-enter this branch
+                        try:
+                            g = Github()  # anonymous client from here on
+                            repo = g.get_repo(f"{owner}/{repo_name}")
+                            repo_id = repo.id
+                        except GithubException as e2:
+                            self.log_message.emit(f"GitHub API error: {e2}", "error")
+                            if self.link_tracker:
+                                try:
+                                    self.link_tracker.mark_failed(url, f"GitHub API: {e2}")
+                                except Exception:
+                                    pass
                             self.progress_updated.emit(self._current_position, self.total)
                             continue
                     elif e.status == 404:
@@ -2080,14 +2140,14 @@ class ProcessingWorker(QThread):
             for cat in sorted(notes_by_category.keys()):
                 notes = notes_by_category[cat]
                 lines.append(f"### {cat} ({len(notes)})")
-                lines.append(f"→ [[_moc/{cat.replace('/', '_')}|View MOC]]")
+                lines.append(f"→ [[_moc/{_safe_moc_name(cat)}|View MOC]]")
                 lines.append("")
                 # Top 5 by stars
                 top = sorted(notes, key=lambda x: -x['stars'])[:5]
                 for n in top:
                     lines.append(f"- [[{n['name']}]] — ⭐ {n['stars']} · 🔧 {n['language']} · 📊 {n['credibility']}/100")
                 if len(notes) > 5:
-                    lines.append(f"- ... and {len(notes) - 5} more in [[_moc/{cat.replace('/', '_')}|MOC]]")
+                    lines.append(f"- ... and {len(notes) - 5} more in [[_moc/{_safe_moc_name(cat)}|MOC]]")
                 lines.append("")
 
             # Review queue
@@ -2127,7 +2187,7 @@ class ProcessingWorker(QThread):
 
             # Generate per-category MOCs
             for cat, notes in notes_by_category.items():
-                moc_filename = cat.replace('/', '_') + '.md'
+                moc_filename = _safe_moc_name(cat) + '.md'
                 moc_path = os.path.join(moc_dir, moc_filename)
 
                 moc_lines = []
@@ -3568,6 +3628,29 @@ class MainWindow(QMainWindow):
                 QPushButton:pressed {{ background-color: {hover_bg}; }}
                 QPushButton:disabled {{ color: #A79F92; }}
             """
+        if kind == 'icon':
+            # v32.1: square ICON-ONLY header button (the always-visible
+            # light/dark toggle). 16px glyph on a 38×36 target, panel bg +
+            # accent text so it reads on both themes (violet 6.2:1 on white,
+            # lavender 8.2:1 on plum).
+            bg = '#2B2639' if getattr(self, '_dark_mode', False) else '#FFFFFF'
+            hover_bg = '#352F4A' if getattr(self, '_dark_mode', False) else '#F2EDE3'
+            border = '#4A4263' if getattr(self, '_dark_mode', False) else '#D8D0BE'
+            fg = '#C4BCF5' if getattr(self, '_dark_mode', False) else '#5F54B4'
+            return f"""
+                QPushButton {{
+                    background-color: {bg};
+                    color: {fg};
+                    border: 1px solid {border};
+                    font-size: 16px;
+                    font-weight: 600;
+                    padding: 0;
+                    border-radius: 8px;
+                }}
+                QPushButton:hover {{ background-color: {hover_bg}; border-color: {fg}; }}
+                QPushButton:pressed {{ background-color: {hover_bg}; }}
+                QPushButton:focus {{ outline: 2px solid {self._accent()}; outline-offset: 2px; }}
+            """
         # default: 'primary' — filled pastel mint + deep-forest text
         return self._btn_style(COLORS['cta'], COLORS['cta_hover'],
                                text=COLORS['cta_text'])
@@ -3743,6 +3826,16 @@ class MainWindow(QMainWindow):
         creds_layout.addRow("API Hash:", self.api_hash)
         creds_layout.addRow("Phone:", self.phone)
         creds_layout.addRow("GitHub Token (optional):", self.github_token)
+
+        # v32.1: one-click token validation — catches the #1 field error
+        # (expired/rotated token) BEFORE a batch burns its repos on 401s.
+        # Reads the field as typed (test before Save), reports the account
+        # login on success or an actionable message on 401/403.
+        self.test_github_btn = QPushButton("🔑 Test GitHub Token")
+        self.test_github_btn.setToolTip("Validate the token and show the GitHub account it belongs to")
+        self.test_github_btn.clicked.connect(self.test_github_token)
+        self._style_btn(self.test_github_btn, 'secondary')
+        creds_layout.addRow("", self.test_github_btn)
 
         # v31.1: '🔗 Test Telegram & GitHub' moved to the global 'More'
         # overflow menu (infrequent actions: export / verify / retry /
@@ -4313,6 +4406,19 @@ class MainWindow(QMainWindow):
         self.more_btn.setMenu(more_menu)
         self._style_btn(self.more_btn, 'secondary')
         action_layout.addWidget(self.more_btn)
+        action_layout.addSpacing(8)
+
+        # v32.1 — ALWAYS-VISIBLE light/dark toggle. v31.1 hid the toggle in
+        # the More → Settings submenu and users read the app as "dark only".
+        # One compact icon button in the action row shows the mode you'll
+        # switch TO (🌙 in light mode, ☀️ in dark mode); the tooltip spells
+        # it out. Synced by _sync_theme_toggle_btn() on init + every flip.
+        self.theme_toggle_btn = QPushButton("🌙")
+        self.theme_toggle_btn.setFixedSize(38, 36)
+        self.theme_toggle_btn.setToolTip("Switch to dark mode (current: Light)")
+        self.theme_toggle_btn.clicked.connect(self.toggle_theme)
+        self._style_btn(self.theme_toggle_btn, 'icon')
+        action_layout.addWidget(self.theme_toggle_btn)
 
         # v22 Feature 7: Proxy Health Monitor — small colored dot + TEXT label
         # (v31.1: color alone never conveys state — WCAG 1.4.1) that reflect
@@ -4447,6 +4553,7 @@ class MainWindow(QMainWindow):
             self.apply_dark_theme()
             self.theme_btn.setChecked(True)
             self._refresh_button_styles()  # outlined variant is theme-aware
+        self._sync_theme_toggle_btn()  # v32.1: header toggle reflects the restored mode
 
         # Auto-check bot queue on startup (after proxy validation)
         from PyQt6.QtCore import QTimer
@@ -4658,8 +4765,22 @@ class MainWindow(QMainWindow):
         # Sync the Settings-menu check state and re-apply the (theme-aware)
         # outlined variants on the persistent window buttons.
         self.theme_btn.setChecked(self._dark_mode)
+        self._sync_theme_toggle_btn()  # v32.1: header icon button
         self._refresh_button_styles()
         self.save_config()  # persist the theme choice
+
+    def _sync_theme_toggle_btn(self):
+        """v32.1: keep the ALWAYS-VISIBLE header light/dark toggle in sync.
+
+        The button shows the mode you'll switch TO (🌙 while light, ☀️ while
+        dark) with a tooltip naming the current mode — icon + text, never
+        color alone (WCAG 1.4.1)."""
+        if getattr(self, '_dark_mode', False):
+            self.theme_toggle_btn.setText("☀️")
+            self.theme_toggle_btn.setToolTip("Switch to light mode (current: Dark)")
+        else:
+            self.theme_toggle_btn.setText("🌙")
+            self.theme_toggle_btn.setToolTip("Switch to dark mode (current: Light)")
 
     # ------------------------------------------------------------------
     # About Me Wizard — generates about_me.md to give the LLM context
@@ -4838,6 +4959,50 @@ class MainWindow(QMainWindow):
         worker.finished_signal.connect(_on_finished)
         self._keep_worker(worker)
         worker.start()
+
+    def test_github_token(self):
+        """v32.1: validate the GitHub token from the Credentials tab.
+
+        Calls GET /user with the token as typed (before Save). Shows the
+        account login on success, or an actionable message on 401/403 —
+        the exact failure that used to surface as raw JSON blobs for every
+        repo of a batch. Fast + inline, same pattern as the GitHub half of
+        test_telegram_github()."""
+        token = self.github_token.text().strip()
+        if not token:
+            self.log_message(
+                "🔑 No GitHub token entered — the app will use anonymous access "
+                "(60 requests/hour, 5000 with a token).",
+                "warning",
+            )
+            return
+        self.log_message("🔑 Testing GitHub token...", "info")
+        try:
+            auth = Auth.Token(token)
+            g = Github(auth=auth, timeout=15)
+            user = g.get_user().login
+            self.log_message(
+                f"✅ GitHub token valid — account: {user} "
+                f"(5000 requests/hour enabled)",
+                "success",
+            )
+        except GithubException as e:
+            if getattr(e, 'status', None) == 401:
+                self.log_message(
+                    "❌ GitHub token REJECTED (401 Bad credentials) — it is invalid, "
+                    "expired, or was rotated. Create a fresh token at "
+                    "github.com/settings/tokens (classic, 'repo' scope) and paste it here.",
+                    "error",
+                )
+            elif getattr(e, 'status', None) == 403:
+                self.log_message(
+                    f"❌ GitHub token forbidden (403): {e.data if hasattr(e, 'data') else e}",
+                    "error",
+                )
+            else:
+                self.log_message(f"❌ GitHub token test failed: {e}", "error")
+        except Exception as e:
+            self.log_message(f"❌ GitHub token test failed (network): {e}", "error")
 
     def test_proxy(self):
         """Test proxy by connecting to Telegram through it (background)."""

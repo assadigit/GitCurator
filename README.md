@@ -38,7 +38,7 @@
    directory** (`goodrepos.py`) organized like *AI → Skills → …*, with the
    notes mirrored into category folders of the public `good-repos` repo.
 
-## UI standards (v0.0.6 + v0.0.7 pastel)
+## UI standards (v0.0.6 + v0.0.7 pastel, v0.0.8 toggle)
 
 The desktop GUI follows a small, explicit set of visual rules:
 
@@ -46,6 +46,9 @@ The desktop GUI follows a small, explicit set of visual rules:
   independently and starts at the same top position at its natural height.
 - **One growable region per tab** — the results/list/log panel absorbs the
   leftover vertical space; forms and buttons stay content-sized.
+- **Always-visible light/dark toggle (v0.0.8)** — a compact 🌙/☀️ icon button
+  in the action row flips the full cream/plum pastel theme and persists the
+  choice; the tooltip always names the current mode (never color alone).
 - **Three button variants** — filled pastel-mint primary (exactly one per
   tab, deep-forest text), outlined violet secondary, filled pastel-rose
   danger; everything infrequent (tests, verify, export, retry,
@@ -61,6 +64,22 @@ The desktop GUI follows a small, explicit set of visual rules:
 - **Design tokens** — 4/8/16/24/32/48px spacing scale; type scale of four
   sizes (16 titles / 13 labels / 12 body / 12 mono); 2px focus outlines
   on every interactive element, both themes.
+
+## Resilience (v0.0.8)
+
+Real-world Windows runs surfaced three failure modes — all fixed:
+
+- **401 bad-credentials fallback** — an expired/rotated GitHub token used
+  to fail every repo of a batch with raw `401` JSON. The first 401 now
+  logs ONE actionable error, drops the token for the rest of the batch
+  (anonymous access, 60 req/h), retries the current repo, and continues.
+- **`🔑 Test GitHub Token`** (Credentials tab) — validates the token as
+  typed *before* Save via `GET /user`: shows the account login on success,
+  an actionable 401/403 message on failure.
+- **Windows-safe MOC filenames** — LLM categories with quotes or `>`
+  separators (`"Agents_Skills"`, `AI > Skills`) no longer crash master-index
+  generation with `[Errno 22]`; one canonical sanitizer keeps the
+  `_moc/` files and their `[[_moc/…]]` wiki-links in sync.
 
 ## VaultSeal — automatic vault backup (v0.0.5)
 
