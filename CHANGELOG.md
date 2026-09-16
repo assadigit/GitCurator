@@ -3,6 +3,40 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.9] — Backup Tab Scrollout Fix Pack — 2026-09-17
+
+Three usability fixes for the Backup tab (internal `v32.2`): its four
+sections no longer clip inside the fixed window, the theme toggle now
+re-colors all three status dots, and the dark scrollbar handle is
+readable on plum.
+
+### Fixed
+- **Backup tab scrollout** — the Backup tab's four sections (Vault Backup,
+  VaultSeal — GitHub Mirror, Good Repos — Public Directory, Dashboard) no
+  longer clip inside the fixed 1000×750 window: the tab content is wrapped
+  in a vertical-only `QScrollArea` (horizontal scrollbar always off) and
+  compacted — status dots share the action rows, the two settings
+  checkboxes sit side-by-side, info notes are single wrapped sentences.
+  Visible-pane/natural-content ratio dropped from ~2.2 to 1.31; every
+  control (Backup Now / Restore / toggles / Seal Now / Publish Now /
+  Worker URL / Open Dashboard) is reachable by scrolling.
+- **Theme toggle re-themes all three Backup status dots** — previously the
+  Good Repos status kept light-theme deep-butter on the plum background
+  (~2.5:1) after switching to dark; `toggle_theme()` and the startup
+  dark-restore block now re-run all three refreshers; the backup dot also
+  refreshes at construction; hardcoded `#AE2237` error reds route through
+  theme-aware `_status_colors()`.
+- **Dark scrollbar handle contrast raised** — `#3B344F` → `#7A7199`
+  (~3.2:1 on plum, WCAG 1.4.11 non-text), hover `#8D84AD`.
+
+### Verified
+- 12/12 py_compile gate and 73/73 tests (34 core + 28 goodrepos + 11 e2e)
+  on both the live copy and the repo mirror; offscreen GUI smoke
+  (scroll-area config, four-section single column, 617px pane / 811px
+  content, post-scroll visibility of the Dashboard section + Open
+  Dashboard button, THEME-SWITCH assertion for all three dots); VLM QA
+  of 4 screenshots (top/bottom × light/dark) with pixel forensics.
+
 ## [0.0.8] — Resilience Fix Pack: 401 Fallback, Windows-safe MOCs, Visible Theme Toggle
 
 Four fixes driven by a real Windows run (internal `v32.1`): a rejected

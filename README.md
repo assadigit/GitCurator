@@ -4,7 +4,7 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.7` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Version:** `0.0.9` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
 **Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green.
 
 ---
@@ -80,6 +80,20 @@ Real-world Windows runs surfaced three failure modes — all fixed:
   separators (`"Agents_Skills"`, `AI > Skills`) no longer crash master-index
   generation with `[Errno 22]`; one canonical sanitizer keeps the
   `_moc/` files and their `[[_moc/…]]` wiki-links in sync.
+
+## Usability (v0.0.9)
+
+The Backup tab fits the fixed window again, and theme switches keep every
+status readable:
+
+- **Scrollable, compacted Backup tab** — the four sections (Vault Backup,
+  VaultSeal, Good Repos, Dashboard) sit in a vertical-only scroll area with
+  compacted rows (status dots share the action rows, settings checkboxes
+  side-by-side), so every control is reachable inside the fixed 1000×750
+  window.
+- **Theme-synced status dots** — toggling light/dark re-runs all three
+  Backup status refreshers (no more light-theme deep-butter stranded on
+  plum), and the dark scrollbar handle is readable on plum (WCAG 1.4.11).
 
 ## VaultSeal — automatic vault backup (v0.0.5)
 

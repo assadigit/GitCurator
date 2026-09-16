@@ -89,21 +89,21 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.8",
-  codename: "Resilience Fix Pack — 401 Fallback, Windows-safe MOCs, Visible Theme Toggle",
-  releasedAt: "2026-09-16",
+  version: "0.0.9",
+  codename: "Backup Tab Scrollout — Compact & Theme-Sync",
+  releasedAt: "2026-09-17",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
   metrics: {
-    bugsFixed: 17,
+    bugsFixed: 20,
     testsTotal: 73,
     testsPassed: 73,
     mainPyLines: 9200,
-    filesTouched: 30,
+    filesTouched: 31,
     newModules: 8,
     testCaughtBugs: 3,
   },
-  severityBreakdown: { critical: 3, high: 7, medium: 3 },
+  severityBreakdown: { critical: 3, high: 8, medium: 5 },
   pipeline: [
     {
       id: 1,
@@ -167,6 +167,14 @@ export const releaseReport: ReleaseReport = {
       description:
         "The curated notes become an emoji-rich public README directory (AI → Skills → …) mirrored into category folders of github.com/assadigit/good-repos (v0.0.7).",
       hardening: "Pure stdlib, history-preserving publish (fetch + reset --mixed), token never persisted, skip-when-unchanged.",
+    },
+    {
+      id: 9,
+      name: "Backup Tab",
+      icon: "monitor",
+      description:
+        "The GUI Backup tab — Vault Backup, VaultSeal — GitHub Mirror, Good Repos — Public Directory and Dashboard sections stacked in one vertical-only scroll area (v0.0.9).",
+      hardening: "Horizontal scrollbar always off; content/pane ratio 1.31 (was ~2.2) so every control is reachable; status dots and the scrollbar handle re-theme with the toggle (WCAG 1.4.11).",
     },
   ],
   fixes: [
@@ -326,6 +334,42 @@ export const releaseReport: ReleaseReport = {
       files: ["gitcurator/gui/app.py — theme_toggle_btn, _sync_theme_toggle_btn, _btn_kind_style('icon'), test_github_token"],
       evidence: "commit 4ac3562 · offscreen smoke toggled both ways (config persisted), geometry 38×36, window histograms verified cream/plum in both themes",
     },
+    {
+      id: "F14",
+      title: "Backup tab scrollout — every control reachable",
+      severity: "high",
+      status: "shipped",
+      summary:
+        "The Backup tab's four sections overgrew the fixed 1000×750 window and were clipped with no way to reach them — the tab now lives in a vertical-only QScrollArea with a compacted layout (content/pane ratio 1.31, down from ~2.2).",
+      detail:
+        "Vault Backup, VaultSeal — GitHub Mirror, Good Repos — Public Directory and Dashboard stacked to roughly 2.2× the pane height, so the Dashboard section (and its Open Dashboard button) were simply cut off — every other tab scrolls via _wrap_scroll, but the Backup tab, which grew from one section in v31 to four by v32.1, never got the wrapper. The tab content is now wrapped via _wrap_scroll in _build_ui (vertical scrollbar as-needed, horizontal ALWAYS off, widget-resizable so word-wrapped labels reflow), and _create_backup_tab was compacted: status dots share the action rows, checkboxes sit side-by-side, notes wrap to one line. Pane 617px vs content 811px → ratio 1.31 — every control reachable by scrolling.",
+      files: ["app/gitcurator/gui/app.py — _create_backup_tab, _wrap_scroll (in _build_ui)"],
+      evidence: "offscreen smoke: scroll-area config verified, four sections in one column, Dashboard section + Open Dashboard button visible after scroll-to-bottom",
+    },
+    {
+      id: "F15",
+      title: "Theme toggle re-themes all three Backup status dots",
+      severity: "medium",
+      status: "shipped",
+      summary:
+        "After a flip to dark, the Good Repos dot kept its light-theme deep-butter fill on plum (≈2.5:1) — toggle_theme now re-runs all three backup-status refreshers, and the dots are correct from construction time.",
+      detail:
+        "The three Backup status dots set their text colors from whatever palette was active at style time: VaultSeal refreshed correctly after a toggle, but the Good Repos dot kept the light theme's deep-butter on plum (≈2.5:1). toggle_theme now re-runs _vaultseal_refresh_status, _goodrepos_refresh_status and _backup_refresh_status after applying the new palette; the three also run once at construction (dots correct before the first run or seal); and the hardcoded #AE2237 error red is routed through the theme-aware _status_colors().",
+      files: ["app/gitcurator/gui/app.py — toggle_theme, backup status refreshers, _status_colors"],
+      evidence: "offscreen smoke THEME-SWITCH assertion: all 3 dots re-themed in both directions",
+    },
+    {
+      id: "F16",
+      title: "Dark scrollbar handle contrast raised (WCAG 1.4.11)",
+      severity: "medium",
+      status: "shipped",
+      summary:
+        "The dark-mode scroll handle #3B344F sat well under the 3:1 non-text minimum on plum — raised to #7A7199 ≈3.2:1 (hover #8D84AD) so the new Backup scroll is actually findable.",
+      detail:
+        "With the Backup tab scrollout shipping, its scrollbar affordance had to be visible in dark mode too: the old #3B344F handle on the plum #2B2639 sheets was near-invisible. The dark theme QSS now paints the handle #7A7199 (≈3.2:1, clearing the WCAG 1.4.11 non-text bar) with an #8D84AD hover state, on both vertical and horizontal tracks.",
+      files: ["app/gitcurator/gui/app.py — apply_dark_theme (QScrollBar QSS)"],
+      evidence: "pixel forensics on the offscreen screenshots: handle ≈3.2:1 against plum in dark mode",
+    },
   ],
   testSuites: [
     {
@@ -396,6 +440,10 @@ export const releaseReport: ReleaseReport = {
     "Sanitizer regression (v0.0.8): all 6 _safe_moc_name cases green — including the exact \"Agents_Skills\" input from the user's Windows crash log and 'AI > Skills' separator handling",
     "Token tester (v0.0.8): empty-field warning path exercised offscreen; the 401/403 branches verified against the live GitHub API",
     "Release v0.0.8 (2026-09-16): commit 4ac3562 + tag pushed one-time-token; tags v0.0.1–v0.0.8 verified via the GitHub API; zip GitCurator-v0.08.zip served from download/ + public/",
+    "Backup tab scrollout (v0.0.9): offscreen smoke — scroll-area config verified (vertical as-needed, horizontal ALWAYS off, widget-resizable), all four sections (Vault Backup, VaultSeal — GitHub Mirror, Good Repos — Public Directory, Dashboard) stacked in a single column",
+    "Backup tab scrollout (v0.0.9): pane 617px vs content 811px → ratio 1.31 (was ~2.2); scrolled to bottom, the Dashboard section + Open Dashboard button fully visible; compaction confirmed (status dots share action rows, side-by-side checkboxes, one-line wrapped notes)",
+    "Backup tab scrollout (v0.0.9): THEME-SWITCH assertion — all three Backup status dots re-themed in both directions (Good Repos no longer keeps light-theme deep-butter on plum ≈2.5:1); dots correct at construction; #AE2237 error red now theme-aware; dark scrollbar handle raised #3B344F → #7A7199 ≈3.2:1 on plum (WCAG 1.4.11)",
+    "Release v0.0.9 (2026-09-17): 12/12 py_compiles + 73/73 tests (34 core + 28 goodrepos + 11 e2e) in BOTH the live copy and the repo mirror; VLM QA of 4 Backup-tab screenshots with pixel forensics — layout, dots and contrast all green",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -415,6 +463,7 @@ export const releaseReport: ReleaseReport = {
       "GoodRepos (v0.0.7): every curation run also regenerates the PUBLIC curated directory — an emoji README everyone can browse, with the notes mirrored into category folders",
       "Pastel theme (v0.0.7): cream day / plum night with mint-violet-rose pastel actions — AA contrast preserved on every text pair",
       "Resilience (v0.0.8): a rejected GitHub token degrades to anonymous instead of killing the batch; quoted LLM categories can no longer crash index generation; the theme toggle is always visible",
+      "Backup tab (v0.0.9): all four backup sections in one vertical-only scroll area — every control reachable in the fixed 1000×750 window; status dots and scrollbar re-theme with the toggle (WCAG 1.4.11)",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
       "GitHub Actions CI runs the full 73-test gate (12 py_compiles) on every push, tag and PR",
     ],

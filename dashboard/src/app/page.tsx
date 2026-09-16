@@ -56,7 +56,7 @@ const PRIORITY_STYLES: Record<Priority, string> = {
 };
 
 const STAGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  send: Send, link: Link2, github: Github, brain: Brain, "file-text": FileText, vault: Vault, lock: Lock,
+  send: Send, link: Link2, github: Github, brain: Brain, "file-text": FileText, vault: Vault, lock: Lock, monitor: Monitor,
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium"];
@@ -3872,7 +3872,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.7"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.9"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -4001,16 +4001,16 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
-              Release {report?.version ?? "0.0.7"}
+              Release {report?.version ?? "0.0.9"}
             </Badge>
             <Badge variant="outline" className="max-w-full whitespace-normal break-words border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal text-center leading-snug">
-              {report?.codename ?? "UI/UX Overhaul — Fixed Window, AA Contrast, Button Hierarchy"}
+              {report?.codename ?? "Backup Tab Scrollout — Compact & Theme-Sync"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 font-mono text-zinc-500 dark:text-zinc-400 font-normal">
-              {report?.releasedAt ?? "2026-09-16"}
+              {report?.releasedAt ?? "2026-09-17"}
             </Badge>
           </div>
           <h2 className="mt-4 max-w-3xl text-balance text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">
@@ -4018,13 +4018,13 @@ export default function Home() {
             <span className="text-emerald-600 dark:text-emerald-400">hardened, tested pipeline</span>.
           </h2>
           <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-            Full SWOT audit, 17 shipped fixes across 8 releases — latest: a rejected GitHub token
-            degrades to anonymous instead of killing the batch, Windows-illegal MOC filenames
-            sanitized, the light/dark pastel toggle always visible — plus a modular
-            gitcurator package and a 73-case regression suite with a live verification gate,
-            persisted run history, code-drift detection and per-case timing insights. Every
-            release ships to the private GitCurator repository with a tagged commit and a
-            downloadable .zip backup.
+            Full SWOT audit, 20 shipped fixes across 9 releases — latest: the Backup tab's four
+            sections scroll in a vertical-only area (content/pane ratio 1.31 — every control
+            reachable), all three backup status dots re-theme with the toggle, and the dark
+            scrollbar handle clears WCAG 1.4.11 — plus a modular gitcurator package and a
+            73-case regression suite with a live verification gate, persisted run history,
+            code-drift detection and per-case timing insights. Every release ships to the
+            private GitCurator repository with a tagged commit and a downloadable .zip backup.
           </p>
           {report && (
             <div className="mt-4 flex flex-wrap gap-1.5">
