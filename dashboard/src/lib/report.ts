@@ -1,12 +1,13 @@
 /**
- * report.ts — typed release-report data for the GitHub Curator v30.3 dashboard.
+ * report.ts — typed release-report data for the GitCurator v0.0.2 dashboard.
  *
  * Single source of truth consumed by GET /api/report and rendered by the
  * dashboard at /. Every number here is verified against the actual
  * audit/Github V6.7 tree (main.py 9,014 lines post-v30, 45/45 tests —
  * 34 unit + 11 end-to-end — re-runnable live via POST /api/verify, with
- * every run persisted to SQLite for the History tab; v30.3 adds per-case
- * timing, a 200-run retention policy, and a light/dark theme).
+ * every run persisted to SQLite for the History tab; the repository now
+ * follows repo-level SemVer (0.0.x) — the v30.x numbers live on as the
+ * internal build lineage).
  */
 
 export type Severity = "critical" | "high" | "medium";
@@ -88,10 +89,10 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "30.4",
-  codename: "Timing Insights & Scheduled Verification",
+  version: "0.0.2",
+  codename: "Repository & Release Console",
   releasedAt: "2026-09-16",
-  project: "GitHub Curator — Telegram → Ollama → Obsidian",
+  project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
   metrics: {
     bugsFixed: 13,
@@ -319,8 +320,10 @@ export const releaseReport: ReleaseReport = {
     "python -m unittest tests.test_core tests.test_e2e — 45/45 OK in 0.22s (34 unit + 11 e2e)",
     "Live gate: POST /api/verify re-runs compile + both suites on demand (~2.6s), per-suite AND per-case timing (tests/timing_runner.py)",
     "Every run is persisted to SQLite (Prisma) with a sha256 code fingerprint + per-file hashes — History shows trends, pass-rate stats and WHICH files drifted",
-    "Timing Insights (v30.4): per-case median/latest wall-clock leaderboard with regression + flakiness detection over a 20-run window",
-    "Scheduled verification (v30.4): server-side scheduler (src/instrumentation.ts) runs the gate 60s after startup and every 6 hours — drift and failures land in history without an open browser",
+    "Timing Insights: per-case median/latest wall-clock leaderboard with regression + flakiness detection over a 20-run window",
+    "Scheduled verification: server-side scheduler (src/instrumentation.ts) runs the gate 60s after startup and every 6 hours — drift and failures land in history without an open browser",
+    "Repository & Release Console (v0.0.2): /api/releases surfaces live git state (last commit, tag, dirty files) of the assadigit/GitCurator staging repo, the parsed CHANGELOG.md, and the served .zip backups",
+    "Versioning aligned: repo-level SemVer (0.0.x, tags v0.0.1 / v0.0.2) — the v30.x numbers continue as the internal build lineage",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -334,6 +337,7 @@ export const releaseReport: ReleaseReport = {
       "Vault index dedup (filesystem as ground truth, beats SQLite cache drift)",
       "Batch undo snapshots; OneDrive/Dropbox-friendly local backups",
       "New pure-stdlib core — headlessly testable, zero GUI coupling",
+      "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
     ],
     weaknessesFixed: [
       "Non-atomic note/banner/config writes → tempfile + os.replace everywhere",

@@ -3,6 +3,40 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.2] — Repository & Release Console
+
+The dashboard becomes release-aware: live git status of this repository, the
+parsed changelog, and the downloadable zip backups — plus version alignment
+(repo-level SemVer 0.0.x; the v30.x numbers live on as the internal build
+lineage).
+
+### Verification dashboard (`dashboard/`)
+- **NEW GET /api/releases** — live repository status: last commit, commit
+  count, last tag, dirty-file detection, VERSION, the CHANGELOG.md parsed
+  into structured releases, and the local .zip backups (public/ + download/
+  scan with served flags). Best-effort by construction — never 500s.
+- **NEW Releases tab (8th)** — repository status card (private badge,
+  Open-on-GitHub link, clean/dirty working-tree indicator with file chips),
+  backups card with per-zip Download buttons, the "how the next version
+  ships" workflow card, and the full version history rendered from
+  CHANGELOG.md in a scrollable timeline.
+- **Header Backup button** — one-click download of the newest served zip
+  with toast + tooltip (name, size, contents).
+- **Versioning aligned** — the dashboard version now equals the repo
+  version (0.0.2); the internal v30.x lineage is shown as a hero badge;
+  page title and metadata renamed to GitCurator.
+- **Mobile tab grid** — the 8 tabs lay out as a 2×4 grid on phones
+  (replacing horizontal scroll); "Risks & Roadmap" shortens to "Risks"
+  below the sm breakpoint; trigger typography scales responsively.
+- Export JSON now includes the releases/repo snapshot; footer lists
+  /api/releases; eslint config ignores the staging repos/ tree.
+
+### Notes
+- First release produced by the complete round-trip: sandbox QA → staging
+  mirror → VERSION/CHANGELOG bump → tag v0.0.2 → GitHub push →
+  GitCurator-v0.02.zip backup (download/ + public/).
+
+
 ## [0.0.1] — Initial repository import (V0.01)
 
 First versioned snapshot of GitCurator, published to GitHub as the canonical

@@ -4,7 +4,7 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.1` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Version:** `0.0.2` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
 **Status:** v30.x hardening sprint complete — 45/45 automated tests green.
 
 ---
@@ -67,15 +67,21 @@ bun run dev           # http://localhost:3000
 
 The dashboard expects the Python app at `../app` (override with
 `GITCURATOR_APP_DIR`). It runs the real test suite on demand
-(`POST /api/verify`), persists every run, and flags code drift between runs.
+(`POST /api/verify`), persists every run, flags code drift between runs,
+and reports live repository/release status (`GET /api/releases` — last
+commit, tags, dirty files, CHANGELOG, zip backups).
 
 ## Versioning
 
 - Semantic versioning `MAJOR.MINOR.PATCH`, git tags `vMAJOR.MINOR.PATCH`.
-- **0.0.1** — initial repository import (this commit). The internal build
-  lineage (v30.0 → v30.4) maps to this snapshot; see `CHANGELOG.md`.
+- **0.0.2** — Repository & Release Console: `/api/releases` + Releases tab,
+  header backup download, version alignment, mobile 2×4 tab grid.
+- **0.0.1** — initial repository import. The internal build lineage
+  (v30.0 → v30.4) maps to this snapshot; see `CHANGELOG.md`.
 - Future releases: every meaningful change set ships as a new tag, and the
-  working tree on `main` is always the latest version.
+  working tree on `main` is always the latest version. Each release also
+  produces a `GitCurator-vX.YY.zip` snapshot (source + .git history +
+  runtime DBs) served by the dashboard's Releases tab.
 
 ## Security — read before deploying
 

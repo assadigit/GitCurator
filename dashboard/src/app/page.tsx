@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { animate, motion } from "framer-motion";
 import { useTheme } from "next-themes";
 import {
-  Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Brain, Bug, CheckCircle2, ChevronDown, ChevronRight,
-  CircleDot, ClipboardCheck, Clock, Cpu, Download, FileCode2, FileJson, FileText,
-  FlaskConical, Fingerprint, Gauge, Github, GitBranch, History, Layers, Lightbulb, Link2, ListChecks, Loader2,
-  Lock, Monitor, Moon, Play, RefreshCw, RotateCcw, Search, Send, ServerCog, ShieldCheck,
-  Sparkles, Sun, Target, TerminalSquare, TrendingUp, Trash2, Vault, Wrench, X, Zap,
+  Activity, AlertTriangle, Archive, ArrowDownRight, ArrowRight, ArrowUpRight, Brain, Bug, CheckCircle2, ChevronDown, ChevronRight,
+  CircleDot, ClipboardCheck, Clock, Cpu, Download, ExternalLink, FileArchive, FileCode2, FileJson, FileText,
+  FlaskConical, Fingerprint, Gauge, GitCommitHorizontal, Github, GitBranch, HardDrive, History, Layers, Lightbulb, Link2, ListChecks, Loader2,
+  Lock, Monitor, Moon, Package, Play, RefreshCw, RotateCcw, Rocket, Search, Send, ServerCog, ShieldCheck,
+  Sparkles, Sun, Tag, Target, TerminalSquare, TrendingUp, Trash2, Vault, Wrench, X, Zap,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer,
@@ -34,6 +34,7 @@ import type {
 import type { VerifyResult } from "@/lib/verify-core";
 import type { TimingInsight, TimingSample } from "@/lib/insights";
 import type { HistoryData, HistoryRun } from "@/app/api/history/route";
+import type { ReleasesData } from "@/app/api/releases/route";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -84,6 +85,12 @@ function timeAgo(iso: string): string {
 
 function shortHash(hash: string): string {
   return hash.slice(0, 8);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2055,6 +2062,324 @@ function InsightsTab({
 }
 
 /* ------------------------------------------------------------------ */
+/* Releases tab (v0.0.2 — repository & release console)                */
+/* ------------------------------------------------------------------ */
+
+function formatSectionText(text: string): string {
+  // Strip simple markdown emphasis so changelog bullets read cleanly.
+  return text.replace(/\*\*/g, "").replace(/`/g, "");
+}
+
+function RepoStatusCard({ repo }: { repo: ReleasesData["repo"] }) {
+  const clean = repo.dirtyCount === 0;
+  const dirty = (repo.dirtyCount ?? 0) > 0;
+  return (
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
+              <Github className="h-4 w-4 text-zinc-500" /> assadigit/GitCurator
+              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[10px] font-normal text-amber-700 dark:text-amber-300">
+                <Lock className="mr-1 h-3 w-3" /> private
+              </Badge>
+            </CardTitle>
+            <CardDescription className="mt-1 text-[12px] text-zinc-500">
+              The canonical online home for every upcoming version — pushed with one-shot tokens, never stored in git config.
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="h-7 border-zinc-200 bg-zinc-50 px-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <a
+              href={repo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open the GitCurator repository on GitHub (new tab)"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              <span className="ml-1.5 hidden text-[12px] sm:inline">Open on GitHub</span>
+            </a>
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Repository status">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <Tag className="h-3 w-3" /> VERSION
+            </p>
+            <p className="mt-1.5 font-mono text-base font-semibold text-zinc-900 dark:text-zinc-50">v{repo.version || "—"}</p>
+            <p className="mt-0.5 text-[10.5px] text-zinc-500">repo working tree</p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <GitBranch className="h-3 w-3" /> Last tag
+            </p>
+            <p className="mt-1.5 font-mono text-base font-semibold text-zinc-900 dark:text-zinc-50">{repo.lastTag ?? "—"}</p>
+            <p className="mt-0.5 text-[10.5px] text-zinc-500">on main</p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <GitCommitHorizontal className="h-3 w-3" /> Commits
+            </p>
+            <p className="mt-1.5 font-mono text-base font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">{repo.commitCount ?? "—"}</p>
+            <p className="mt-0.5 truncate text-[10.5px] text-zinc-500" title={repo.headCommit?.subject ?? ""}>
+              {repo.headCommit ? `${repo.headCommit.short} · ${repo.headCommit.subject.slice(0, 42)}${repo.headCommit.subject.length > 42 ? "…" : ""}` : "history unavailable"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <CircleDot className="h-3 w-3" /> Working tree
+            </p>
+            <p className="mt-1.5 flex items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={clean
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : dirty
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                    : "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400"}
+              >
+                <span className={`mr-1 h-1.5 w-1.5 rounded-full ${clean ? "bg-emerald-400" : dirty ? "bg-amber-400" : "bg-zinc-500"}`} aria-hidden="true" />
+                {repo.dirtyCount === null ? "unknown" : clean ? "clean" : `${repo.dirtyCount} uncommitted`}
+              </Badge>
+            </p>
+            <p className="mt-0.5 text-[10.5px] text-zinc-500">
+              {repo.headCommit ? `pushed ${timeAgo(repo.headCommit.date)}` : "—"}
+            </p>
+          </div>
+        </div>
+        {dirty && repo.dirtyFiles.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label="Uncommitted files">
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-400">uncommitted:</span>
+            {repo.dirtyFiles.slice(0, 8).map((f) => (
+              <span
+                key={f}
+                title={f}
+                className="max-w-[220px] truncate rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10.5px] text-amber-700 dark:text-amber-300"
+              >
+                {f}
+              </span>
+            ))}
+            {repo.dirtyFiles.length > 8 && (
+              <span className="text-[10.5px] text-zinc-500">+{repo.dirtyFiles.length - 8} more</span>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BackupsCard({ backups }: { backups: ReleasesData["backups"] }) {
+  return (
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+      <CardHeader className="pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
+            <HardDrive className="h-4 w-4 text-zinc-500" /> Local .zip backups
+          </CardTitle>
+          <CardDescription className="mt-1 text-[12px] text-zinc-500">
+            Full snapshots — source tree, .git history (commits + tags) and runtime databases — served from <code className="font-mono">public/</code>.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {backups.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 p-4 text-center text-[12px] text-zinc-500">
+            No backup zips found yet — the first release zip lands here with every tagged version.
+          </p>
+        ) : (
+          <ul className="space-y-2" aria-label="Backup archives">
+            {backups.map((b) => (
+              <li
+                key={b.name}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-2.5 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 ring-1 ring-teal-500/30" aria-hidden="true">
+                    <FileArchive className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-[12.5px] font-medium text-zinc-800 dark:text-zinc-200">{b.name}</p>
+                    <p className="text-[10.5px] text-zinc-500">
+                      {formatBytes(b.sizeBytes)} · created {timeAgo(b.modifiedAt)}
+                      {!b.served && " · not served"}
+                    </p>
+                  </div>
+                </div>
+                {b.served ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="h-7 border-teal-500/30 bg-teal-500/10 px-2 text-teal-700 hover:bg-teal-500/20 hover:text-teal-800 dark:text-teal-300 dark:hover:text-teal-200"
+                  >
+                    <a href={b.url} download aria-label={`Download ${b.name}`}>
+                      <Download className="h-3.5 w-3.5" />
+                      <span className="ml-1.5 text-[12px]">Download</span>
+                    </a>
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-[10.5px] font-normal text-zinc-500 dark:text-zinc-400">
+                    archive only
+                  </Badge>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const RELEASE_WORKFLOW_STEPS = [
+  "Develop & QA in the sandbox tree — verify gate stays green",
+  "Mirror changes into the staging repo + bump VERSION / CHANGELOG.md",
+  "Commit, tag vMAJOR.MINOR.PATCH, push to GitHub (one-shot token)",
+  "Rebuild GitCurator-vX.YY.zip → download/ + public/ (this tab refreshes)",
+] as const;
+
+function WorkflowCard() {
+  return (
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+      <CardHeader className="pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
+            <Rocket className="h-4 w-4 text-zinc-500" /> How the next version ships
+          </CardTitle>
+          <CardDescription className="mt-1 text-[12px] text-zinc-500">
+            Every release round follows the same five-step pipeline — the dashboard mirrors each one.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-2.5">
+          {RELEASE_WORKFLOW_STEPS.map((step, i) => (
+            <li key={i} className="flex items-start gap-3">
+              <span
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+                aria-hidden="true"
+              >
+                {i + 1}
+              </span>
+              <p className="pt-0.5 text-[12.5px] leading-relaxed text-zinc-600 dark:text-zinc-300">{step}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-4 border-t border-zinc-200 pt-3 text-[11px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          <AlertTriangle className="mr-1 inline h-3 w-3 -translate-y-px text-amber-500" aria-hidden="true" />
+          The repo stays <strong>private</strong> until every committed credential is rotated (3 × P0 on the Go-Live tab).
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReleaseCard({ release, latest }: { release: ReleasesData["releases"][number]; latest: boolean }) {
+  return (
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant="outline"
+            className={latest
+              ? "border-emerald-500/40 bg-emerald-500/10 font-mono text-emerald-700 dark:text-emerald-300"
+              : "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 font-mono text-zinc-600 dark:text-zinc-300"}
+          >
+            <Tag className="mr-1 h-3 w-3" /> v{release.version}
+          </Badge>
+          <CardTitle className="text-sm text-zinc-800 dark:text-zinc-200">{formatSectionText(release.title)}</CardTitle>
+          {latest && (
+            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-[10px] font-normal text-emerald-700 dark:text-emerald-300">
+              current
+            </Badge>
+          )}
+        </div>
+        {release.intro && (
+          <CardDescription className="mt-1.5 max-w-3xl text-[12px] leading-relaxed text-zinc-500">
+            {formatSectionText(release.intro)}
+          </CardDescription>
+        )}
+      </CardHeader>
+      {release.sections.length > 0 && (
+        <CardContent>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {release.sections.map((section) => (
+              <div key={section.heading} className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-700 dark:text-zinc-200">
+                  <Package className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
+                  {formatSectionText(section.heading)}
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {section.bullets.map((bullet, j) => (
+                    <li key={j} className="flex items-start gap-2 text-[11.5px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500/70" aria-hidden="true" />
+                      <span>{formatSectionText(bullet)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function ReleasesTab({ data, loading }: { data: ReleasesData | null; loading: boolean }) {
+  if (loading && !data) {
+    return (
+      <div className="grid gap-4 lg:grid-cols-2" aria-busy="true" aria-label="Loading releases">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-40 animate-pulse rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/60" />
+        ))}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <Card className="border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900/60">
+        <CardContent className="p-6 text-center">
+          <Archive className="mx-auto h-8 w-8 text-zinc-400" aria-hidden="true" />
+          <p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-200">Repository status unavailable</p>
+          <p className="mt-1 text-[12px] text-zinc-500">
+            <code className="font-mono">/api/releases</code> could not be reached — retry from the header.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-5">
+      <RepoStatusCard repo={data.repo} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BackupsCard backups={data.backups} />
+        <WorkflowCard />
+      </div>
+      {data.releases.length > 0 && (
+        <section aria-label="Version history">
+          <h3 className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-zinc-700 dark:text-zinc-200">
+            <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" /> Version history — CHANGELOG.md
+          </h3>
+          <div className="max-h-[62vh] space-y-4 overflow-y-auto pr-1 custom-scroll">
+            {data.releases.map((release, i) => (
+              <ReleaseCard key={release.version} release={release} latest={i === 0} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -2073,6 +2398,10 @@ export default function Home() {
 
   // Go-live checklist state (persisted to localStorage)
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+
+  // Releases & repository state (v0.0.2 — best-effort, like history)
+  const [releases, setReleases] = useState<ReleasesData | null>(null);
+  const [releasesLoading, setReleasesLoading] = useState(true);
 
   /* Fetch the report */
   useEffect(() => {
@@ -2119,6 +2448,20 @@ export default function Home() {
   useEffect(() => {
     void refreshHistory();
   }, [refreshHistory]);
+
+  /* Load repository & release status (v0.0.2) — best-effort */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/releases")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<ReleasesData>;
+      })
+      .then((data) => { if (!cancelled) setReleases(data); })
+      .catch(() => { /* releases panel is best-effort */ })
+      .finally(() => { if (!cancelled) setReleasesLoading(false); });
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   /* Load persisted checklist (rAF-deferred — after hydration, no mismatch) */
   useEffect(() => {
@@ -2226,6 +2569,7 @@ export default function Home() {
       report,
       liveVerification: verify.result,
       verificationHistory: history,
+      releases,
     };
     try {
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -2261,6 +2605,12 @@ export default function Home() {
     [history],
   );
 
+  // v0.0.2 — newest served backup for the header download button
+  const newestBackup = useMemo(
+    () => releases?.backups.find((b) => b.served) ?? null,
+    [releases],
+  );
+
   const verifyChip = verify.running
     ? { label: "verifying…", cls: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300", dot: "bg-amber-400 animate-pulse" }
     : verify.result?.ok
@@ -2284,11 +2634,11 @@ export default function Home() {
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-                GitHub Curator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "30.4"}</span>
+                GitCurator
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.2"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
-                {report?.project ?? "Telegram → Ollama → Obsidian"}
+                {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
               </p>
             </div>
           </div>
@@ -2317,6 +2667,54 @@ export default function Home() {
             </TooltipProvider>
             {/* Theme toggle (v30.3) */}
             <ThemeToggle />
+            {/* Backup zip download (v0.0.2) */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {newestBackup ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      className="h-7 border-teal-500/30 bg-teal-500/10 px-2 text-teal-700 hover:bg-teal-500/20 hover:text-teal-800 dark:text-teal-300 dark:hover:text-teal-200"
+                    >
+                      <a
+                        href={newestBackup.url}
+                        download
+                        aria-label={`Download the newest backup zip (${newestBackup.name})`}
+                        onClick={() =>
+                          toast({
+                            title: "Backup download started",
+                            description: `${newestBackup.name} · ${formatBytes(newestBackup.sizeBytes)}`,
+                          })
+                        }
+                      >
+                        <FileArchive className="h-3.5 w-3.5" />
+                        <span className="ml-1.5 hidden text-[12px] md:inline">Backup</span>
+                      </a>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      aria-label="No backup zip available yet"
+                      className="h-7 border-zinc-200 bg-zinc-50 px-2 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500"
+                    >
+                      <FileArchive className="h-3.5 w-3.5" />
+                      <span className="ml-1.5 hidden text-[12px] md:inline">Backup</span>
+                    </Button>
+                  )}
+                </TooltipTrigger>
+                <TooltipContent>
+                  <span className="text-xs">
+                    {newestBackup
+                      ? `${newestBackup.name} — full snapshot: source + .git history + runtime DBs`
+                      : "No backup zip served yet — see the Releases tab"}
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {/* Export */}
             <TooltipProvider>
               <Tooltip>
@@ -2366,10 +2764,13 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              Release {report?.version ?? "30.4"}
+              Release {report?.version ?? "0.0.2"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              {report?.codename ?? "Core Extraction & Reliability"}
+              {report?.codename ?? "Repository & Release Console"}
+            </Badge>
+            <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
+              repo lineage <span className="ml-1 font-mono">v30.x</span>
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 font-mono text-zinc-500 dark:text-zinc-400 font-normal">
               {report?.releasedAt ?? "2026-09-16"}
@@ -2383,8 +2784,8 @@ export default function Home() {
             Full SWOT audit, 13 shipped fixes (including the model-dialog bug you reported), a
             testable 4-module core, and a 45-case regression suite — 34 unit + 11 end-to-end —
             with a live verification gate, persisted run history, code-drift detection and
-            per-case timing insights — verified on demand and on a 6-hour schedule, all from
-            this page.
+            per-case timing insights. Now versioned and published: every release ships to the
+            private GitCurator repository with a tagged commit and a downloadable .zip backup.
           </p>
           {report && (
             <div className="mt-4 flex flex-wrap gap-1.5">
@@ -2408,64 +2809,78 @@ export default function Home() {
 
               <section aria-label="Detailed report">
                 <Tabs defaultValue="fixes" className="w-full">
-                  <TabsList className="mb-5 h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-1 custom-scroll sm:w-fit">
+                  <TabsList className="mb-5 h-auto w-full grid grid-cols-4 gap-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-1 custom-scroll sm:flex sm:w-fit sm:justify-start sm:overflow-x-auto">
                     <TabsTrigger
                       value="fixes"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <Wrench className="mr-1.5 h-3.5 w-3.5" /> Fixes
-                      <Badge className="ml-1.5 h-4 px-1.5 font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">{report.fixes.length}</Badge>
+                      <Wrench className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Fixes
+                      <Badge className="ml-1 h-4 px-1.5 font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">{report.fixes.length}</Badge>
                     </TabsTrigger>
                     <TabsTrigger
                       value="audit"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Audit
+                      <ShieldCheck className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Audit
                     </TabsTrigger>
                     <TabsTrigger
                       value="tests"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <FlaskConical className="mr-1.5 h-3.5 w-3.5" /> Tests
-                      <Badge className="ml-1.5 h-4 px-1.5 font-mono text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">
+                      <FlaskConical className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Tests
+                      <Badge className="ml-1 h-4 px-1.5 font-mono text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">
                         {report.metrics.testsPassed}/{report.metrics.testsTotal}
                       </Badge>
                     </TabsTrigger>
                     <TabsTrigger
                       value="history"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <History className="mr-1.5 h-3.5 w-3.5" /> History
-                      <Badge className="ml-1.5 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
+                      <History className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> History
+                      <Badge className="ml-1 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
                         {history?.stats?.totalRuns ?? 0}
                       </Badge>
                     </TabsTrigger>
                     <TabsTrigger
                       value="insights"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <Gauge className="mr-1.5 h-3.5 w-3.5" /> Insights
+                      <Gauge className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Insights
                       {insightsRegressed > 0 ? (
-                        <Badge className="ml-1.5 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">
+                        <Badge className="ml-1 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">
                           {insightsRegressed} slowed
                         </Badge>
                       ) : null}
                     </TabsTrigger>
                     <TabsTrigger
                       value="golive"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <ListChecks className="mr-1.5 h-3.5 w-3.5" /> Go-Live
-                      <Badge className="ml-1.5 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
+                      <ListChecks className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Go-Live
+                      <Badge className="ml-1 h-4 min-w-[1.4rem] px-1.5 font-mono text-[10px] tabular-nums bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0">
                         {checklistDone}/{report.deployChecklist.length}
                       </Badge>
                     </TabsTrigger>
                     <TabsTrigger
-                      value="risks"
-                      className="data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                      value="releases"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
                     >
-                      <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Risks &amp; Roadmap
-                      <Badge className="ml-1.5 h-4 px-1.5 font-mono text-[10px] bg-rose-500/15 text-rose-700 dark:text-rose-300 border-0">1 P0</Badge>
+                      <Rocket className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Releases
+                      {releases && (
+                        <Badge className="ml-1 hidden h-4 px-1.5 font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-0 sm:inline-flex">
+                          v{releases.repo.version || releases.releases[0]?.version || "—"}
+                        </Badge>
+                      )}
+                      {(releases?.repo.dirtyCount ?? 0) > 0 && (
+                        <span className="ml-1 h-1.5 w-1.5 rounded-full bg-amber-400" aria-label="uncommitted changes" />
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="risks"
+                      className="px-1 text-[11.5px] sm:px-2 sm:text-sm data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300 data-[state=active]:shadow-none"
+                    >
+                      <AlertTriangle className="mr-1 h-3.5 w-3.5 sm:mr-1.5" /> Risks<span className="hidden sm:inline">&nbsp;&amp; Roadmap</span>
+                      <Badge className="ml-1 h-4 px-1.5 font-mono text-[10px] bg-rose-500/15 text-rose-700 dark:text-rose-300 border-0">1 P0</Badge>
                     </TabsTrigger>
                   </TabsList>
 
@@ -2516,6 +2931,11 @@ export default function Home() {
                       />
                     </motion.div>
                   </TabsContent>
+                  <TabsContent value="releases" className="mt-0 focus-visible:outline-none">
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+                      <ReleasesTab data={releases} loading={releasesLoading} />
+                    </motion.div>
+                  </TabsContent>
                   <TabsContent value="risks" className="mt-0 focus-visible:outline-none">
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
                       <RisksTab risks={report.risks} />
@@ -2535,7 +2955,8 @@ export default function Home() {
             Dashboard rendered {generatedAt} · data
             <code className="font-mono text-zinc-500">/api/report</code> · live gate
             <code className="font-mono text-zinc-500">/api/verify</code> · history + timing insights
-            <code className="font-mono text-zinc-500">/api/history</code> · scheduled every 6h
+            <code className="font-mono text-zinc-500">/api/history</code> · repo + releases
+            <code className="font-mono text-zinc-500">/api/releases</code>
           </p>
           <p className="flex items-center gap-1.5">
             <ArrowRight className="h-3 w-3" aria-hidden="true" />
