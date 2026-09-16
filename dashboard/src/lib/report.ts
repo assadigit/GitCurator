@@ -404,15 +404,15 @@ export const releaseReport: ReleaseReport = {
     },
     {
       id: "F19",
-      title: "Credential-laden release zips (v0.01–v0.07) deleted",
+      title: "Credential-laden release zips (v0.01–v0.09) deleted; v0.0.10 zips clean",
       severity: "high",
       status: "shipped",
       summary:
-        "The v0.01–v0.07 release zips were built before the v0.08 session.session exclusion rule and shipped the Telethon session inside — all copies were removed from download/ and public/.",
+        "Every release zip v0.01–v0.09 shipped the Telethon session — v0.01–v0.07 in the working tree, v0.08/v0.09 hidden inside the bundled .git object store — all copies were deleted, and the v0.0.10 zip is built via git archive with no .git at all.",
       detail:
-        "Release zips only excluded session.session from v0.08 on; the seven earlier zips (still web-served from the dashboard's public/ folder for version-to-version download parity) each contained app/session.session + .bak — full Telegram account access. All 14 copies (7 versions × download/ + public/) were deleted; v0.08+ zips were verified clean and remain available. Git tags still contain the code history — the session blobs there are covered by the same history caveat as F17.",
-      files: ["download/GitCurator-v0.0[1-7].zip (deleted)", "public/GitCurator-v0.0[1-7].zip (deleted)"],
-      evidence: "unzip -l audit: v0.01 and v0.07 zips contained 2 session files each; post-deletion only v0.08/v0.09/v0.0.10 remain, all session-free",
+        "v0.08 introduced a working-tree exclusion for session.session, but the zips still bundled the whole .git folder — whose object store carried the session blob (44213fc2…) plus every other historical secret, recoverable by anyone who unzipped. Blob-hash forensics proved both served copies (v0.08, v0.09) contained it. All zips were deleted from download/ and public/; the v0.0.10 zip is built via git archive (tracked tree at the tag exactly — no .git, no untracked caches, no sessions). Git tags still contain the code history — the session blobs there are covered by the same history caveat as F17.",
+      files: ["download/GitCurator-v0.0[1-9].zip (deleted)", "public/GitCurator-v0.0[1-9].zip (deleted)"],
+      evidence: "unzip -l + blob-hash check: .git/objects/44/213fc2… present in v0.08 and v0.09 zips; post-deletion only the git-archive v0.0.10 zip remains, verified session-free and .git-free",
     },
   ],
   testSuites: [
@@ -489,7 +489,7 @@ export const releaseReport: ReleaseReport = {
     "Backup tab scrollout (v0.0.9): THEME-SWITCH assertion — all three Backup status dots re-themed in both directions (Good Repos no longer keeps light-theme deep-butter on plum ≈2.5:1); dots correct at construction; #AE2237 error red now theme-aware; dark scrollbar handle raised #3B344F → #7A7199 ≈3.2:1 on plum (WCAG 1.4.11)",
     "Release v0.0.9 (2026-09-17): 12/12 py_compiles + 73/73 tests (34 core + 28 goodrepos + 11 e2e) in BOTH the live copy and the repo mirror; VLM QA of 4 Backup-tab screenshots with pixel forensics — layout, dots and contrast all green",
     "Security scrub (v0.0.10): git grep sweep over the whole tree returns CLEAN for every known secret value (bot token, api_id/api_hash, phone, TG user id, bot-id prefix); session files untracked + gitignored; repo mirror and live copy kept byte-identical; 12/12 compile + 73/73 tests re-run green on the sanitized tree",
-    "Zip audit (v0.0.10): unzip -l proved v0.01–v0.07 zips carried app/session.session + .bak (2 files each) — all 14 copies deleted from download/ + public/; v0.08+ verified session-free and still served",
+    "Zip audit (v0.0.10): unzip -l + blob-hash forensics — v0.01–v0.07 zips carried app/session.session + .bak in the tree; v0.08/v0.09 carried the session blob (44213fc2…) inside the bundled .git/objects; ALL copies deleted from download/ + public/; the v0.0.10 zip is built via git archive (no .git) and verified session-free",
     "Deploy kit (v0.0.10): bash -n on deploy-latest.sh clean; DEPLOYMENT.md quick-path added; the live worker's health endpoint verified reachable (200 {status:ok}) for the script's post-deploy probe",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",

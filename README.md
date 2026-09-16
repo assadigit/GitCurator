@@ -110,8 +110,11 @@ the latest version is a two-minute command:
   health check, with an optional `--with-secret` flow for the v30
   `WEBHOOK_SECRET` webhook anti-impersonation hardening. Secrets, data, D1,
   KV, Queues and R2 all persist across deploys.
-- **Old release zips removed** — v0.01–v0.07 zips (built before the v0.08
-  `session.session` exclusion) were deleted from the download folders.
+- **Old release zips removed** — v0.01–v0.09 zips all carried the Telethon
+  session (v0.01–v0.07 in the working tree; v0.08/v0.09 hidden inside the
+  bundled `.git/objects` store) and were deleted from the download folders.
+  The v0.0.10 zip is built via `git archive` — tracked tree only, no `.git`,
+  no sessions, no caches.
 
 ## VaultSeal — automatic vault backup (v0.0.5)
 

@@ -21,9 +21,13 @@ committed* in the git tree, and adds the two-minute Cloudflare update path.
   is now safe against a future visibility flip. Note: git **history** still
   contains the pre-scrub blobs — run `git filter-repo` before ever making
   this repository public.
-- **Release zips v0.01–v0.06/v0.07 deleted from download/ + public/** — they
-  were built before the v0.08 exclusion rule and contained
-  `session.session`. v0.08+ zips were already clean and remain available.
+- **Release zips v0.01–v0.09 deleted from download/ + public/** — v0.01–v0.07
+  shipped `session.session` directly in the working tree; v0.08/v0.09
+  excluded the file from the tree but bundled the whole `.git` folder, whose
+  object store still carried the session blob (`44213fc2…`) plus every other
+  historical secret — recoverable by anyone who unzipped them. Only the
+  v0.0.10 zip is clean: it is built via `git archive` (tracked tree only, no
+  `.git`, no runtime caches, no sessions).
 
 ### Added
 - **`deploy-latest.ps1` / `deploy-latest.sh`** — the two-minute update path
