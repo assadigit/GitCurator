@@ -28,7 +28,7 @@ because the problem is in the asyncio/threading layer, not the GUI layer.
 """
 
 # === VERSION STAMP - printed at import so you can verify the right file loads ===
-__VERSION__ = "32.1 (fix pack: 401 bad-credentials fallback — a rejected GitHub token no longer kills the batch; MOC filename sanitizer for Windows-illegal category chars; ALWAYS-VISIBLE light/dark toggle in the action row; one-click GitHub token tester in Credentials; modular lineage v32)"
+__VERSION__ = "32.2 (fix pack: Backup tab vertical scroll + compacted four sections — nothing clips in the fixed 1000x750 window; theme toggle re-themes all three Backup status dots; higher-contrast dark scrollbar; lineage: 401 fallback, MOC sanitizer, always-visible theme toggle, one-click token tester; modular lineage v32)"
 import sys as _sys
 print(f"[main] LOADED version {__VERSION__} from {__file__}", file=_sys.stderr, flush=True)
 # === END VERSION STAMP ===
@@ -3682,11 +3682,18 @@ class MainWindow(QMainWindow):
         starts at the same top position and keeps its natural height (no
         padded/fixed-height containers). The content widget carries the
         `tab_sheet` object name so the theme QSS paints it a solid sheet
-        color (never a transparent/rgba fill — see _panel_bg)."""
+        color (never a transparent/rgba fill — see _panel_bg).
+
+        v32.2: the scroll is VERTICAL-ONLY — the horizontal bar is always
+        off and the widget is resized to the viewport width
+        (setWidgetResizable), so content wraps (wordWrap labels) instead
+        of ever scrolling sideways."""
         content.setObjectName("tab_sheet")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         return scroll
 
@@ -4335,8 +4342,12 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self._wrap_scroll(sources_tab), "📡 Sources")
 
         # ---- Tab: Backup (local folder + timestamped zip) ----
+        # v32.2: wrap in the scroll area like every other tab — the four
+        # sections' natural height exceeds the fixed tab pane, which
+        # previously clipped each section's lower rows (buttons, toggles,
+        # the dashboard link).
         backup_tab = self._create_backup_tab()
-        self.tab_widget.addTab(backup_tab, "💾 Backup")
+        self.tab_widget.addTab(self._wrap_scroll(backup_tab), "💾 Backup")
 
         # Make the Bot tab the PRIMARY view (auto-check runs there on startup)
         # Move Bot tab to position 0, Input to position 1
@@ -4553,6 +4564,12 @@ class MainWindow(QMainWindow):
             self.apply_dark_theme()
             self.theme_btn.setChecked(True)
             self._refresh_button_styles()  # outlined variant is theme-aware
+            # v32.2: the status dots were styled with LIGHT colors during
+            # _build_ui (dark_mode is only set here) — re-run so a user
+            # starting in dark mode gets dark-palette dots immediately.
+            self._vaultseal_refresh_status()
+            self._goodrepos_refresh_status()
+            self._backup_refresh_status()
         self._sync_theme_toggle_btn()  # v32.1: header toggle reflects the restored mode
 
         # Auto-check bot queue on startup (after proxy validation)
@@ -4743,13 +4760,13 @@ class MainWindow(QMainWindow):
             QRadioButton::indicator:checked { border-color: #C4BCF5; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #C4BCF5, stop:0.5 #C4BCF5, stop:0.5 transparent, stop:1 transparent); }
             QRadioButton::indicator:hover { border-color: #C4BCF5; }
             QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
-            QScrollBar::handle:vertical { background: #3B344F; border-radius: 4px; min-height: 24px; }
-            QScrollBar::handle:vertical:hover { background: #4A4263; }
+            QScrollBar::handle:vertical { background: #7A7199; border-radius: 4px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #8D84AD; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
             QScrollBar:horizontal { background: transparent; height: 8px; margin: 0; }
-            QScrollBar::handle:horizontal { background: #3B344F; border-radius: 4px; min-width: 24px; }
-            QScrollBar::handle:horizontal:hover { background: #4A4263; }
+            QScrollBar::handle:horizontal { background: #7A7199; border-radius: 4px; min-width: 24px; }
+            QScrollBar::handle:horizontal:hover { background: #8D84AD; }
             QScrollBar::add-line:horizontal { height: 0; width: 0; }
             QScrollBar::add-page:horizontal { background: transparent; }
         """)
@@ -4767,6 +4784,13 @@ class MainWindow(QMainWindow):
         self.theme_btn.setChecked(self._dark_mode)
         self._sync_theme_toggle_btn()  # v32.1: header icon button
         self._refresh_button_styles()
+        # v32.2: the three Backup-tab status dots carry theme-aware text
+        # colors — re-run their refreshers so they don't keep the previous
+        # theme's palette after a toggle (Good Repos stayed deep-butter on
+        # plum, ~2.5:1, while VaultSeal refreshed correctly).
+        self._vaultseal_refresh_status()
+        self._goodrepos_refresh_status()
+        self._backup_refresh_status()
         self.save_config()  # persist the theme choice
 
     def _sync_theme_toggle_btn(self):
@@ -8638,34 +8662,31 @@ class MainWindow(QMainWindow):
     # ========================================================================
 
     def _create_backup_tab(self):
-        """Create the Backup tab (local folder + timestamped zip)."""
+        """Create the Backup tab (local folder + timestamped zip).
+
+        v32.2 — scroll + compaction. The four sections' natural height
+        exceeds the fixed tab pane inside the 1000×750 window, so the tab
+        content is wrapped in a QScrollArea (via _wrap_scroll in _build_ui):
+        the scroll area's own height matches the tab pane while the inner
+        content panel expands to whatever height the sections need —
+        vertical scrolling only, horizontal always off. The sections are
+        also COMPACTED so most content fits without scrolling:
+        - status dots share the action/keep rows (no dedicated status lines)
+        - the two settings checkboxes sit side-by-side on one row
+        - info notes are single wrapped sentences (no hard line breaks)
+        - folder/repo inputs keep their full-width rows
+        """
         tab = QWidget()
         tab.setObjectName("backup_tab")
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
 
-        # ---- Backup Status ----
+        # ---- 💾 Vault Backup (local zip + FIFO rotation) ----
         status_group = QGroupBox("💾 Vault Backup")
         status_layout = QVBoxLayout(status_group)
+        status_layout.setSpacing(6)
 
-        self.backup_status_label = QLabel("● Disabled")
-        self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #AE2237;")
-        status_layout.addWidget(self.backup_status_label)
-
-        self.backup_enabled_check = QCheckBox("Enable auto-backup after each batch")
-        self.backup_enabled_check.setChecked(self.config.get('backup_enabled', False))
-        status_layout.addWidget(self.backup_enabled_check)
-
-        # Info
-        info_label = QLabel(
-            "💡 Pick any folder — if it's a OneDrive/Dropbox/Google Drive sync folder,\n"
-            "your backups upload to the cloud automatically. Zero setup, no OAuth needed."
-        )
-        info_label.setWordWrap(True)
-        info_label.setObjectName("info_note")
-        status_layout.addWidget(info_label)
-
-        # Backup folder picker
+        # Backup folder picker — the section's one input row.
         folder_row = QHBoxLayout()
         folder_row.addWidget(QLabel("Backup folder:"))
         self.backup_folder_input = QLineEdit()
@@ -8678,21 +8699,25 @@ class MainWindow(QMainWindow):
         folder_row.addWidget(browse_btn)
         status_layout.addLayout(folder_row)
 
-        # Max backups
-        max_row = QHBoxLayout()
-        max_row.addWidget(QLabel("Keep last:"))
+        # Rotation + status dot on ONE row (v32.2 compaction).
+        keep_row = QHBoxLayout()
+        keep_row.addWidget(QLabel("Keep last:"))
         self.backup_max_input = QLineEdit()
         self.backup_max_input.setPlaceholderText("10")
         self.backup_max_input.setMaximumWidth(60)
         self.backup_max_input.setText(str(self.config.get('backup_max', 10)))
-        max_row.addWidget(self.backup_max_input)
-        max_row.addWidget(QLabel("backups (FIFO rotation)"))
-        max_row.addStretch()
-        status_layout.addLayout(max_row)
+        keep_row.addWidget(self.backup_max_input)
+        keep_row.addWidget(QLabel("backups (FIFO rotation)"))
+        keep_row.addStretch()
+        self.backup_status_label = QLabel("● Disabled")
+        self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
+        keep_row.addWidget(self.backup_status_label)
+        status_layout.addLayout(keep_row)
 
         # Action buttons — v31.1 hierarchy: ONE filled primary (Backup Now)
-        # + outlined secondary (Restore). '📤 Export ZIP' lives in the global
-        # 'More' overflow menu (export = infrequent action).
+        # + outlined secondary (Restore); the enable toggle rides the same
+        # row, right-aligned (v32.2 compaction). '📤 Export ZIP' lives in the
+        # global 'More' overflow menu (export = infrequent action).
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         self.backup_now_btn = QPushButton("💾 Backup Now")
@@ -8706,22 +8731,46 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self.backup_restore_btn)
 
         btn_row.addStretch()
+        self.backup_enabled_check = QCheckBox("Enable auto-backup after each batch")
+        self.backup_enabled_check.setToolTip(
+            "Create a timestamped vault ZIP after every processing batch")
+        self.backup_enabled_check.setChecked(self.config.get('backup_enabled', False))
+        btn_row.addWidget(self.backup_enabled_check)
         status_layout.addLayout(btn_row)
+
+        # One wrapped note (was a 2-line hard-wrapped paragraph).
+        info_label = QLabel(
+            "💡 Any folder works — a OneDrive/Dropbox/Drive sync folder "
+            "uploads your zips to the cloud automatically. Zero setup, no OAuth."
+        )
+        info_label.setWordWrap(True)
+        info_label.setObjectName("info_note")
+        status_layout.addWidget(info_label)
 
         layout.addWidget(status_group)
 
         # ---- VaultSeal (v31): automatic GitHub mirror ----
         seal_group = QGroupBox("🛡️ VaultSeal — GitHub Mirror")
         seal_layout = QVBoxLayout(seal_group)
+        seal_layout.setSpacing(6)
 
-        self.vaultseal_enabled_check = QCheckBox("Seal the vault to a private GitHub repo after every run")
+        # Both settings on ONE row (v32.2 compaction).
+        seal_checks_row = QHBoxLayout()
+        self.vaultseal_enabled_check = QCheckBox("Seal after every run")
+        self.vaultseal_enabled_check.setToolTip(
+            "Commit the whole vault to git after every run and push it to a "
+            "PRIVATE GitHub repository")
         self.vaultseal_enabled_check.setChecked((self.config.get('vaultseal') or {}).get('enabled', True))
         self.vaultseal_enabled_check.toggled.connect(self._vaultseal_refresh_status)
-        seal_layout.addWidget(self.vaultseal_enabled_check)
+        seal_checks_row.addWidget(self.vaultseal_enabled_check)
 
-        self.vaultseal_push_check = QCheckBox("Push to GitHub (uses the GitHub token from Settings)")
+        self.vaultseal_push_check = QCheckBox("Push to GitHub")
+        self.vaultseal_push_check.setToolTip(
+            "Push the seal to GitHub (uses the GitHub token from Settings)")
         self.vaultseal_push_check.setChecked((self.config.get('vaultseal') or {}).get('auto_push', True))
-        seal_layout.addWidget(self.vaultseal_push_check)
+        seal_checks_row.addWidget(self.vaultseal_push_check)
+        seal_checks_row.addStretch()
+        seal_layout.addLayout(seal_checks_row)
 
         repo_row = QHBoxLayout()
         repo_row.addWidget(QLabel("Backup repo:"))
@@ -8731,20 +8780,7 @@ class MainWindow(QMainWindow):
         repo_row.addWidget(self.vaultseal_repo_input, 1)
         seal_layout.addLayout(repo_row)
 
-        seal_info = QLabel(
-            "💡 Obsidian's free tier has no sync. VaultSeal commits the whole vault after\n"
-            "every run and pushes it to a PRIVATE repository — full history, restore\n"
-            "with git clone. Machine state (workspace.json, .trash) is excluded\n"
-            "automatically. Runs even after failed batches; an unchanged vault is a no-op."
-        )
-        seal_info.setWordWrap(True)
-        seal_info.setObjectName("info_note")
-        seal_layout.addWidget(seal_info)
-
-        self.vaultseal_status_label = QLabel("● —")
-        self.vaultseal_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
-        seal_layout.addWidget(self.vaultseal_status_label)
-
+        # Action + status dot on ONE row (v32.2 compaction).
         seal_btn_row = QHBoxLayout()
         self.vaultseal_now_btn = QPushButton("🛡️ Seal Now")
         # v31.1: Backup Now is the Backup tab's ONE filled primary — Seal Now
@@ -8753,7 +8789,22 @@ class MainWindow(QMainWindow):
         self.vaultseal_now_btn.clicked.connect(self._vaultseal_now)
         seal_btn_row.addWidget(self.vaultseal_now_btn)
         seal_btn_row.addStretch()
+
+        self.vaultseal_status_label = QLabel("● —")
+        self.vaultseal_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
+        seal_btn_row.addWidget(self.vaultseal_status_label)
         seal_layout.addLayout(seal_btn_row)
+
+        # One wrapped note (was a 4-line hard-wrapped paragraph).
+        seal_info = QLabel(
+            "💡 Obsidian's free tier has no sync — VaultSeal commits the whole "
+            "vault after every run and pushes it to a PRIVATE repository (full "
+            "history, restore with git clone). Machine state (workspace.json, "
+            ".trash) is excluded; an unchanged vault is a no-op."
+        )
+        seal_info.setWordWrap(True)
+        seal_info.setObjectName("info_note")
+        seal_layout.addWidget(seal_info)
 
         layout.addWidget(seal_group)
 
@@ -8762,15 +8813,25 @@ class MainWindow(QMainWindow):
         # ---- GoodRepos (v32): public curated directory ----
         good_group = QGroupBox("🌟 Good Repos — Public Directory")
         good_layout = QVBoxLayout(good_group)
+        good_layout.setSpacing(6)
 
-        self.goodrepos_enabled_check = QCheckBox("Publish the curated directory to a PUBLIC GitHub repo after every run")
+        # Both settings on ONE row (v32.2 compaction).
+        good_checks_row = QHBoxLayout()
+        self.goodrepos_enabled_check = QCheckBox("Publish after every run")
+        self.goodrepos_enabled_check.setToolTip(
+            "Publish the curated directory to a PUBLIC GitHub repo after "
+            "every run")
         self.goodrepos_enabled_check.setChecked((self.config.get('goodrepos') or {}).get('enabled', True))
         self.goodrepos_enabled_check.toggled.connect(self._goodrepos_refresh_status)
-        good_layout.addWidget(self.goodrepos_enabled_check)
+        good_checks_row.addWidget(self.goodrepos_enabled_check)
 
-        self.goodrepos_push_check = QCheckBox("Push to GitHub (uses the GitHub token from Settings)")
+        self.goodrepos_push_check = QCheckBox("Push to GitHub")
+        self.goodrepos_push_check.setToolTip(
+            "Push the directory to GitHub (uses the GitHub token from Settings)")
         self.goodrepos_push_check.setChecked((self.config.get('goodrepos') or {}).get('auto_push', True))
-        good_layout.addWidget(self.goodrepos_push_check)
+        good_checks_row.addWidget(self.goodrepos_push_check)
+        good_checks_row.addStretch()
+        good_layout.addLayout(good_checks_row)
 
         good_repo_row = QHBoxLayout()
         good_repo_row.addWidget(QLabel("Directory repo:"))
@@ -8780,20 +8841,7 @@ class MainWindow(QMainWindow):
         good_repo_row.addWidget(self.goodrepos_repo_input, 1)
         good_layout.addLayout(good_repo_row)
 
-        good_info = QLabel(
-            "💡 Every curated repo becomes an entry in a browsable, emoji-rich README\n"
-            "directory (organized like AI → Skills → …) with the full notes mirrored\n"
-            "into category folders. PUBLIC by design — everyone can browse and\n"
-            "benefit from your curation."
-        )
-        good_info.setWordWrap(True)
-        good_info.setObjectName("info_note_indigo")
-        good_layout.addWidget(good_info)
-
-        self.goodrepos_status_label = QLabel("● —")
-        self.goodrepos_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
-        good_layout.addWidget(self.goodrepos_status_label)
-
+        # Action + status dot on ONE row (v32.2 compaction).
         good_btn_row = QHBoxLayout()
         self.goodrepos_now_btn = QPushButton("🌟 Publish Now")
         # v32: outlined secondary — Backup Now stays this tab's one filled primary.
@@ -8801,7 +8849,22 @@ class MainWindow(QMainWindow):
         self.goodrepos_now_btn.clicked.connect(self._goodrepos_now)
         good_btn_row.addWidget(self.goodrepos_now_btn)
         good_btn_row.addStretch()
+
+        self.goodrepos_status_label = QLabel("● —")
+        self.goodrepos_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
+        good_btn_row.addWidget(self.goodrepos_status_label)
         good_layout.addLayout(good_btn_row)
+
+        # One wrapped note (was a 4-line hard-wrapped paragraph).
+        good_info = QLabel(
+            "💡 Every curated repo becomes an entry in a browsable, emoji-rich "
+            "README directory (organized like AI → Skills → …) with the full "
+            "notes mirrored into category folders. PUBLIC by design — "
+            "everyone can browse and benefit from your curation."
+        )
+        good_info.setWordWrap(True)
+        good_info.setObjectName("info_note_indigo")
+        good_layout.addWidget(good_info)
 
         layout.addWidget(good_group)
 
@@ -8810,15 +8873,9 @@ class MainWindow(QMainWindow):
         # ---- Dashboard Link ----
         dash_group = QGroupBox("📊 Dashboard")
         dash_layout = QVBoxLayout(dash_group)
+        dash_layout.setSpacing(6)
 
-        dash_info = QLabel(
-            "The web dashboard shows your bot stats, pending links, and recent activity.\n"
-            "It's served by your Cloudflare Worker — no separate deployment needed."
-        )
-        dash_info.setWordWrap(True)
-        dash_info.setObjectName("info_note_indigo")
-        dash_layout.addWidget(dash_info)
-
+        # URL + action on ONE row (v32.2 compaction — was 2 rows).
         dash_row = QHBoxLayout()
         dash_row.addWidget(QLabel("Worker URL:"))
         self.dash_worker_url_input = QLineEdit()
@@ -8832,10 +8889,25 @@ class MainWindow(QMainWindow):
         dash_row.addWidget(open_dash_btn)
         dash_layout.addLayout(dash_row)
 
+        # One wrapped note (was 2 hard-wrapped lines).
+        dash_info = QLabel(
+            "📊 Bot stats, pending links and recent activity — served by your "
+            "Cloudflare Worker, no separate deployment needed."
+        )
+        dash_info.setWordWrap(True)
+        dash_info.setObjectName("info_note_indigo")
+        dash_layout.addWidget(dash_info)
+
         layout.addWidget(dash_group)
 
-        # v31.1: no filler stretch — the tab scrolls naturally inside the
-        # fixed 1000×750 window (content starts at the top, natural height).
+        # v32.2: initialize the backup status dot from config (the seal and
+        # goodrepos sections already self-refresh at construction).
+        self._backup_refresh_status()
+
+        # v31.1: no filler stretch. v32.2: _wrap_scroll in _build_ui pins this
+        # tab's scroll area to the tab pane's fixed visible height while this
+        # content panel expands to the height the four sections actually need
+        # (vertical-only scrolling, horizontal always off).
         return tab
 
     def _backup_browse_folder(self):
@@ -8886,13 +8958,13 @@ class MainWindow(QMainWindow):
                 self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['success']};")
             else:
                 self.backup_status_label.setText("● Folder not found")
-                self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #AE2237;")
+                self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
         elif backup_enabled:
             self.backup_status_label.setText("● No folder selected")
             self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['warning']};")
         else:
             self.backup_status_label.setText("● Disabled")
-            self.backup_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #AE2237;")
+            self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
 
     def _backup_now(self):
         """Create a local backup now."""
