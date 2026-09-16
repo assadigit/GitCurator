@@ -89,8 +89,8 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.5",
-  codename: "VaultSeal — Vault Backup",
+  version: "0.0.6",
+  codename: "UI/UX Overhaul — Fixed Window, AA Contrast, Button Hierarchy",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
@@ -338,6 +338,10 @@ export const releaseReport: ReleaseReport = {
     "VaultSeal (v0.0.5): LIVE end-to-end — a real demo vault sealed to the private github.com/assadigit/GitCurator-Vault (initial 12-file seal, incremental 1-file fast-forward push, no-op skip), verified via the GitHub API",
     "VaultSeal regression guard: a vault nested inside another git repository bootstraps its OWN repo — the parent's files can never be sealed (git add -A is repo-wide from subdirectories since git 2.0; caught live during QA and fixed)",
     "VaultSeal credential hygiene: remote stays token-less, .git/config greps clean, one-time token URLs only",
+    "UI/UX overhaul (v0.0.6): offscreen PyQt6 smoke test — fixed 1000×750 window verified (min=max), all 9 tabs cycled error-free, theme toggled both ways, progress bar hidden at rest, 'Processing 7 of 30 — psf/requests' label confirmed",
+    "UI/UX overhaul (v0.0.6): pixel-sampled screenshots in BOTH themes — secondary buttons, sheets, header boxes and inputs verified dark (#27272A) in dark mode; the rgba-compositing bug was caught by VLM review and fixed with solid theme-aware panels",
+    "UI/UX overhaul (v0.0.6): WCAG-AA tokens verified (#047857 7.4:1, #4338CA 7.9:1, #B91C1C 6.5:1); pending badge neutral zinc; >10-item batch confirmation gate wired into all six batch entry points",
+    "UI/UX overhaul (v0.0.6): VLM screenshot review scored the dark theme 10/10 for consistency after the fix — no light boxes remain",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -352,6 +356,7 @@ export const releaseReport: ReleaseReport = {
       "Batch undo snapshots; OneDrive/Dropbox-friendly local backups",
       "New pure-stdlib core — headlessly testable, zero GUI coupling",
       "VaultSeal (v0.0.5): every curation run seals the vault to a private GitHub repo — full history, restore with git clone, zero-config",
+      "UI/UX overhaul (v0.0.6): fixed window + per-tab scroll + 3-variant button hierarchy + overflow More menu — WCAG-AA contrast throughout",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
       "GitHub Actions CI runs the full 45-test gate on every push, tag and PR",
     ],

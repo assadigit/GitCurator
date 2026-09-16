@@ -15,16 +15,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitCurator v0.0.5 — Release & Audit Dashboard",
+  title: "GitCurator v0.0.6 — Release & Audit Dashboard",
   description:
-    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.5 VaultSeal: 13 fixes shipped, 45/45 tests, live verification gate with persisted history, drift detection, timing insights, repository & release console with CI history — plus VaultSeal: every curation run backs the whole Obsidian vault up to a private GitHub repository.",
+    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.6 UI/UX Overhaul: fixed 1000×750 window, per-tab scroll, WCAG-AA tokens, 3-variant button hierarchy + More menu, batch confirmations — plus VaultSeal: every curation run backs the whole Obsidian vault up to a private GitHub repository. 45/45 tests, live verification gate with persisted history, drift detection, repository & release console with CI history.",
   keywords: ["GitCurator", "GitHub", "Obsidian", "Ollama", "Telegram", "audit", "reliability", "Python", "PyQt6", "vault backup", "VaultSeal"],
   authors: [{ name: "Z.ai Team" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "GitCurator v0.0.5 — Release & Audit Dashboard",
+    title: "GitCurator v0.0.6 — Release & Audit Dashboard",
     description: "13 fixes shipped, 45/45 tests, live verification gate, VaultSeal automatic vault backup to a private GitHub repo, repository & release console with CI history",
     siteName: "Z.ai",
     type: "website",

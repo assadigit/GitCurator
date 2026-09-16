@@ -2856,10 +2856,10 @@ function VaultSealTab({
                   <p className="mt-1 text-[11.5px] text-zinc-500 dark:text-zinc-400">
                     {vault.totalFiles ?? "—"} files · {formatBytes(vault.sizeBytes ?? 0)} · {vault.isGitRepo ? "own git repo" : "not a repo yet — one seal bootstraps it"}
                   </p>
-                  <p className="mt-3 flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  <p className="mt-3 flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
                     <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
                     {vault.lastCommit ? (
-                      <>last commit {timeAgo(vault.lastCommit.date)} — <span className="truncate font-mono text-emerald-700 dark:text-emerald-300">{vault.lastCommit.subject}</span></>
+                      <>last commit {timeAgo(vault.lastCommit.date)} — <span className="min-w-0 flex-1 truncate font-mono text-emerald-700 dark:text-emerald-300">{vault.lastCommit.subject}</span></>
                     ) : (
                       "no commits yet"
                     )}
@@ -3424,7 +3424,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.5"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.6"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -3553,10 +3553,10 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
-              Release {report?.version ?? "0.0.5"}
+              Release {report?.version ?? "0.0.6"}
             </Badge>
-            <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              {report?.codename ?? "VaultSeal — Vault Backup"}
+            <Badge variant="outline" className="max-w-full whitespace-normal break-words border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal text-center leading-snug">
+              {report?.codename ?? "UI/UX Overhaul — Fixed Window, AA Contrast, Button Hierarchy"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>
