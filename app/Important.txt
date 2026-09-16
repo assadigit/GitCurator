@@ -1,3 +1,0 @@
-ReadME:
-
-This project lasted untill V56, I need to start a fresh session in chat.z.ai if I want to continue developing.
