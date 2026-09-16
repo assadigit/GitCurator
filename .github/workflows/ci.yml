@@ -1,0 +1,54 @@
+# GitCurator CI — the same gate the dashboard runs via POST /api/verify.
+#
+# Every push to main, every tag, and every PR compiles the 9 audited
+# Python modules and runs the full 45-case suite (34 unit + 11 e2e).
+# The testable core is pure stdlib — no pip install step required.
+# PyQt6/telethon/ollama are GUI/runtime deps that the test suite
+# deliberately does not touch.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Python gate (compile + 45 tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile the 9 audited modules
+        run: >
+          python -m py_compile
+          main.py
+          links.py
+          storage.py
+          note_builder.py
+          llm_client.py
+          telegram_fetch_worker.py
+          telethon_fetcher.py
+          backfill_manager.py
+          cloudflare_sync.py
+
+      - name: Run the test suite (34 unit + 11 e2e)
+        run: python -m unittest tests.test_core tests.test_e2e -v
+
+      - name: Test summary
+        if: always()
+        run: echo "Gate mirrors dashboard POST /api/verify — 9 compiles + 45 tests."

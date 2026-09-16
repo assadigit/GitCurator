@@ -4,7 +4,7 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.2` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Version:** `0.0.3` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
 **Status:** v30.x hardening sprint complete — 45/45 automated tests green.
 
 ---
@@ -74,6 +74,8 @@ commit, tags, dirty files, CHANGELOG, zip backups).
 ## Versioning
 
 - Semantic versioning `MAJOR.MINOR.PATCH`, git tags `vMAJOR.MINOR.PATCH`.
+- **0.0.3** — CI Pipeline & Actions Status: GitHub Actions runs the
+  45-test gate on every push/tag/PR; the Releases tab shows live CI status.
 - **0.0.2** — Repository & Release Console: `/api/releases` + Releases tab,
   header backup download, version alignment, mobile 2×4 tab grid.
 - **0.0.1** — initial repository import. The internal build lineage
@@ -82,6 +84,13 @@ commit, tags, dirty files, CHANGELOG, zip backups).
   working tree on `main` is always the latest version. Each release also
   produces a `GitCurator-vX.YY.zip` snapshot (source + .git history +
   runtime DBs) served by the dashboard's Releases tab.
+
+## CI
+
+Every push, tag and PR runs `.github/workflows/ci.yml` — py_compile of the
+9 audited modules + the 45-case suite (no pip installs needed; the
+testable core is pure stdlib). The dashboard's Releases tab shows the
+live status when a read-only `GITCURATOR_GH_TOKEN` is configured.
 
 ## Security — read before deploying
 

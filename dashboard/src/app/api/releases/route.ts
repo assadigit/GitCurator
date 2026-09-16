@@ -88,10 +88,25 @@ export interface BackupFile {
   served: boolean; // present in public/ → downloadable
 }
 
+/** v0.0.3 — newest GitHub Actions run (best-effort, needs a token for private repos). */
+export interface CiRun {
+  status: "queued" | "in_progress" | "completed" | "unknown";
+  conclusion: string | null; // success / failure / cancelled / … (when completed)
+  ok: boolean; // completed && success
+  runNumber: number | null;
+  name: string | null;
+  htmlUrl: string | null;
+  headBranch: string | null;
+  headSha: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface ReleasesData {
   repo: RepoStatus;
   releases: ReleaseEntry[];
   backups: BackupFile[];
+  ci: CiRun | null; // null = no token / API unreachable
   fetchedAt: string;
 }
 
@@ -224,16 +239,89 @@ async function scanBackups(): Promise<BackupFile[]> {
 }
 
 /* ------------------------------------------------------------------ */
+/* GitHub Actions CI status (v0.0.3 — optional token, best-effort)      */
+/* ------------------------------------------------------------------ */
+
+async function fetchCiStatus(): Promise<CiRun | null> {
+  // The repo is private — the Actions API needs a token. Read-only,
+  // optional: GITCURATOR_GH_TOKEN or GITHUB_TOKEN. No token → null and
+  // the dashboard shows "CI: unknown".
+  const token = process.env.GITCURATOR_GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (!token) return null;
+  try {
+    const r = await fetch(
+      "https://api.github.com/repos/assadigit/GitCurator/actions/runs?per_page=1",
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "gitcurator-dashboard",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!r.ok) return null;
+    const data = (await r.json()) as {
+      workflow_runs?: Array<{
+        status?: string;
+        conclusion?: string | null;
+        run_number?: number;
+        name?: string;
+        html_url?: string;
+        head_branch?: string;
+        head_sha?: string;
+        created_at?: string;
+        updated_at?: string;
+      }>;
+    };
+    const run = data.workflow_runs?.[0];
+    if (!run) {
+      // Repo exists, no runs yet — a known state, not an error.
+      return {
+        status: "unknown",
+        conclusion: null,
+        ok: false,
+        runNumber: null,
+        name: null,
+        htmlUrl: null,
+        headBranch: null,
+        headSha: null,
+        createdAt: null,
+        updatedAt: null,
+      };
+    }
+    const status = (run.status ?? "unknown") as CiRun["status"];
+    return {
+      status: ["queued", "in_progress", "completed"].includes(status) ? status : "unknown",
+      conclusion: run.conclusion ?? null,
+      ok: status === "completed" && run.conclusion === "success",
+      runNumber: run.run_number ?? null,
+      name: run.name ?? null,
+      htmlUrl: run.html_url ?? null,
+      headBranch: run.head_branch ?? null,
+      headSha: run.head_sha ?? null,
+      createdAt: run.created_at ?? null,
+      updatedAt: run.updated_at ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
 
 export async function GET() {
   // Git state — all best-effort.
-  const [logOut, tagOut, statusOut, countOut] = await Promise.all([
+  const [logOut, tagOut, statusOut, countOut, ci] = await Promise.all([
     git(["log", "-1", "--format=%H%x00%h%x00%s%x00%aI"]),
     git(["describe", "--tags", "--abbrev=0"]),
     git(["status", "--porcelain"]),
     git(["rev-list", "--count", "HEAD"]),
+    fetchCiStatus(),
   ]);
 
   let headCommit: RepoHeadCommit | null = null;
@@ -278,6 +366,7 @@ export async function GET() {
     },
     releases,
     backups,
+    ci,
     fetchedAt: new Date().toISOString(),
   };
 

@@ -2070,9 +2070,19 @@ function formatSectionText(text: string): string {
   return text.replace(/\*\*/g, "").replace(/`/g, "");
 }
 
-function RepoStatusCard({ repo }: { repo: ReleasesData["repo"] }) {
+function RepoStatusCard({ repo, ci }: { repo: ReleasesData["repo"]; ci: ReleasesData["ci"] }) {
   const clean = repo.dirtyCount === 0;
   const dirty = (repo.dirtyCount ?? 0) > 0;
+  const ciState = ci
+    ? ci.ok
+      ? { label: `CI passing${ci.runNumber ? ` · #${ci.runNumber}` : ""}`, cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", icon: CheckCircle2, dot: "bg-emerald-400" }
+      : ci.status === "in_progress" || ci.status === "queued"
+        ? { label: "CI running", cls: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300", icon: Loader2, dot: "bg-amber-400 animate-pulse" }
+        : ci.status === "completed"
+          ? { label: `CI ${ci.conclusion ?? "failed"}${ci.runNumber ? ` · #${ci.runNumber}` : ""}`, cls: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300", icon: X, dot: "bg-rose-400" }
+          : { label: "CI not run yet", cls: "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400", icon: CircleDot, dot: "bg-zinc-500" }
+    : { label: "CI n/a", cls: "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400", icon: CircleDot, dot: "bg-zinc-500" };
+  const CiIcon = ciState.icon;
   return (
     <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
       <CardHeader className="pb-3">
@@ -2083,6 +2093,54 @@ function RepoStatusCard({ repo }: { repo: ReleasesData["repo"] }) {
               <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[10px] font-normal text-amber-700 dark:text-amber-300">
                 <Lock className="mr-1 h-3 w-3" /> private
               </Badge>
+              {ci ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {ci.htmlUrl ? (
+                      <a
+                        href={ci.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex"
+                        aria-label={`Open CI run ${ci.runNumber ?? ""} on GitHub (new tab)`}
+                      >
+                        <Badge variant="outline" className={`font-mono text-[10px] font-normal ${ciState.cls}`}>
+                          <span className={`mr-1 h-1.5 w-1.5 rounded-full ${ciState.dot}`} aria-hidden="true" />
+                          <CiIcon className="mr-1 h-3 w-3" /> {ciState.label}
+                        </Badge>
+                      </a>
+                    ) : (
+                      <Badge variant="outline" className={`font-mono text-[10px] font-normal ${ciState.cls}`}>
+                        <span className={`mr-1 h-1.5 w-1.5 rounded-full ${ciState.dot}`} aria-hidden="true" />
+                        <CiIcon className="mr-1 h-3 w-3" /> {ciState.label}
+                      </Badge>
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <span className="max-w-[280px] text-xs leading-relaxed">
+                      {ci
+                        ? ci.htmlUrl
+                          ? `GitHub Actions · ${ci.name ?? "CI"} — ${ci.status}${ci.conclusion ? ` (${ci.conclusion})` : ""}${ci.updatedAt ? ` · updated ${timeAgo(ci.updatedAt)}` : ""} · click to open`
+                          : "GitHub Actions has no runs for this repository yet"
+                        : "Actions status needs a read-only token (GITCURATOR_GH_TOKEN) — not configured"}
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className={`font-mono text-[10px] font-normal ${ciState.cls}`}>
+                      <span className={`mr-1 h-1.5 w-1.5 rounded-full ${ciState.dot}`} aria-hidden="true" />
+                      <CiIcon className="mr-1 h-3 w-3" /> {ciState.label}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <span className="max-w-[280px] text-xs leading-relaxed">
+                      Actions status needs a read-only token (GITCURATOR_GH_TOKEN) — not configured
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </CardTitle>
             <CardDescription className="mt-1 text-[12px] text-zinc-500">
               The canonical online home for every upcoming version — pushed with one-shot tokens, never stored in git config.
@@ -2358,7 +2416,7 @@ function ReleasesTab({ data, loading }: { data: ReleasesData | null; loading: bo
   }
   return (
     <div className="space-y-5">
-      <RepoStatusCard repo={data.repo} />
+      <RepoStatusCard repo={data.repo} ci={data.ci} />
       <div className="grid gap-4 lg:grid-cols-2">
         <BackupsCard backups={data.backups} />
         <WorkflowCard />
@@ -2635,7 +2693,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.2"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.3"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -2764,10 +2822,10 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              Release {report?.version ?? "0.0.2"}
+              Release {report?.version ?? "0.0.3"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              {report?.codename ?? "Repository & Release Console"}
+              {report?.codename ?? "CI Pipeline & Actions Status"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>

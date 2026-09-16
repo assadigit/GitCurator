@@ -89,8 +89,8 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.2",
-  codename: "Repository & Release Console",
+  version: "0.0.3",
+  codename: "CI Pipeline & Actions Status",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
@@ -322,8 +322,9 @@ export const releaseReport: ReleaseReport = {
     "Every run is persisted to SQLite (Prisma) with a sha256 code fingerprint + per-file hashes — History shows trends, pass-rate stats and WHICH files drifted",
     "Timing Insights: per-case median/latest wall-clock leaderboard with regression + flakiness detection over a 20-run window",
     "Scheduled verification: server-side scheduler (src/instrumentation.ts) runs the gate 60s after startup and every 6 hours — drift and failures land in history without an open browser",
-    "Repository & Release Console (v0.0.2): /api/releases surfaces live git state (last commit, tag, dirty files) of the assadigit/GitCurator staging repo, the parsed CHANGELOG.md, and the served .zip backups",
-    "Versioning aligned: repo-level SemVer (0.0.x, tags v0.0.1 / v0.0.2) — the v30.x numbers continue as the internal build lineage",
+    "Repository & Release Console: /api/releases surfaces live git state (last commit, tag, dirty files) of the assadigit/GitCurator staging repo, the parsed CHANGELOG.md, and the served .zip backups",
+    "GitHub Actions CI (v0.0.3): .github/workflows/ci.yml runs the same gate on every push, tag and PR — 9 py_compiles + the 45-case suite, zero pip installs (pure-stdlib core)",
+    "Actions status in the dashboard (v0.0.3): /api/releases reads the newest workflow run (optional read-only GITCURATOR_GH_TOKEN) — passing / running / failing chip links straight to the run",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",
@@ -338,6 +339,7 @@ export const releaseReport: ReleaseReport = {
       "Batch undo snapshots; OneDrive/Dropbox-friendly local backups",
       "New pure-stdlib core — headlessly testable, zero GUI coupling",
       "Versioned GitHub repository (private) with tagged releases + downloadable zip backups",
+      "GitHub Actions CI runs the full 45-test gate on every push, tag and PR",
     ],
     weaknessesFixed: [
       "Non-atomic note/banner/config writes → tempfile + os.replace everywhere",

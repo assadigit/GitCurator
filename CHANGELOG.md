@@ -3,6 +3,34 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.3] — CI Pipeline & Actions Status
+
+The repository gets its own gate: GitHub Actions now runs the exact
+verification the dashboard performs — on every push, tag and pull request —
+and the dashboard surfaces the live CI status.
+
+### CI (`​.github/workflows/ci.yml`)
+- Runs on push (main + v* tags), pull requests and manual dispatch.
+- The gate mirrors POST /api/verify 1:1 — py_compile over the 9 audited
+  modules, then the full 45-case suite (`tests.test_core` +
+  `tests.test_e2e`) with verbose output.
+- Zero pip installs: the testable core is pure stdlib by design, so the
+  whole gate boots in seconds on ubuntu-latest / Python 3.12.
+
+### Verification dashboard (`dashboard/`)
+- `/api/releases` now also reports the newest GitHub Actions run
+  (status, conclusion, run number, link) — read-only, best-effort, and
+  only when a `GITCURATOR_GH_TOKEN` (or `GITHUB_TOKEN`) env var is set;
+  private-repo API reads need a token. Without it the field is null and
+  the UI shows "CI n/a" — never an error.
+- Releases tab: CI status chip beside the repo title — passing (emerald) /
+  running (amber pulse) / failing (rose) / not-run (zinc), linking
+  straight to the run on GitHub with a status tooltip.
+- `.env.example` documents the optional read-only token (recommend a
+  fine-grained PAT with Actions:read only).
+- Version bumped to 0.0.3 across report/layout/fallbacks.
+
+
 ## [0.0.2] — Repository & Release Console
 
 The dashboard becomes release-aware: live git status of this repository, the
