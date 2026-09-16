@@ -89,21 +89,21 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.9",
-  codename: "Backup Tab Scrollout — Compact & Theme-Sync",
+  version: "0.0.10",
+  codename: "Security Hygiene & Deploy Kit",
   releasedAt: "2026-09-17",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
   metrics: {
-    bugsFixed: 20,
+    bugsFixed: 23,
     testsTotal: 73,
     testsPassed: 73,
     mainPyLines: 9200,
-    filesTouched: 31,
+    filesTouched: 43,
     newModules: 8,
     testCaughtBugs: 3,
   },
-  severityBreakdown: { critical: 3, high: 8, medium: 5 },
+  severityBreakdown: { critical: 4, high: 9, medium: 6 },
   pipeline: [
     {
       id: 1,
@@ -175,6 +175,14 @@ export const releaseReport: ReleaseReport = {
       description:
         "The GUI Backup tab — Vault Backup, VaultSeal — GitHub Mirror, Good Repos — Public Directory and Dashboard sections stacked in one vertical-only scroll area (v0.0.9).",
       hardening: "Horizontal scrollbar always off; content/pane ratio 1.31 (was ~2.2) so every control is reachable; status dots and the scrollbar handle re-theme with the toggle (WCAG 1.4.11).",
+    },
+    {
+      id: 10,
+      name: "Cloudflare Deploy",
+      icon: "lock",
+      description:
+        "deploy-latest.ps1 / deploy-latest.sh — the two-minute update path for the existing worker deployment (v0.0.10).",
+      hardening: "Idempotent D1 schema re-apply, wrangler auth check, post-deploy health check against the live worker, optional WEBHOOK_SECRET anti-impersonation flow.",
     },
   ],
   fixes: [
@@ -370,6 +378,42 @@ export const releaseReport: ReleaseReport = {
       files: ["app/gitcurator/gui/app.py — apply_dark_theme (QScrollBar QSS)"],
       evidence: "pixel forensics on the offscreen screenshots: handle ≈3.2:1 against plum in dark mode",
     },
+    {
+      id: "F17",
+      title: "Live credentials removed from the git tree",
+      severity: "critical",
+      status: "shipped",
+      summary:
+        "The Session-1 audit finding 'live secrets committed' is closed in the tree: session.session (+ .bak, full Telethon account access) untracked + gitignored, configs and installer templates emptied, docs use YOUR_BOT_TOKEN placeholders.",
+      detail:
+        "Nine tracked files carried real values (bot token, api_id/hash, phone, user id) and two session files sat in the repo. v0.0.10 scrubs all of them: app/config.json and both installer.config.json files are clean templates again (their _comment headers always intended 'fill in your credentials below'), DEPLOYMENT.md/README/deploy-dashboard.js examples are genericized, and gui/app.py + tools/test.py + tools/diagnose_code.py use placeholders. The repo is private and every value was already chat-exposed (rotation remains the standing P0), so the tree is now safe against a future visibility flip — git history before v0.0.10 still holds the blobs, so filter-repo before ever going public.",
+      files: ["app/session.session* (untracked, gitignored)", "app/config.json", "app/installer.config.json", "app/cloudflare-bot/installer.config.json", "app/cloudflare-bot/DEPLOYMENT.md", "app/cloudflare-bot/README.md", "app/cloudflare-bot/dashboard/deploy-dashboard.js", "app/gitcurator/gui/app.py", "app/gitcurator/tools/test.py", "app/gitcurator/tools/diagnose_code.py", ".gitignore"],
+      evidence: "git grep sweep for every known secret value (full token, api_id/hash, phone, user id, bot-id prefix) returns clean; 12/12 compile + 73/73 tests on the sanitized tree",
+    },
+    {
+      id: "F18",
+      title: "Two-minute Cloudflare deploy kit (deploy-latest)",
+      severity: "medium",
+      status: "shipped",
+      summary:
+        "Updating the existing worker deployment to the latest version is now one script: auth check → idempotent D1 schema → wrangler deploy → live health check, with an optional WEBHOOK_SECRET hardening flow.",
+      detail:
+        "DEPLOYMENT.md only described the 45-minute from-scratch path. deploy-latest.ps1 (Windows) and deploy-latest.sh (bash) now wrap the update flow: wrangler presence + login check, schema.sql re-apply (CREATE TABLE/INDEX IF NOT EXISTS — data untouched), wrangler deploy with URL capture, a health GET against the deployed worker ({status:ok, version, last_webhook_at}), and --with-secret / -WithSecret to set the v30 WEBHOOK_SECRET anti-impersonation secret plus the matching Telegram setWebhook command. All secrets, D1, KV, Queues and R2 persist across deploys.",
+      files: ["app/cloudflare-bot/deploy-latest.ps1", "app/cloudflare-bot/deploy-latest.sh", "app/cloudflare-bot/DEPLOYMENT.md"],
+      evidence: "bash -n syntax gate on the .sh; DEPLOYMENT.md quick-path section added ahead of the from-scratch guide; live worker health endpoint verified reachable (200 {status:ok})",
+    },
+    {
+      id: "F19",
+      title: "Credential-laden release zips (v0.01–v0.07) deleted",
+      severity: "high",
+      status: "shipped",
+      summary:
+        "The v0.01–v0.07 release zips were built before the v0.08 session.session exclusion rule and shipped the Telethon session inside — all copies were removed from download/ and public/.",
+      detail:
+        "Release zips only excluded session.session from v0.08 on; the seven earlier zips (still web-served from the dashboard's public/ folder for version-to-version download parity) each contained app/session.session + .bak — full Telegram account access. All 14 copies (7 versions × download/ + public/) were deleted; v0.08+ zips were verified clean and remain available. Git tags still contain the code history — the session blobs there are covered by the same history caveat as F17.",
+      files: ["download/GitCurator-v0.0[1-7].zip (deleted)", "public/GitCurator-v0.0[1-7].zip (deleted)"],
+      evidence: "unzip -l audit: v0.01 and v0.07 zips contained 2 session files each; post-deletion only v0.08/v0.09/v0.0.10 remain, all session-free",
+    },
   ],
   testSuites: [
     {
@@ -444,6 +488,9 @@ export const releaseReport: ReleaseReport = {
     "Backup tab scrollout (v0.0.9): pane 617px vs content 811px → ratio 1.31 (was ~2.2); scrolled to bottom, the Dashboard section + Open Dashboard button fully visible; compaction confirmed (status dots share action rows, side-by-side checkboxes, one-line wrapped notes)",
     "Backup tab scrollout (v0.0.9): THEME-SWITCH assertion — all three Backup status dots re-themed in both directions (Good Repos no longer keeps light-theme deep-butter on plum ≈2.5:1); dots correct at construction; #AE2237 error red now theme-aware; dark scrollbar handle raised #3B344F → #7A7199 ≈3.2:1 on plum (WCAG 1.4.11)",
     "Release v0.0.9 (2026-09-17): 12/12 py_compiles + 73/73 tests (34 core + 28 goodrepos + 11 e2e) in BOTH the live copy and the repo mirror; VLM QA of 4 Backup-tab screenshots with pixel forensics — layout, dots and contrast all green",
+    "Security scrub (v0.0.10): git grep sweep over the whole tree returns CLEAN for every known secret value (bot token, api_id/api_hash, phone, TG user id, bot-id prefix); session files untracked + gitignored; repo mirror and live copy kept byte-identical; 12/12 compile + 73/73 tests re-run green on the sanitized tree",
+    "Zip audit (v0.0.10): unzip -l proved v0.01–v0.07 zips carried app/session.session + .bak (2 files each) — all 14 copies deleted from download/ + public/; v0.08+ verified session-free and still served",
+    "Deploy kit (v0.0.10): bash -n on deploy-latest.sh clean; DEPLOYMENT.md quick-path added; the live worker's health endpoint verified reachable (200 {status:ok}) for the script's post-deploy probe",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",

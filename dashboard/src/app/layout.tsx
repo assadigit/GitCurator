@@ -15,17 +15,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitCurator v0.0.9 — Release & Audit Dashboard",
+  title: "GitCurator v0.0.10 — Release & Audit Dashboard",
   description:
-    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.9 Backup Tab Scrollout: the Backup tab's four sections (Vault Backup, VaultSeal, Good Repos, Dashboard) now scroll in a vertical-only area — every control reachable at a 1.31 content/pane ratio, all three backup status dots re-theme with the light/dark toggle, and the dark scrollbar handle clears WCAG 1.4.11. Modular package lineage, GoodRepos public directory, 73/73 tests, live verification gate with persisted history, drift detection, repository & release console with CI history.",
+    "Telegram → Ollama → Obsidian pipeline. GitCurator v0.0.10 Security Hygiene & Deploy Kit: the git tree is credential-free (session files untracked + gitignored, configs are templates, docs use YOUR_BOT_TOKEN placeholders) and deploy-latest.ps1/.sh ships a two-minute Cloudflare update path (idempotent D1 schema → wrangler deploy → live health check, optional WEBHOOK_SECRET anti-impersonation). Modular package lineage, GoodRepos public directory, 73/73 tests, live verification gate with persisted history, drift detection, repository & release console with CI history.",
   keywords: ["GitCurator", "GitHub", "Obsidian", "Ollama", "Telegram", "audit", "reliability", "Python", "PyQt6", "vault backup", "VaultSeal"],
   authors: [{ name: "Z.ai Team" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "GitCurator v0.0.9 — Release & Audit Dashboard",
-    description: "20 fixes shipped, 73/73 tests, live verification gate, VaultSeal automatic vault backup to a private GitHub repo, repository & release console with CI history",
+    title: "GitCurator v0.0.10 — Release & Audit Dashboard",
+    description: "23 fixes shipped, 73/73 tests, credential-free git tree, two-minute Cloudflare deploy kit, live verification gate, VaultSeal automatic vault backup to a private GitHub repo, repository & release console with CI history",
     siteName: "Z.ai",
     type: "website",
   },

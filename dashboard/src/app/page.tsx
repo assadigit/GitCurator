@@ -3872,7 +3872,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.9"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.10"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -4001,10 +4001,10 @@ export default function Home() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
-              Release {report?.version ?? "0.0.9"}
+              Release {report?.version ?? "0.0.10"}
             </Badge>
             <Badge variant="outline" className="max-w-full whitespace-normal break-words border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal text-center leading-snug">
-              {report?.codename ?? "Backup Tab Scrollout — Compact & Theme-Sync"}
+              {report?.codename ?? "Security Hygiene & Deploy Kit"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>
@@ -4018,13 +4018,14 @@ export default function Home() {
             <span className="text-emerald-600 dark:text-emerald-400">hardened, tested pipeline</span>.
           </h2>
           <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-            Full SWOT audit, 20 shipped fixes across 9 releases — latest: the Backup tab's four
-            sections scroll in a vertical-only area (content/pane ratio 1.31 — every control
-            reachable), all three backup status dots re-theme with the toggle, and the dark
-            scrollbar handle clears WCAG 1.4.11 — plus a modular gitcurator package and a
-            73-case regression suite with a live verification gate, persisted run history,
-            code-drift detection and per-case timing insights. Every release ships to the
-            private GitCurator repository with a tagged commit and a downloadable .zip backup.
+            Full SWOT audit, 23 shipped fixes across 10 releases — latest: a credential-free git tree
+            (session files untracked, configs are templates, docs use placeholders — closing the
+            Session-1 audit finding) and a two-minute Cloudflare deploy kit (deploy-latest.ps1/.sh:
+            idempotent schema → wrangler deploy → live health check, optional WEBHOOK_SECRET
+            anti-impersonation flow) — plus a modular gitcurator package and a 73-case regression
+            suite with a live verification gate, persisted run history, code-drift detection and
+            per-case timing insights. Every release ships to the private GitCurator repository with
+            a tagged commit and a downloadable .zip backup.
           </p>
           {report && (
             <div className="mt-4 flex flex-wrap gap-1.5">

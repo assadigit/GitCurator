@@ -4,8 +4,8 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.9` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green.
+**Version:** `0.0.10` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green · credential-free git tree (v0.0.10).
 
 ---
 
@@ -94,6 +94,24 @@ status readable:
 - **Theme-synced status dots** — toggling light/dark re-runs all three
   Backup status refreshers (no more light-theme deep-butter stranded on
   plum), and the dark scrollbar handle is readable on plum (WCAG 1.4.11).
+
+## Security & Deploy (v0.0.10)
+
+The git tree is now credential-free, and updating the Cloudflare worker to
+the latest version is a two-minute command:
+
+- **Scrubbed tree** — `session.session` files untracked + gitignored,
+  `config.json` / `installer.config.json` are clean templates, and the docs
+  use `YOUR_BOT_TOKEN` placeholders. Git history predating v0.0.10 still
+  holds the old blobs — rewrite history (`git filter-repo`) before ever
+  making the repository public.
+- **`deploy-latest.ps1` / `deploy-latest.sh`** (in `app/cloudflare-bot/`) —
+  wrangler auth check → idempotent D1 schema → `wrangler deploy` → live
+  health check, with an optional `--with-secret` flow for the v30
+  `WEBHOOK_SECRET` webhook anti-impersonation hardening. Secrets, data, D1,
+  KV, Queues and R2 all persist across deploys.
+- **Old release zips removed** — v0.01–v0.07 zips (built before the v0.08
+  `session.session` exclusion) were deleted from the download folders.
 
 ## VaultSeal — automatic vault backup (v0.0.5)
 
@@ -229,14 +247,18 @@ live status when a read-only `GITCURATOR_GH_TOKEN` is configured.
 
 ## Security — read before deploying
 
-This repository ships **private** because it contains live credentials:
+Since v0.0.10 the git tree ships **without live credentials** (session files
+untracked, configs are templates, docs use placeholders). Two things remain:
 
-- `app/config.json` — Telegram bot token, api_id/api_hash, phone
-- `app/session.session` (+ `.bak`) — Telethon auth sessions (full account access)
-- `app/installer.config.json`, `app/cloudflare-bot/` — bot token + Cloudflare account references
-
-**Do not make this repository public without rotating every credential above.**
-The dashboard's Go-Live tab tracks this rotation checklist (3 × P0 items).
+- **Git history** still contains pre-scrub blobs (`session.session`, real
+  tokens) in commits before v0.0.10. The repository is private — keep it
+  that way, or run `git filter-repo` + force-push BEFORE any visibility flip.
+- **Credential rotation is still the standing P0** — every value was exposed
+  in chat during development. Rotate the Telegram bot token / api credentials
+  / sessions and the GitHub PAT, then update them in the app (Settings →
+  Credentials → '🔑 Test GitHub Token') and on the worker
+  (`npx wrangler secret put BOT_TOKEN`). The dashboard's Go-Live tab tracks
+  this rotation checklist (3 × P0 items).
 
 ## License
 

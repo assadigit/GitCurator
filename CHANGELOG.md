@@ -3,6 +3,47 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.10] — Security Hygiene & Deploy Kit — 2026-09-17
+
+Session wrap-up release: closes the Session-1 audit finding *live secrets
+committed* in the git tree, and adds the two-minute Cloudflare update path.
+
+### Security
+- **Live credentials removed from the git tree** — `app/session.session` and
+  `app/session.session.bak` (full Telethon account access) are untracked and
+  gitignored; `app/config.json` and both `installer.config.json` files are
+  clean templates again (empty credential fields, as their `_comment` headers
+  intend); the real bot token that appeared in `DEPLOYMENT.md` examples is
+  now `YOUR_BOT_TOKEN`; `gitcurator/gui/app.py`, `tools/test.py` and
+  `tools/diagnose_code.py` use placeholder credentials. The repository is
+  private and every value was already exposed in chat (credential rotation
+  remains the standing P0 — see the dashboard's Go-Live tab), but the tree
+  is now safe against a future visibility flip. Note: git **history** still
+  contains the pre-scrub blobs — run `git filter-repo` before ever making
+  this repository public.
+- **Release zips v0.01–v0.06/v0.07 deleted from download/ + public/** — they
+  were built before the v0.08 exclusion rule and contained
+  `session.session`. v0.08+ zips were already clean and remain available.
+
+### Added
+- **`deploy-latest.ps1` / `deploy-latest.sh`** — the two-minute update path
+  for an existing Cloudflare deployment: wrangler presence + auth check,
+  idempotent D1 schema apply (`IF NOT EXISTS` — existing data untouched),
+  `wrangler deploy`, a live health check against the deployed worker, and an
+  optional `--with-secret` / `-WithSecret` flow that sets the v30
+  `WEBHOOK_SECRET` anti-impersonation hardening and prints the matching
+  Telegram `setWebhook` command. All secrets and data persist across
+  deploys — nothing is re-entered.
+- **DEPLOYMENT.md** gained a "Quick path — update an EXISTING deployment"
+  section ahead of the 45-minute from-scratch guide.
+
+### Verified
+- 12/12 py_compile and 73/73 tests on the sanitized tree (repo mirror AND
+  the live copy stay byte-identical); `git grep` sweep for every known
+  secret value (bot token, api_id/hash, phone, user id, bot-id prefix)
+  returns clean; `bash -n` on the deploy script; PowerShell twin reviewed
+  line-by-line (no pwsh in the sandbox).
+
 ## [0.0.9] — Backup Tab Scrollout Fix Pack — 2026-09-17
 
 Three usability fixes for the Backup tab (internal `v32.2`): its four
