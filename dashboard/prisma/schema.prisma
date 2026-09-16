@@ -28,6 +28,11 @@ model VerificationRun {
   codeHash      String
   /// full VerifyResult JSON snapshot (compile grid + suites + cases)
   resultJson    String
+  /// v0.0.4 provenance — who started the run:
+  /// "manual" (Tests/History tab button), "startup" (scheduler first pass),
+  /// "scheduled" (6-hour interval). Rows written before v0.0.4 default to
+  /// "manual".
+  source        String   @default("manual")
 
   @@index([ranAt])
 }

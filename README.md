@@ -67,13 +67,20 @@ bun run dev           # http://localhost:3000
 
 The dashboard expects the Python app at `../app` (override with
 `GITCURATOR_APP_DIR`). It runs the real test suite on demand
-(`POST /api/verify`), persists every run, flags code drift between runs,
-and reports live repository/release status (`GET /api/releases` — last
-commit, tags, dirty files, CHANGELOG, zip backups).
+(`POST /api/verify`), persists every run — tagged by who triggered it
+(manual button, server-startup pass or the 6-hour scheduler) — flags code
+drift between runs, and reports live repository/release status
+(`GET /api/releases` — last commit, tags, dirty files, CHANGELOG, zip
+backups, and the last 10 GitHub Actions runs).
 
 ## Versioning
 
 - Semantic versioning `MAJOR.MINOR.PATCH`, git tags `vMAJOR.MINOR.PATCH`.
+- **0.0.4** — Provenance & CI History: every verification run records its
+  origin (manual / startup / scheduled — badges + stats in the History tab,
+  source column in the CSV export); the Releases tab gains a CI run-history
+  strip (last 10 Actions runs, each chip linking to its run) plus a
+  version-history timeline rail and card-hover polish.
 - **0.0.3** — CI Pipeline & Actions Status: GitHub Actions runs the
   45-test gate on every push/tag/PR; the Releases tab shows live CI status.
 - **0.0.2** — Repository & Release Console: `/api/releases` + Releases tab,

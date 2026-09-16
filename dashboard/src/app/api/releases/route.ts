@@ -107,6 +107,9 @@ export interface ReleasesData {
   releases: ReleaseEntry[];
   backups: BackupFile[];
   ci: CiRun | null; // null = no token / API unreachable
+  /** v0.0.4 — newest-first Actions runs (last 10) for the CI history strip;
+   *  null = no token / API unreachable. Empty array = token works, no runs. */
+  ciHistory: CiRun[] | null;
   fetchedAt: string;
 }
 
@@ -240,17 +243,47 @@ async function scanBackups(): Promise<BackupFile[]> {
 
 /* ------------------------------------------------------------------ */
 /* GitHub Actions CI status (v0.0.3 — optional token, best-effort)      */
+/*          v0.0.4 — also returns the last 10 runs for the history strip */
 /* ------------------------------------------------------------------ */
 
-async function fetchCiStatus(): Promise<CiRun | null> {
+const CI_HISTORY_LIMIT = 10;
+
+/** Map a raw Actions API run object onto the CiRun shape. */
+function toCiRun(run: {
+  status?: string;
+  conclusion?: string | null;
+  run_number?: number;
+  name?: string;
+  html_url?: string;
+  head_branch?: string;
+  head_sha?: string;
+  created_at?: string;
+  updated_at?: string;
+}): CiRun {
+  const status = (run.status ?? "unknown") as CiRun["status"];
+  return {
+    status: ["queued", "in_progress", "completed"].includes(status) ? status : "unknown",
+    conclusion: run.conclusion ?? null,
+    ok: status === "completed" && run.conclusion === "success",
+    runNumber: run.run_number ?? null,
+    name: run.name ?? null,
+    htmlUrl: run.html_url ?? null,
+    headBranch: run.head_branch ?? null,
+    headSha: run.head_sha ?? null,
+    createdAt: run.created_at ?? null,
+    updatedAt: run.updated_at ?? null,
+  };
+}
+
+async function fetchCiStatus(): Promise<{ ci: CiRun | null; history: CiRun[] | null }> {
   // The repo is private — the Actions API needs a token. Read-only,
-  // optional: GITCURATOR_GH_TOKEN or GITHUB_TOKEN. No token → null and
-  // the dashboard shows "CI: unknown".
+  // optional: GITCURATOR_GH_TOKEN or GITHUB_TOKEN. No token → nulls and
+  // the dashboard shows "CI n/a".
   const token = process.env.GITCURATOR_GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (!token) return null;
+  if (!token) return { ci: null, history: null };
   try {
     const r = await fetch(
-      "https://api.github.com/repos/assadigit/GitCurator/actions/runs?per_page=1",
+      `https://api.github.com/repos/assadigit/GitCurator/actions/runs?per_page=${CI_HISTORY_LIMIT}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -262,51 +295,27 @@ async function fetchCiStatus(): Promise<CiRun | null> {
         signal: AbortSignal.timeout(5000),
       },
     );
-    if (!r.ok) return null;
+    if (!r.ok) return { ci: null, history: null };
     const data = (await r.json()) as {
-      workflow_runs?: Array<{
-        status?: string;
-        conclusion?: string | null;
-        run_number?: number;
-        name?: string;
-        html_url?: string;
-        head_branch?: string;
-        head_sha?: string;
-        created_at?: string;
-        updated_at?: string;
-      }>;
+      workflow_runs?: Array<Parameters<typeof toCiRun>[0]>;
     };
-    const run = data.workflow_runs?.[0];
-    if (!run) {
+    const runs = data.workflow_runs ?? [];
+    if (runs.length === 0) {
       // Repo exists, no runs yet — a known state, not an error.
       return {
-        status: "unknown",
-        conclusion: null,
-        ok: false,
-        runNumber: null,
-        name: null,
-        htmlUrl: null,
-        headBranch: null,
-        headSha: null,
-        createdAt: null,
-        updatedAt: null,
+        ci: {
+          status: "unknown", conclusion: null, ok: false, runNumber: null,
+          name: null, htmlUrl: null, headBranch: null, headSha: null,
+          createdAt: null, updatedAt: null,
+        },
+        history: [],
       };
     }
-    const status = (run.status ?? "unknown") as CiRun["status"];
-    return {
-      status: ["queued", "in_progress", "completed"].includes(status) ? status : "unknown",
-      conclusion: run.conclusion ?? null,
-      ok: status === "completed" && run.conclusion === "success",
-      runNumber: run.run_number ?? null,
-      name: run.name ?? null,
-      htmlUrl: run.html_url ?? null,
-      headBranch: run.head_branch ?? null,
-      headSha: run.head_sha ?? null,
-      createdAt: run.created_at ?? null,
-      updatedAt: run.updated_at ?? null,
-    };
+    // The Actions API returns runs newest-first — run #1 (v0.0.3 CI) is last.
+    const history = runs.map(toCiRun);
+    return { ci: history[0], history };
   } catch {
-    return null;
+    return { ci: null, history: null };
   }
 }
 
@@ -316,7 +325,7 @@ async function fetchCiStatus(): Promise<CiRun | null> {
 
 export async function GET() {
   // Git state — all best-effort.
-  const [logOut, tagOut, statusOut, countOut, ci] = await Promise.all([
+  const [logOut, tagOut, statusOut, countOut, ciResult] = await Promise.all([
     git(["log", "-1", "--format=%H%x00%h%x00%s%x00%aI"]),
     git(["describe", "--tags", "--abbrev=0"]),
     git(["status", "--porcelain"]),
@@ -366,7 +375,8 @@ export async function GET() {
     },
     releases,
     backups,
-    ci,
+    ci: ciResult.ci,
+    ciHistory: ciResult.history,
     fetchedAt: new Date().toISOString(),
   };
 

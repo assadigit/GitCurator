@@ -8,8 +8,10 @@
  *   - then: every 6 hours
  *
  * Each pass calls the /api/verify POST handler directly (same module, same
- * in-flight coalescing, same Prisma persistence) — triggered runs are
- * indistinguishable from manual ones in the History tab.
+ * in-flight coalescing, same Prisma persistence). Since v0.0.4 the passes
+ * identify themselves via the request body — "startup" for the first pass,
+ * "scheduled" for the 6-hour intervals — so the History tab can tell
+ * machine-triggered runs from manual ones.
  *
  * Guards: nodejs runtime only (never the edge compiler) + a globalThis flag
  * so hot-reloads can't stack duplicate schedulers.
@@ -25,10 +27,16 @@ export async function register() {
   const FIRST_DELAY_MS = 60_000;
   const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
-  const runScheduled = async (label: string) => {
+  const runScheduled = async (label: "startup" | "scheduled") => {
     try {
       const { POST } = await import("./app/api/verify/route");
-      const res = await POST();
+      // v0.0.4 — the body tags the persisted run with its provenance.
+      const req = new Request("http://internal/api/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: label }),
+      });
+      const res = await POST(req);
       const data = (await res.json()) as {
         ok?: boolean;
         summaryLine?: string;

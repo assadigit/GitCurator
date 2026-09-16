@@ -89,8 +89,8 @@ export interface ReleaseReport {
 }
 
 export const releaseReport: ReleaseReport = {
-  version: "0.0.3",
-  codename: "CI Pipeline & Actions Status",
+  version: "0.0.4",
+  codename: "Provenance & CI History",
   releasedAt: "2026-09-16",
   project: "GitCurator — Telegram → Ollama → Obsidian",
   stack: ["Python 3 · PyQt6", "Ollama", "PyGithub", "Telethon", "SQLite", "Cloudflare Workers", "Next.js 16 · Prisma"],
@@ -325,6 +325,8 @@ export const releaseReport: ReleaseReport = {
     "Repository & Release Console: /api/releases surfaces live git state (last commit, tag, dirty files) of the assadigit/GitCurator staging repo, the parsed CHANGELOG.md, and the served .zip backups",
     "GitHub Actions CI (v0.0.3): .github/workflows/ci.yml runs the same gate on every push, tag and PR — 9 py_compiles + the 45-case suite, zero pip installs (pure-stdlib core)",
     "Actions status in the dashboard (v0.0.3): /api/releases reads the newest workflow run (optional read-only GITCURATOR_GH_TOKEN) — passing / running / failing chip links straight to the run",
+    "Run provenance (v0.0.4): every persisted run records who triggered it — manual button, server-startup pass or the 6-hour scheduler — shown as badges + source-split chips in the History tab and a source column in the CSV export",
+    "CI run history strip (v0.0.4): /api/releases returns the last 10 Actions runs — the Releases tab renders the full run strip with a pass-rate summary, each chip linking to its run on GitHub",
     "History retention: the newest 200 runs are kept, older rows pruned automatically on every run",
     "node --check cloudflare-bot/src/index.js — syntax OK",
     "links.is_github_url now rejects '..' owners (alphanumeric start/end required)",

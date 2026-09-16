@@ -3,6 +3,52 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [0.0.4] — Provenance & CI History
+
+Verification runs now carry their origin, and the CI pipeline gets a
+visible track record in the dashboard.
+
+### Verification provenance
+- `VerificationRun` (Prisma) gains a `source` column (default
+  `"manual"`): `"manual"` for button-triggered runs, `"startup"` for the
+  scheduler's first pass 60s after boot, `"scheduled"` for the 6-hour
+  intervals. Existing rows backfill to `"manual"`.
+- `POST /api/verify` accepts an optional JSON body
+  `{"source": "manual"|"startup"|"scheduled"}` — validated against a
+  closed whitelist before it touches the database; no body (the normal
+  dashboard button) still records `"manual"`. In-flight runs coalesce,
+  so the source of whoever started the run is the one recorded.
+- `src/instrumentation.ts` now identifies itself — the startup pass and
+  the interval passes each send their own source.
+- `GET /api/history` returns `source` per run plus a
+  `stats.sources { manual, startup, scheduled }` split.
+- History tab: provenance badge on every run row (manual = zinc cursor,
+  startup = amber refresh, scheduled = teal clock, each with an
+  explanatory tooltip), source-count chips under the Total-runs stat
+  tile, and a `source` column in the CSV export.
+
+### CI run history
+- `GET /api/releases` returns `ciHistory` — the last 10 GitHub Actions
+  runs (newest first) from the same token-gated Actions API call as the
+  existing latest-run chip. No token → `null` → the card simply doesn't
+  render; zero runs → `[]` → also hidden (the "not run yet" chip covers
+  it).
+- Releases tab: new "CI run history" card — a 5×2 (mobile) / 10-wide
+  (desktop) grid of run-number chips, colored by conclusion (emerald
+  success / amber pulse while running / rose failure), each linking to
+  its run on GitHub, with a pass-rate summary and last-failure line.
+
+### Styling & UX polish
+- Version history renders as a timeline: connector rail + per-release
+  dots on the left, the newest dot emerald with a soft halo.
+- The current release card gets an emerald border, ring and gradient
+  wash; "current" badge gains a pulsing dot.
+- Repo status / Backups / Workflow / Release cards lift on hover
+  (translate + border + shadow), matching the History stat tiles.
+- Repo status tile icons are now color-coded (VERSION emerald, Last tag
+  amber, Commits teal, Working tree status-colored); the hero "Release"
+  badge is emerald-tinted.
+
 ## [0.0.3] — CI Pipeline & Actions Status
 
 The repository gets its own gate: GitHub Actions now runs the exact

@@ -43,6 +43,8 @@ export interface HistoryRun {
   codeHash: string;
   /** true when the code fingerprint differs from the PREVIOUS (older) run */
   codeChanged: boolean;
+  /** v0.0.4 provenance — "manual" | "startup" | "scheduled" */
+  source: string;
 }
 
 export interface HistoryStats {
@@ -55,6 +57,8 @@ export interface HistoryStats {
   /** consecutive green runs counting from the newest */
   streak: number;
   distinctCodeVersions: number;
+  /** v0.0.4 — run provenance counts (manual / startup / scheduled) */
+  sources: { manual: number; startup: number; scheduled: number };
 }
 
 export interface HistoryData {
@@ -97,6 +101,7 @@ export async function GET() {
       summaryLine: row.summaryLine,
       codeHash: row.codeHash,
       codeChanged: i < rows.length - 1 ? row.codeHash !== rows[i + 1].codeHash : false,
+      source: row.source,
     }));
 
     const totalRuns = rows.length;
@@ -109,6 +114,8 @@ export async function GET() {
         else break;
       }
       const durations = rows.map((r) => r.durationMs);
+      // v0.0.4 — provenance counts (defaults cover pre-v0.0.4 rows).
+      const countBy = (s: string) => rows.filter((r) => (r.source ?? "manual") === s).length;
       stats = {
         totalRuns,
         okRuns,
@@ -118,6 +125,11 @@ export async function GET() {
         maxDurationMs: Math.max(...durations),
         streak,
         distinctCodeVersions: new Set(rows.map((r) => r.codeHash)).size,
+        sources: {
+          manual: countBy("manual"),
+          startup: countBy("startup"),
+          scheduled: countBy("scheduled"),
+        },
       };
     }
 

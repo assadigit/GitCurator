@@ -28,8 +28,15 @@ import {
  * Every run is persisted to SQLite via Prisma (VerificationRun) for the
  * History tab — trends, pass-rate stats and drift detection.
  *
- * Security: NO user input is accepted — commands and paths are fixed
- * constants. GET returns the last cached result without re-running.
+ * v0.0.4 provenance: POST accepts an optional JSON body
+ * `{ "source": "manual" | "startup" | "scheduled" }` — anything else
+ * (or no body at all) falls back to "manual". The scheduled passes from
+ * src/instrumentation.ts identify themselves; in-flight runs coalesce, so
+ * the source of whoever STARTED the run is the one recorded.
+ *
+ * Security: NO user input reaches a shell — commands and paths are fixed
+ * constants; `source` is matched against a closed whitelist before it
+ * touches the database. GET returns the last cached result without re-running.
  *
  * Concurrency: parallel POSTs coalesce onto a single in-flight run.
  */
@@ -41,6 +48,22 @@ const exec = promisify(execFile);
 
 const COMPILE_TIMEOUT_MS = 15_000;
 const TEST_TIMEOUT_MS = 120_000;
+
+/** Closed whitelist for the run-provenance column (v0.0.4). */
+const RUN_SOURCES = ["manual", "startup", "scheduled"] as const;
+type RunSource = (typeof RUN_SOURCES)[number];
+
+/** Extract + validate the provenance hint from the request body (if any). */
+async function readRunSource(req: Request): Promise<RunSource> {
+  try {
+    const body = (await req.json()) as { source?: unknown };
+    return RUN_SOURCES.includes(body?.source as RunSource)
+      ? (body.source as RunSource)
+      : "manual";
+  } catch {
+    return "manual"; // no body / not JSON / malformed — the default
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Parsing                                                             */
@@ -304,7 +327,7 @@ async function runVerification(): Promise<VerifyResult> {
 /** Keep the newest N runs — older rows are pruned after every insert. */
 const RETAIN_RUNS = 200;
 
-async function persistRun(result: VerifyResult): Promise<void> {
+async function persistRun(result: VerifyResult, source: RunSource): Promise<void> {
   try {
     await db.verificationRun.create({
       data: {
@@ -318,6 +341,7 @@ async function persistRun(result: VerifyResult): Promise<void> {
         summaryLine: result.summaryLine,
         codeHash: result.codeHash,
         resultJson: JSON.stringify(result),
+        source,
       },
     });
 
@@ -348,12 +372,15 @@ async function persistRun(result: VerifyResult): Promise<void> {
 let inFlight: Promise<VerifyResult> | null = null;
 let lastResult: VerifyResult | null = null;
 
-export async function POST() {
+export async function POST(req: Request) {
+  // v0.0.4 — provenance is read BEFORE the coalescing check so a body is
+  // always consumed exactly once, even when joining an in-flight run.
+  const source = await readRunSource(req);
   if (!inFlight) {
     inFlight = runVerification()
       .then(async (result) => {
         lastResult = result;
-        await persistRun(result);
+        await persistRun(result, source);
         return result;
       })
       .finally(() => {

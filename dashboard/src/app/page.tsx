@@ -7,8 +7,8 @@ import {
   Activity, AlertTriangle, Archive, ArrowDownRight, ArrowRight, ArrowUpRight, Brain, Bug, CheckCircle2, ChevronDown, ChevronRight,
   CircleDot, ClipboardCheck, Clock, Cpu, Download, ExternalLink, FileArchive, FileCode2, FileJson, FileText,
   FlaskConical, Fingerprint, Gauge, GitCommitHorizontal, Github, GitBranch, HardDrive, History, Layers, Lightbulb, Link2, ListChecks, Loader2,
-  Lock, Monitor, Moon, Package, Play, RefreshCw, RotateCcw, Rocket, Search, Send, ServerCog, ShieldCheck,
-  Sparkles, Sun, Tag, Target, TerminalSquare, TrendingUp, Trash2, Vault, Wrench, X, Zap,
+  Lock, Monitor, Moon, MousePointerClick, Package, Play, RefreshCw, RotateCcw, Rocket, Search, Send, ServerCog, ShieldCheck,
+  Sparkles, Sun, Tag, Target, TerminalSquare, TrendingUp, Trash2, Vault, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer,
@@ -1223,6 +1223,12 @@ interface ChartPoint {
 }
 
 function HistoryStatsTiles({ stats }: { stats: NonNullable<HistoryData["stats"]> }) {
+  // v0.0.4 — provenance split chips (rendered under the Total runs value).
+  const sourceChips = [
+    { label: "manual", count: stats.sources.manual, cls: "border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400" },
+    { label: "startup", count: stats.sources.startup, cls: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" },
+    { label: "scheduled", count: stats.sources.scheduled, cls: "border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300" },
+  ].filter((c) => c.count > 0);
   const tiles: {
     icon: React.ComponentType<{ className?: string }>;
     label: string;
@@ -1230,11 +1236,21 @@ function HistoryStatsTiles({ stats }: { stats: NonNullable<HistoryData["stats"]>
     format?: (v: number) => string;
     sub: string;
     accent: string;
+    footer?: React.ReactNode;
   }[] = [
     {
       icon: History, label: "Total runs", value: stats.totalRuns,
       sub: `${stats.okRuns} green · ${stats.distinctCodeVersions} code version${stats.distinctCodeVersions === 1 ? "" : "s"}`,
       accent: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
+      footer: sourceChips.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1" aria-label="Run provenance split">
+          {sourceChips.map((c) => (
+            <span key={c.label} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9.5px] ${c.cls}`}>
+              {c.count} {c.label}
+            </span>
+          ))}
+        </div>
+      ) : undefined,
     },
     {
       icon: CheckCircle2, label: "Pass rate", value: stats.passRate,
@@ -1276,6 +1292,7 @@ function HistoryStatsTiles({ stats }: { stats: NonNullable<HistoryData["stats"]>
                 <CountUp value={t.value} format={t.format} />
               </p>
               <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">{t.sub}</p>
+              {t.footer}
             </CardContent>
           </Card>
         </motion.div>
@@ -1522,7 +1539,34 @@ function DurationChart({ runs }: { runs: HistoryRun[] }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.0.4 — run provenance styling                                     */
+/* ------------------------------------------------------------------ */
+
+const RUN_SOURCE_STYLES: Record<
+  string,
+  { icon: React.ComponentType<{ className?: string }>; cls: string; hint: string }
+> = {
+  manual: {
+    icon: MousePointerClick,
+    cls: "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400",
+    hint: "Manual run — triggered from the Tests or History tab",
+  },
+  startup: {
+    icon: RefreshCw,
+    cls: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    hint: "Startup pass — the scheduler's first run, 60s after the server boots",
+  },
+  scheduled: {
+    icon: Clock,
+    cls: "border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300",
+    hint: "Scheduled pass — the 6-hour interval in src/instrumentation.ts",
+  },
+};
+
 function RunRow({ run, onDelete }: { run: HistoryRun; onDelete: (id: string) => void }) {
+  const sourceStyle = RUN_SOURCE_STYLES[run.source] ?? RUN_SOURCE_STYLES.manual;
+  const SourceIcon = sourceStyle.icon;
   return (
     <motion.li variants={fadeUp}>
       <div className="group flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-950/60 px-3.5 py-2.5 transition-colors hover:border-zinc-300 dark:hover:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-900/60">
@@ -1553,6 +1597,24 @@ function RunRow({ run, onDelete }: { run: HistoryRun; onDelete: (id: string) => 
         >
           {run.ok ? "GREEN" : "RED"}
         </Badge>
+
+        {/* v0.0.4 — provenance: who triggered this run */}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={`inline-flex cursor-default items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] ${sourceStyle.cls}`}
+                aria-label={`Run source: ${run.source}`}
+              >
+                <SourceIcon className="h-3 w-3" aria-hidden="true" />
+                {run.source}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <span className="max-w-[260px] text-xs leading-relaxed">{sourceStyle.hint}</span>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
         <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
           {run.testsPassed}/{run.testsTotal} <span className="text-zinc-500 dark:text-zinc-600">tests</span>
@@ -1592,10 +1654,11 @@ function RunRow({ run, onDelete }: { run: HistoryRun; onDelete: (id: string) => 
 
 function exportHistoryCsv(runs: HistoryRun[]): { ok: boolean; count: number } {
   try {
-    const header = "ranAt,ok,testsPassed,testsTotal,compileOk,compileTotal,durationMs,pythonVersion,codeHash";
+    const header = "ranAt,source,ok,testsPassed,testsTotal,compileOk,compileTotal,durationMs,pythonVersion,codeHash";
     const lines = runs.map((r) =>
       [
         r.ranAt,
+        r.source,
         r.ok ? "GREEN" : "RED",
         r.testsPassed,
         r.testsTotal,
@@ -2084,7 +2147,7 @@ function RepoStatusCard({ repo, ci }: { repo: ReleasesData["repo"]; ci: Releases
     : { label: "CI n/a", cls: "border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400", icon: CircleDot, dot: "bg-zinc-500" };
   const CiIcon = ciState.icon;
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)]">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -2168,21 +2231,21 @@ function RepoStatusCard({ repo, ci }: { repo: ReleasesData["repo"]; ci: Releases
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Repository status">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
             <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              <Tag className="h-3 w-3" /> VERSION
+              <Tag className="h-3 w-3 text-emerald-500" /> VERSION
             </p>
             <p className="mt-1.5 font-mono text-base font-semibold text-zinc-900 dark:text-zinc-50">v{repo.version || "—"}</p>
             <p className="mt-0.5 text-[10.5px] text-zinc-500">repo working tree</p>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
             <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              <GitBranch className="h-3 w-3" /> Last tag
+              <GitBranch className="h-3 w-3 text-amber-500" /> Last tag
             </p>
             <p className="mt-1.5 font-mono text-base font-semibold text-zinc-900 dark:text-zinc-50">{repo.lastTag ?? "—"}</p>
             <p className="mt-0.5 text-[10.5px] text-zinc-500">on main</p>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
             <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              <GitCommitHorizontal className="h-3 w-3" /> Commits
+              <GitCommitHorizontal className="h-3 w-3 text-teal-500" /> Commits
             </p>
             <p className="mt-1.5 font-mono text-base font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">{repo.commitCount ?? "—"}</p>
             <p className="mt-0.5 truncate text-[10.5px] text-zinc-500" title={repo.headCommit?.subject ?? ""}>
@@ -2191,7 +2254,7 @@ function RepoStatusCard({ repo, ci }: { repo: ReleasesData["repo"]; ci: Releases
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900">
             <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              <CircleDot className="h-3 w-3" /> Working tree
+              <CircleDot className={`h-3 w-3 ${clean ? "text-emerald-500" : dirty ? "text-amber-500" : ""}`} /> Working tree
             </p>
             <p className="mt-1.5 flex items-center gap-1.5">
               <Badge
@@ -2235,7 +2298,7 @@ function RepoStatusCard({ repo, ci }: { repo: ReleasesData["repo"]; ci: Releases
 
 function BackupsCard({ backups }: { backups: ReleasesData["backups"] }) {
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)]">
       <CardHeader className="pb-3">
         <div>
           <CardTitle className="flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
@@ -2303,9 +2366,112 @@ const RELEASE_WORKFLOW_STEPS = [
   "Rebuild GitCurator-vX.YY.zip → download/ + public/ (this tab refreshes)",
 ] as const;
 
+/* ------------------------------------------------------------------ */
+/* v0.0.4 — CI history strip (last 10 GitHub Actions runs)             */
+/* ------------------------------------------------------------------ */
+
+function ciRunChipCls(run: ReleasesData["ciHistory"] extends (infer R)[] | null ? R : never): string {
+  if (run.ok) return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20";
+  if (run.status === "in_progress" || run.status === "queued") return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20";
+  if (run.status === "completed") return "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20";
+  return "border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400";
+}
+
+function ciRunDotCls(run: ReleasesData["ciHistory"] extends (infer R)[] | null ? R : never): string {
+  if (run.ok) return "bg-emerald-400";
+  if (run.status === "in_progress" || run.status === "queued") return "bg-amber-400 animate-pulse";
+  if (run.status === "completed") return "bg-rose-400";
+  return "bg-zinc-500";
+}
+
+function CiHistoryCard({ runs }: { runs: ReleasesData["ciHistory"] }) {
+  // runs is newest-first (the Actions API order).
+  const completed = runs.filter((r) => r.status === "completed");
+  const passing = completed.filter((r) => r.ok).length;
+  const lastFailure = completed.find((r) => !r.ok) ?? null;
+  const inFlight = runs.find((r) => r.status === "in_progress" || r.status === "queued") ?? null;
+
+  return (
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)]">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
+              <Workflow className="h-4 w-4 text-zinc-500" /> CI run history
+              <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/50 font-mono text-[10px] font-normal text-zinc-600 dark:text-zinc-300">
+                last {runs.length}
+              </Badge>
+            </CardTitle>
+            <CardDescription className="mt-1 text-[12px] text-zinc-500">
+              GitHub Actions, newest first — every push, tag and PR triggers the 45-test gate.
+            </CardDescription>
+          </div>
+          <p className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+            {passing}/{completed.length} passing
+            {inFlight && <span className="ml-1.5 text-amber-600 dark:text-amber-400">· 1 running</span>}
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div
+          className="grid grid-cols-5 gap-1.5 sm:grid-cols-10"
+          role="list"
+          aria-label="Recent GitHub Actions runs, newest first"
+        >
+          {runs.map((run) => {
+            const chip = (
+              <span
+                className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border font-mono text-[11px] font-semibold tabular-nums transition-colors ${ciRunChipCls(run)}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${ciRunDotCls(run)}`} aria-hidden="true" />
+                #{run.runNumber ?? "?"}
+              </span>
+            );
+            const label = `CI run #${run.runNumber ?? "?"} — ${
+              run.status === "completed" ? run.conclusion ?? "completed" : run.status
+            }${run.updatedAt ? `, updated ${timeAgo(run.updatedAt)}` : ""}`;
+            return (
+              <div role="listitem" key={`${run.runNumber}-${run.createdAt}`}>
+                {run.htmlUrl ? (
+                  <a
+                    href={run.htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${label} (opens on GitHub)`}
+                    className="inline-block w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-zinc-950 rounded-lg"
+                  >
+                    {chip}
+                  </a>
+                ) : (
+                  <span title={label}>{chip}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-3 border-t border-zinc-200 pt-2.5 text-[11px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          {lastFailure ? (
+            <>
+              <AlertTriangle className="mr-1 inline h-3 w-3 -translate-y-px text-rose-500" aria-hidden="true" />
+              Last failure: #{lastFailure.runNumber}
+              {lastFailure.conclusion ? ` (${lastFailure.conclusion})` : ""}
+              {lastFailure.updatedAt ? ` · ${timeAgo(lastFailure.updatedAt)}` : ""} — every other recent run is green.
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="mr-1 inline h-3 w-3 -translate-y-px text-emerald-500" aria-hidden="true" />
+              No failures in the last {runs.length} run{runs.length === 1 ? "" : "s"} — the gate has held since run #1.
+            </>
+          )}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function WorkflowCard() {
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)]">
       <CardHeader className="pb-3">
         <div>
           <CardTitle className="flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200">
@@ -2341,7 +2507,11 @@ function WorkflowCard() {
 
 function ReleaseCard({ release, latest }: { release: ReleasesData["releases"][number]; latest: boolean }) {
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60">
+    <Card
+      className={latest
+        ? "border-emerald-500/40 dark:border-emerald-500/30 bg-white dark:bg-zinc-900/60 bg-gradient-to-b from-emerald-500/[0.05] to-transparent dark:from-emerald-500/[0.07] ring-1 ring-emerald-500/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/60 dark:hover:border-emerald-500/40 hover:shadow-[0_8px_30px_-12px_rgba(16,185,129,0.35)]"
+        : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)]"}
+    >
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge
@@ -2355,6 +2525,7 @@ function ReleaseCard({ release, latest }: { release: ReleasesData["releases"][nu
           <CardTitle className="text-sm text-zinc-800 dark:text-zinc-200">{formatSectionText(release.title)}</CardTitle>
           {latest && (
             <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-[10px] font-normal text-emerald-700 dark:text-emerald-300">
+              <span className="mr-1 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden="true" />
               current
             </Badge>
           )}
@@ -2417,6 +2588,9 @@ function ReleasesTab({ data, loading }: { data: ReleasesData | null; loading: bo
   return (
     <div className="space-y-5">
       <RepoStatusCard repo={data.repo} ci={data.ci} />
+      {/* v0.0.4 — CI history strip (rendered when the token works and any
+          runs exist; the ci chip above already covers the no-token case) */}
+      {data.ciHistory && data.ciHistory.length > 0 && <CiHistoryCard runs={data.ciHistory} />}
       <div className="grid gap-4 lg:grid-cols-2">
         <BackupsCard backups={data.backups} />
         <WorkflowCard />
@@ -2426,11 +2600,28 @@ function ReleasesTab({ data, loading }: { data: ReleasesData | null; loading: bo
           <h3 className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-zinc-700 dark:text-zinc-200">
             <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" /> Version history — CHANGELOG.md
           </h3>
-          <div className="max-h-[62vh] space-y-4 overflow-y-auto pr-1 custom-scroll">
+          {/* v0.0.4 — timeline rail: a connector line + per-release dots */}
+          <ol className="max-h-[62vh] space-y-4 overflow-y-auto pr-1 custom-scroll">
             {data.releases.map((release, i) => (
-              <ReleaseCard key={release.version} release={release} latest={i === 0} />
+              <li key={release.version} className="relative pl-5">
+                <span
+                  className={`absolute left-0 top-[7px] h-2.5 w-2.5 rounded-full border-2 ${
+                    i === 0
+                      ? "border-emerald-500 bg-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.15)]"
+                      : "border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900"
+                  }`}
+                  aria-hidden="true"
+                />
+                {i < data.releases.length - 1 && (
+                  <span
+                    className="absolute left-[4.5px] top-[22px] bottom-[-16px] w-px bg-zinc-200 dark:bg-zinc-800"
+                    aria-hidden="true"
+                  />
+                )}
+                <ReleaseCard release={release} latest={i === 0} />
+              </li>
             ))}
-          </div>
+          </ol>
         </section>
       )}
     </div>
@@ -2693,7 +2884,7 @@ export default function Home() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 GitCurator
-                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.3"}</span>
+                <span className="ml-2 font-mono text-xs font-normal text-zinc-500">v{report?.version ?? "0.0.4"}</span>
               </h1>
               <p className="hidden truncate text-[11px] text-zinc-500 sm:block">
                 {report?.project ?? "GitCurator — Telegram → Ollama → Obsidian"}
@@ -2821,11 +3012,11 @@ export default function Home() {
           className="mb-9"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              Release {report?.version ?? "0.0.3"}
+            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-normal">
+              Release {report?.version ?? "0.0.4"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
-              {report?.codename ?? "CI Pipeline & Actions Status"}
+              {report?.codename ?? "Provenance & CI History"}
             </Badge>
             <Badge variant="outline" className="border-zinc-300 dark:border-zinc-700 bg-zinc-200/60 dark:bg-zinc-800/40 text-zinc-700 dark:text-zinc-300 font-normal">
               repo lineage <span className="ml-1 font-mono">v30.x</span>
