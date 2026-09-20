@@ -14,18 +14,31 @@ import path from "path";
 
 export const APP_DIR = process.env.GITCURATOR_APP_DIR ?? path.join(process.cwd(), "..", "app");
 
-/** The Python files in the compile gate (v0.0.7: modular package layout —
- *  the flat app/ became gitcurator/{core,integrations,cloud,gui,tools} →
- *  12 files, +goodrepos.py). */
+/** The Python files in the compile gate (v32.3: the 9,770-line gui/app.py
+ *  became cli.py + gui/{main_window,workers,log_handler,_qt}.py +
+ *  core/{vault,cache_db,link_tracker,inbox}.py + utils/ +
+ *  integrations/telegram_jobs.py — 24 files, all pure-stdlib-anchored). */
 export const PY_FILES = [
   "main.py",
+  "gitcurator/cli.py",
   "gitcurator/gui/app.py",
+  "gitcurator/gui/main_window.py",
+  "gitcurator/gui/workers.py",
+  "gitcurator/gui/log_handler.py",
+  "gitcurator/gui/_qt.py",
   "gitcurator/core/links.py",
   "gitcurator/core/storage.py",
   "gitcurator/core/note_builder.py",
   "gitcurator/core/llm_client.py",
+  "gitcurator/core/vault.py",
+  "gitcurator/core/cache_db.py",
+  "gitcurator/core/link_tracker.py",
+  "gitcurator/core/inbox.py",
+  "gitcurator/utils/logging_setup.py",
+  "gitcurator/utils/terminal.py",
   "gitcurator/integrations/vaultseal.py",
   "gitcurator/integrations/goodrepos.py",
+  "gitcurator/integrations/telegram_jobs.py",
   "gitcurator/integrations/telegram_fetch_worker.py",
   "gitcurator/integrations/telethon_fetcher.py",
   "gitcurator/integrations/backfill_manager.py",
