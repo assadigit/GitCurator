@@ -14,16 +14,26 @@ import path from "path";
 
 export const APP_DIR = process.env.GITCURATOR_APP_DIR ?? path.join(process.cwd(), "..", "app");
 
-/** The Python files in the compile gate (v32.3: the 9,770-line gui/app.py
- *  became cli.py + gui/{main_window,workers,log_handler,_qt}.py +
- *  core/{vault,cache_db,link_tracker,inbox}.py + utils/ +
- *  integrations/telegram_jobs.py — 24 files, all pure-stdlib-anchored). */
+/** The Python files in the compile gate (v32.4: gui/workers.py became the
+ *  gui/workers/ package — signals + __init__ in processing.py, pipeline
+ *  phases mixed in from single-concern modules; 34 files, all
+ *  pure-stdlib-anchored). */
 export const PY_FILES = [
   "main.py",
   "gitcurator/cli.py",
   "gitcurator/gui/app.py",
   "gitcurator/gui/main_window.py",
-  "gitcurator/gui/workers.py",
+  "gitcurator/gui/workers/__init__.py",
+  "gitcurator/gui/workers/_deps.py",
+  "gitcurator/gui/workers/_auth.py",
+  "gitcurator/gui/workers/pipeline.py",
+  "gitcurator/gui/workers/notes.py",
+  "gitcurator/gui/workers/fetch.py",
+  "gitcurator/gui/workers/llm.py",
+  "gitcurator/gui/workers/assets.py",
+  "gitcurator/gui/workers/scoring.py",
+  "gitcurator/gui/workers/processing.py",
+  "gitcurator/gui/workers/test_worker.py",
   "gitcurator/gui/log_handler.py",
   "gitcurator/gui/_qt.py",
   "gitcurator/core/links.py",

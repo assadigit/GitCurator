@@ -1,6 +1,6 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 24 audited
+# Every push to main, every tag, and every PR compiles the 34 audited
 # Python modules and runs the full 87-case suite (34 unit + 11 e2e + 28
 # goodrepos + 14 CLI smoke; the CLI layer's subprocess tests run on bare
 # python, the one PyQt6 end-to-end case self-skips without pip).
@@ -38,14 +38,24 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Compile the 24 audited modules
+      - name: Compile the 34 audited modules
         run: >
           python -m py_compile
           main.py
           gitcurator/cli.py
           gitcurator/gui/app.py
           gitcurator/gui/main_window.py
-          gitcurator/gui/workers.py
+          gitcurator/gui/workers/__init__.py
+          gitcurator/gui/workers/_deps.py
+          gitcurator/gui/workers/_auth.py
+          gitcurator/gui/workers/pipeline.py
+          gitcurator/gui/workers/notes.py
+          gitcurator/gui/workers/fetch.py
+          gitcurator/gui/workers/llm.py
+          gitcurator/gui/workers/assets.py
+          gitcurator/gui/workers/scoring.py
+          gitcurator/gui/workers/processing.py
+          gitcurator/gui/workers/test_worker.py
           gitcurator/gui/log_handler.py
           gitcurator/gui/_qt.py
           gitcurator/core/links.py
