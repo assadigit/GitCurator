@@ -45,7 +45,7 @@ export const PY_FILES = [
   "gitcurator/cloud/cloudflare_sync.py",
 ] as const;
 
-export const TEST_MODULES = ["tests.test_core", "tests.test_e2e", "tests.test_goodrepos"] as const;
+export const TEST_MODULES = ["tests.test_core", "tests.test_e2e", "tests.test_goodrepos", "tests.test_cli"] as const;
 
 /* ------------------------------------------------------------------ */
 /* Types (shared shape with the dashboard)                             */

@@ -3,6 +3,98 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+## [Unreleased] — v32.3 · Modularization & CLI Hardening (branch `refactor/modularization`)
+
+A behavior-preserving refactor of the 9,770-line `gui/app.py` monolith
+(51% of the Python codebase) into focused single-responsibility modules,
+plus four CLI bug fixes with regression tests. Baseline before the work:
+73/73 tests green; every commit on the branch was verified against that
+baseline (tests + import smokes + offscreen GUI construction + headless
+end-to-end runs byte-compared against pre-refactor output).
+
+### Changed — codebase refactoring & modularization (no behavior changes)
+
+- **`app/gitcurator/gui/app.py`: 9,770 → 164 lines.** It is now a thin
+  back-compat facade that re-exports the public surface the monolith
+  exposed (`gitcurator.gui.app.main` and friends keep working —
+  `main.py`'s documented import is unchanged in spirit and re-anchored
+  to `gitcurator.cli.main` in the CLI fix below).
+- New focused modules (bodies moved verbatim, docstrings + explicit
+  import headers added):
+  - `gitcurator/cli.py` — `run_headless`, `_is_process_running`, `main`
+  - `gitcurator/gui/main_window.py` — MainWindow (the PyQt6 GUI, ~6,130 lines)
+  - `gitcurator/gui/workers.py` — ProcessingWorker + TestWorker
+  - `gitcurator/gui/log_handler.py` — logging → Qt signal bridge
+  - `gitcurator/gui/_qt.py` — the guarded PyQt6 import (single site)
+  - `gitcurator/core/vault.py` — VaultIndex, find_obsidian_vaults, _safe_moc_name
+  - `gitcurator/core/cache_db.py` — CacheDB (now pure-stdlib importable)
+  - `gitcurator/core/link_tracker.py` — the v23 "No Link Left Behind" manifest
+  - `gitcurator/core/inbox.py` — non-GitHub link routing (classify/PLATFORM_INFO/write)
+  - `gitcurator/utils/` — logging_setup + terminal (guarded colorama)
+  - `gitcurator/integrations/telegram_jobs.py` — subprocess Telegram fetch jobs
+- The compile gate (CI + dashboard `/api/verify`) widened from 12 to 24
+  modules; the test suite grew from 73 to 87 cases (see Added).
+
+### Fixed — CLI investigation (root causes, fixes, verification)
+
+- **Headless CLI failed outside `app/` (the primary reported failure).**
+  Root cause: the v32 modularization anchored `CONFIG_FILE` to `APP_DIR`
+  in `constants.py` ("correct file when launched from anywhere") but
+  never updated `run_headless()`, whose `--config` default remained the
+  CWD-relative string `'config.json'` — so
+  `python app/main.py --headless …` from any other directory died with
+  `Config file not found: config.json` (exit 1). Fix:
+  `constants.resolve_app_path()` (cwd-first, `APP_DIR` fallback) +
+  `--config` defaulting to the anchored `CONFIG_FILE`; the same
+  resolution covers `--import-file`. Verified: from the repo root the
+  pipeline now loads `…/app/config.json` and runs end-to-end with output
+  byte-identical to an `app/`-cwd run; locked down by
+  `tests/test_cli.py`.
+- **Five sibling CWD-relative paths fixed by the same root-cause
+  analysis:** `system_prompt.txt` (a custom prompt was silently ignored
+  outside `app/`), `session.session` (backup copy missed — the fetch
+  subprocess itself always ran with `cwd=APP_DIR`), `cache.db`
+  (`CacheDB()` re-created the dedup cache per launch directory, so
+  processed repos were "forgotten"), `app.lock` (instances launched from
+  different directories never saw each other's lock), and the `logs/`
+  default. All anchored to `APP_DIR` — identical behavior for the
+  documented `app/` usage.
+- **Headless runs exited 0 on failure.** `run_headless` returned
+  `app.exec()` (0 after `quit()`), so a failed batch ("ERROR: Ollama not
+  available") still exited 0 — schedulers/CI could not detect failure.
+  Fix: `app.exit(0 if success else 1)`. Verified: failed run → exit 1.
+- **`python main.py --help` launched the GUI.** The README has promised
+  "headless mode options" since v0.0.7, but `main()` only routed
+  `--headless`; on display-less machines `--help` died with a Qt
+  platform-plugin error. Root cause: argument inspection happened after
+  the whole PyQt6 import chain. Fix: `build_arg_parser()` hoisted to
+  module level, `--help`/`-h`/`--headless` routed to argparse BEFORE any
+  heavy import (`cli.py` is stdlib+constants-only at module level),
+  `main.py` imports `gitcurator.cli.main` directly. Verified:
+  `python main.py --help` prints usage + exit 0 on a bare Python install
+  with no PyQt6; real runs keep the historical version-stamp on stderr.
+- **`requirements.txt` missing PySocks.** `telethon_fetcher.py` imports
+  `socks` at load time and the default `config.json` ships a socks5
+  proxy enabled — fresh installs printed `No module named 'socks'` and
+  the Telegram fetcher silently degraded to a stub. Fix:
+  `PySocks>=1.7.1` declared. Verified in a clean venv.
+- **Windows console hardening:** redirected stdout/stderr (ANSI code
+  page, e.g. cp1252) are reconfigured to UTF-8 with `errors='replace'`
+  at CLI entry, so the emoji-rich log lines can no longer raise
+  `UnicodeEncodeError` when piped.
+- **Latent unbound-name in the headless finish handler:** `vs_summary`
+  is now built before the VaultSeal try-block (a seal exception used to
+  turn the GoodRepos call into `NameError`).
+
+### Added
+
+- `tests/test_cli.py` — 14 CLI smoke tests (parser surface, path
+  resolution, `main.py --help` subprocess behavior on bare Python, and a
+  PyQt6-guarded end-to-end). Suite: 73 → 87 tests.
+- `docs/SWOT_ANALYSIS.md` — evidence-based SWOT audit of v0.0.10.
+- `gitcurator/constants.resolve_app_path()` — the one canonical
+  relative-path resolver (cwd-first, APP_DIR fallback).
+
 ## [0.0.10] — Security Hygiene & Deploy Kit — 2026-09-17
 
 Session wrap-up release: closes the Session-1 audit finding *live secrets

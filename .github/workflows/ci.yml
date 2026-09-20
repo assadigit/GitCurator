@@ -1,7 +1,9 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 24 audited
-# Python modules and runs the full 73-case suite (34 unit + 11 e2e + 28 goodrepos).
+# Python modules and runs the full 87-case suite (34 unit + 11 e2e + 28
+# goodrepos + 14 CLI smoke; the CLI layer's subprocess tests run on bare
+# python, the one PyQt6 end-to-end case self-skips without pip).
 # The testable core is pure stdlib — no pip install step required.
 # PyQt6/telethon/ollama are GUI/runtime deps that the test suite
 # deliberately does not touch. (v32.3 modularization: the 9,770-line
@@ -64,9 +66,9 @@ jobs:
           gitcurator/integrations/backfill_manager.py
           gitcurator/cloud/cloudflare_sync.py
 
-      - name: Run the test suite (34 unit + 11 e2e + 28 goodrepos)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos -v
+      - name: Run the test suite (34 unit + 11 e2e + 28 goodrepos + 14 CLI)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_cli -v
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 24 compiles + 73 tests."
+        run: echo "Gate mirrors dashboard POST /api/verify — 24 compiles + 87 tests."

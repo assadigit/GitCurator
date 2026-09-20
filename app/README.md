@@ -1,4 +1,27 @@
-# GitHub-to-Obsidian v30.0 (Core Extraction & Reliability Release)
+# GitHub-to-Obsidian — GitCurator app (v32.3 modular layout)
+
+> **v32.3 update** — the 9,770-line `main.py`-lineage monolith
+> (`gitcurator/gui/app.py`) has been split into focused modules; the file
+> itself is now a 164-line back-compat facade. The layout:
+>
+> | Module | Responsibility |
+> |---|---|
+> | `gitcurator/cli.py` | headless CLI (`run_headless`) + `main()` dispatch, app.lock, QApplication bootstrap |
+> | `gitcurator/gui/main_window.py` | the PyQt6 MainWindow (tabs, theming, log panel, Backup tab) |
+> | `gitcurator/gui/workers.py` | ProcessingWorker (curation pipeline) + TestWorker |
+> | `gitcurator/gui/_qt.py` · `log_handler.py` | guarded PyQt6 import · logging→signal bridge |
+> | `gitcurator/core/` | `links` · `storage` · `note_builder` · `llm_client` · `vault` · `cache_db` · `link_tracker` · `inbox` (pure stdlib, testable) |
+> | `gitcurator/utils/` | `logging_setup` · `terminal` |
+> | `gitcurator/integrations/telegram_jobs.py` | subprocess Telegram fetch jobs |
+>
+> **CLI hardening (v32.3):** the headless CLI works from any launch
+> directory (all runtime paths are anchored to this folder via
+> `constants.resolve_app_path`), failed runs exit `1`, `--help` is
+> answered by argparse before any PyQt6 import, and requirements.txt now
+> declares PySocks. The sections below are the historical v30 notes —
+> still accurate for behavior, outdated only where they describe file
+> layout; see the root `README.md` + `CHANGELOG.md` for the current
+> state.
 
 ## Quick Start
 
@@ -8,15 +31,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Headless (no GUI)
+### Headless (no GUI) — works from any directory since v32.3
 ```cmd
 python main.py --headless --import-file urls.txt --vault "C:\path\to\vault"
 python main.py --headless --from-id 123 --to-id 456 --vault "C:\path\to\vault"
+python main.py --help
 ```
 
 ### Unit tests (no GUI / no Ollama / no Telegram needed)
 ```cmd
-python -m unittest tests.test_core -v
+python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_cli -v
 ```
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below

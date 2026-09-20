@@ -5,7 +5,12 @@
 > and writes clean, structured notes into your **Obsidian vault**.
 
 **Version:** `0.0.10` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green · credential-free git tree (v0.0.10).
+**Status:** v32.3 modular layout — the 9,770-line `gui/app.py` monolith is
+now a 164-line back-compat facade over focused modules (`cli.py`,
+`gui/main_window`, `gui/workers`, `core/{vault,cache_db,link_tracker,inbox}`
+`utils/`, `integrations/telegram_jobs`) · 87/87 automated tests green ·
+headless CLI works from any launch directory · credential-free git tree
+(v0.0.10). Also see [docs/SWOT_ANALYSIS.md](docs/SWOT_ANALYSIS.md).
 
 ---
 
@@ -177,29 +182,38 @@ history (`GET /api/goodrepos`).
 | Path | What it is |
 |---|---|
 | `app/` | The Python application: PyQt6 GUI + headless CLI (start with `app/README.md`) |
-| `app/main.py` | Thin launcher — the real entry point is `gitcurator.gui.app.main` |
-| `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` |
-| `app/gitcurator/integrations/` | Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
-| `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful) |
-| `app/gitcurator/gui/` | `app.py` — MainWindow, pipeline worker, headless CLI |
-| `app/gitcurator/tools/` | Developer utilities (diagnostics, import-surface docs) |
-| `app/gitcurator/constants.py` | Shared design tokens + config defaults |
-| `app/tests/` | 73 tests (34 unit + 11 e2e + 28 goodrepos) — fake Ollama + fake GitHub, zero pip |
+| `app/main.py` | Thin launcher — the real entry point is `gitcurator.cli.main` (re-exported by the `gui/app.py` facade) |
+| `app/gitcurator/cli.py` | Headless CLI (`run_headless`) + argv dispatch / app.lock / QApplication bootstrap (`main`) |
+| `app/gitcurator/gui/` | `main_window.py` (MainWindow) · `workers.py` (ProcessingWorker/TestWorker) · `log_handler.py` · `_qt.py` (guarded PyQt6 import) · `app.py` (back-compat facade) |
+| `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` · `vault` · `cache_db` · `link_tracker` · `inbox` |
+| `app/gitcurator/utils/` | `logging_setup` · `terminal` (guarded colorama) |
+| `app/gitcurator/integrations/` | `telegram_jobs` (subprocess fetch jobs) · Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
+| `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful — currently dormant) |
+| `app/gitcurator/constants.py` | Shared design tokens, config defaults and the APP_DIR path anchoring (`resolve_app_path`) |
+| `app/tests/` | 87 tests (34 unit + 11 e2e + 28 goodrepos + 14 CLI smoke) — fake Ollama + fake GitHub, zero pip |
 | `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
 | `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
+| `docs/SWOT_ANALYSIS.md` | Evidence-based SWOT audit of v0.0.10 (Phase-2 deliverable) |
 
 ## Quickstart — the app (Windows)
 
 ```bat
 cd app
-pip install -r requirements.txt
+pip install -r requirements.txt   (includes PySocks — required for the
+                                   default socks5 proxy configuration)
 python main.py            :: GUI mode
-python main.py --help     :: headless mode options
+python main.py --help     :: headless mode options (works from any cwd,
+                            even before the deps are installed)
 ```
+
+The headless CLI works from **any** launch directory since v32.3 —
+`--config` / `--import-file` / `cache.db` / `session.session` /
+`system_prompt.txt` / `app.lock` are anchored to the app folder, and a
+failed headless run exits `1` (not `0`), so schedulers can detect it.
 
 Requirements: Python 3.10+, a running [Ollama](https://ollama.com) server,
 and (optionally) Telegram API credentials in `app/config.json`.
-Run the test suite: `python -m unittest tests.test_core tests.test_e2e -v`
+Run the test suite: `python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_cli -v`
 
 ## Quickstart — the dashboard
 
@@ -244,9 +258,10 @@ by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
 ## CI
 
 Every push, tag and PR runs `.github/workflows/ci.yml` — py_compile of the
-12 audited modules + the 73-case suite (no pip installs needed; the
-testable core is pure stdlib). The dashboard's Releases tab shows the
-live status when a read-only `GITCURATOR_GH_TOKEN` is configured.
+24 audited modules + the 87-case suite (no pip installs needed; the
+testable core is pure stdlib and the CLI subprocess tests run on bare
+Python). The dashboard's Releases tab shows the live status when a
+read-only `GITCURATOR_GH_TOKEN` is configured.
 
 ## Security — read before deploying
 
