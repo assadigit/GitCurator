@@ -21,6 +21,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 
+from gitcurator.constants import APP_DIR
 from gitcurator.core.links import normalize_url
 
 __all__ = ["CacheDB"]
@@ -40,7 +41,13 @@ class CacheDB:
     - close() is idempotent; call sites use try/finally (see run()).
     """
 
-    def __init__(self, db_path="cache.db"):
+    def __init__(self, db_path=None):
+        # v32.3 fix: the default was the CWD-relative "cache.db", so the
+        # cache silently re-created itself wherever the app was launched
+        # from (dedup "forgot" processed repos). Anchor to APP_DIR — the
+        # same file the documented app/-cwd behavior always used.
+        if db_path is None:
+            db_path = os.path.join(APP_DIR, "cache.db")
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
         self.conn.execute("PRAGMA busy_timeout = 30000")

@@ -12,16 +12,18 @@ Extracted verbatim from ``gitcurator/gui/app.py`` (v32.3 modularization):
   single-instance ``app.lock`` dance (stale-lock recovery) and the
   QApplication bootstrap (high-DPI rounding policy, Fusion style).
 
-Behavioral notes kept for fidelity (launch from ``app/``, the documented
-usage): the ``--config`` default and ``app.lock`` are CWD-relative,
-exactly as in the monolith — CLI hardening (APP_DIR anchoring, real exit
-codes, ``--help`` routing) lands as a separate fix commit on this branch.
+v32.3 CLI hardening: ``--config`` / ``--import-file`` / ``app.lock`` /
+``cache.db`` / ``system_prompt.txt`` / ``session.session`` / ``logs/`` are
+all APP_DIR-anchored now (cwd-first for user-supplied relative paths), so
+the CLI works from any launch directory.
 """
 
 import json
 import os
 import sys
 from datetime import datetime
+
+from gitcurator.constants import APP_DIR, CONFIG_FILE, resolve_app_path
 
 from gitcurator.gui._qt import QCoreApplication, QApplication, Qt
 from gitcurator.gui.workers import ProcessingWorker
@@ -65,12 +67,19 @@ def run_headless(args):
     parser.add_argument('--count', type=int, help='Number of messages (offset mode)')
     parser.add_argument('--import-file', type=str, help='Path to .txt file with URLs')
     parser.add_argument('--vault', type=str, required=True, help='Obsidian vault path')
-    parser.add_argument('--config', type=str, default='config.json', help='Config file path')
+    parser.add_argument('--config', type=str, default=CONFIG_FILE, help='Config file path (default: the app\'s own config.json, resolved against APP_DIR)')
     parser.add_argument('--single-id', type=int, help='Single Telegram message ID')
     parsed = parser.parse_args(args)
 
     # Load config
-    config_path = parsed.config
+    # v32.3 fix (root cause): the default was the CWD-relative 'config.json'.
+    # The v32 modularization anchored CONFIG_FILE to APP_DIR for the GUI
+    # but never updated this CLI default — running `python app/main.py
+    # --headless ...` from any directory other than app/ died with
+    # "Config file not found: config.json". The default is now the
+    # APP_DIR-anchored CONFIG_FILE; a user-supplied RELATIVE path still
+    # resolves cwd-first (as typed), then falls back to APP_DIR.
+    config_path = resolve_app_path(parsed.config)
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
             config = json.load(f)
@@ -87,7 +96,9 @@ def run_headless(args):
     # Determine mode
     if parsed.import_file:
         mode = 'import'
-        import_file = parsed.import_file
+        # v32.3 fix: same cwd-first / APP_DIR-fallback resolution as
+        # --config, so `--import-file urls.txt` works from any cwd.
+        import_file = resolve_app_path(parsed.import_file)
         range_from = range_to = offset_start = offset_count = None
         urls = None
         print(f"[headless] Mode: import from file: {import_file}")
@@ -251,8 +262,12 @@ def main():
     if '--headless' in sys.argv:
         sys.exit(run_headless(sys.argv[1:]))
 
-    # Single instance check — detects stale locks from crashed sessions
-    lock_file = "app.lock"
+    # Single instance check — detects stale locks from crashed sessions.
+    # v32.3 fix: anchor app.lock to APP_DIR (was CWD-relative — two
+    # instances launched from different directories never saw each
+    # other's lock, and stray app.lock files scattered wherever the
+    # process happened to start).
+    lock_file = os.path.join(APP_DIR, "app.lock")
     lock_fd = None
     try:
         lock_fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)

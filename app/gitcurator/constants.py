@@ -29,6 +29,38 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CONFIG_FILE = os.path.join(APP_DIR, "config.json")
 
+
+def resolve_app_path(candidate: str) -> str:
+    """v32.3 — CLI path hardening: resolve a possibly-relative path.
+
+    The v32 layout anchored ``CONFIG_FILE`` to APP_DIR, but several other
+    runtime paths stayed CWD-relative (run_headless's ``--config`` default,
+    ``system_prompt.txt``, ``session.session``, ``cache.db``, ``app.lock``,
+    ``logs/``). Running ``python app/main.py --headless ...`` from any
+    directory other than ``app/`` therefore failed with
+    "Config file not found: config.json".
+
+    Resolution order (mirrors the documented app/-cwd behavior for every
+    path that exists, and stays truthful for paths that don't):
+
+    1. absolute paths pass through untouched;
+    2. a relative path that exists as typed (CWD) resolves to the CWD form
+       — identical to the old behavior when launched from ``app/``;
+    3. a relative path that exists anchored at APP_DIR resolves there —
+       the fix that makes any launch directory work;
+    4. a relative path that exists nowhere resolves to the CWD form, so
+       error messages show the path exactly as the user typed it.
+    """
+    if not candidate or os.path.isabs(candidate):
+        return candidate
+    as_typed = os.path.abspath(candidate)
+    if os.path.exists(as_typed):
+        return as_typed
+    anchored = os.path.abspath(os.path.join(APP_DIR, candidate))
+    if os.path.exists(anchored):
+        return anchored
+    return as_typed
+
 # Design System — PASTEL (v32): mint / violet / rose / butter on cream & plum
 # ============================================================================
 # The whole UI speaks pastel while every text pair keeps WCAG AA (>=4.5:1).
