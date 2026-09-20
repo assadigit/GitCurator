@@ -2,7 +2,14 @@
 PyQt6>=6.5.0
 
 # Telegram integration
+# v32.3 fix: PySocks is REQUIRED, not optional - telethon_fetcher.py
+# imports the 'socks' module at load time and the default config.json
+# ships a socks5 proxy enabled. Without PySocks a fresh
+# `pip install -r requirements.txt` prints
+# "Failed to import telethon_fetcher: No module named 'socks'" and the
+# Telegram fetcher silently degrades to a stub.
 Telethon>=1.34.0
+PySocks>=1.7.1
 
 # GitHub API
 PyGithub>=2.1.0
