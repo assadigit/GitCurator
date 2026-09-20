@@ -142,6 +142,28 @@ class TestResolveAppPath(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Dependency-guard contracts (the friendly messages must stay friendly)
+# ---------------------------------------------------------------------------
+
+class TestDependencyGuardContracts(unittest.TestCase):
+    """v32.4: the guards must degrade gracefully on dependency-less
+    installs — no raw ImportError should ever reach the user before a
+    friendly 'X is not installed' message does."""
+
+    def test_terminal_colorama_name_always_bound(self):
+        """utils/terminal.__all__ promises a 'colorama' name and the
+        gui/app.py facade imports it. Before the v32.4 fix the no-colorama
+        fallback forgot to bind it, so a bare install crashed with
+        'cannot import name 'colorama'' BEFORE the PyQt6 guard could
+        print its message."""
+        from gitcurator.utils import terminal
+        self.assertIn("colorama", vars(terminal),
+                      "fallback must honor the module's __all__ contract")
+        self.assertTrue(hasattr(terminal, "Fore"))
+        self.assertTrue(hasattr(terminal, "Style"))
+
+
+# ---------------------------------------------------------------------------
 # main.py subprocess behavior (argparse answered BEFORE any Qt import —
 # these run on a bare Python install, CI included)
 # ---------------------------------------------------------------------------
@@ -180,6 +202,17 @@ class TestMainPySubprocess(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertNotIn("PyQt6 is not installed", proc.stderr)
         self.assertNotIn("PyQt6", proc.stderr)
+
+    def test_python_dash_m_package_entry(self):
+        """v32.4: ``python -m gitcurator`` equals ``python main.py``
+        (PEP 338). Before the __main__.py shim this failed with
+        'No module named gitcurator.__main__'."""
+        proc = subprocess.run(
+            [sys.executable, "-m", "gitcurator", "--help"],
+            cwd=_APP_DIR, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--headless", proc.stdout)
 
 
 # ---------------------------------------------------------------------------
