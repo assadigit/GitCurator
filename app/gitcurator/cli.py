@@ -165,11 +165,15 @@ def run_headless(args):
         # runs before the exit print so it can never be cut off). Runs for
         # failed batches too — notes written before a mid-run failure are
         # exactly what we want backed up.
+        # v32.3 fix: vs_summary is built BEFORE the try — if seal_from_config
+        # ever raises, the GoodRepos call below used to die with
+        # NameError: name 'vs_summary' is not defined instead of the real
+        # error.
+        vs_summary = {
+            "processed": int(getattr(worker, 'processed', 0) or 0),
+            "total": int(getattr(worker, 'total', 0) or 0),
+        }
         try:
-            vs_summary = {
-                "processed": int(getattr(worker, 'processed', 0) or 0),
-                "total": int(getattr(worker, 'total', 0) or 0),
-            }
             vs_result = _vaultseal.seal_from_config(config, run_summary=vs_summary)
             print(f"[headless] VaultSeal: {vs_result.describe()}")
         except Exception as seal_err:
@@ -185,7 +189,11 @@ def run_headless(args):
             print(f"[headless] DONE: {message}")
         else:
             print(f"[headless] ERROR: {message}")
-        app.quit()
+        # v32.3 fix: app.quit() made exec() — and therefore the process —
+        # exit 0 even when the batch FAILED. Schedulers / CI could not
+        # detect a failed headless run. app.exit(code) propagates the real
+        # status through exec()'s return value.
+        app.exit(0 if success else 1)
 
     # v30 — Fix (headless hang-bombs): belt-and-suspenders receivers for the
     # three signals that previously had NO receiver in headless mode. The
