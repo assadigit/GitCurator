@@ -1,15 +1,15 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 34 audited
+# Every push to main, every tag, and every PR compiles the 50 audited
 # Python modules and runs the full 87-case suite (34 unit + 11 e2e + 28
 # goodrepos + 14 CLI smoke; the CLI layer's subprocess tests run on bare
 # python, the one PyQt6 end-to-end case self-skips without pip).
 # The testable core is pure stdlib — no pip install step required.
 # PyQt6/telethon/ollama are GUI/runtime deps that the test suite
-# deliberately does not touch. (v32.3 modularization: the 9,770-line
-# gui/app.py became cli.py + gui/{main_window,workers,log_handler,_qt}.py
-# + core/{vault,cache_db,link_tracker,inbox}.py + utils/ +
-# integrations/telegram_jobs.py — all joined the compile gate.)
+# deliberately does not touch. (v32.4 modularization: the 9,770-line
+# gui/app.py became cli.py + gui/{main_window,workers}/ packages +
+# gui/{log_handler,_qt}.py + core/{vault,cache_db,link_tracker,inbox}.py
+# + utils/ + integrations/telegram_jobs.py — all joined the compile gate.)
 
 name: CI
 
@@ -38,13 +38,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Compile the 34 audited modules
+      - name: Compile the 50 audited modules
         run: >
           python -m py_compile
           main.py
           gitcurator/cli.py
           gitcurator/gui/app.py
-          gitcurator/gui/main_window.py
+          gitcurator/gui/main_window/__init__.py
+          gitcurator/gui/main_window/_deps.py
+          gitcurator/gui/main_window/window.py
+          gitcurator/gui/main_window/styles.py
+          gitcurator/gui/main_window/ui_setup.py
+          gitcurator/gui/main_window/settings_tests.py
+          gitcurator/gui/main_window/search.py
+          gitcurator/gui/main_window/config_ui.py
+          gitcurator/gui/main_window/processing_ctl.py
+          gitcurator/gui/main_window/log_panel.py
+          gitcurator/gui/main_window/vault_ops.py
+          gitcurator/gui/main_window/bot_queue.py
+          gitcurator/gui/main_window/bot_links.py
+          gitcurator/gui/main_window/dialogs.py
+          gitcurator/gui/main_window/backup_tab.py
+          gitcurator/gui/main_window/publish_services.py
           gitcurator/gui/workers/__init__.py
           gitcurator/gui/workers/_deps.py
           gitcurator/gui/workers/_auth.py

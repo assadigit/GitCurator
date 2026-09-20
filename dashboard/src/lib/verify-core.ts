@@ -14,15 +14,30 @@ import path from "path";
 
 export const APP_DIR = process.env.GITCURATOR_APP_DIR ?? path.join(process.cwd(), "..", "app");
 
-/** The Python files in the compile gate (v32.4: gui/workers.py became the
- *  gui/workers/ package — signals + __init__ in processing.py, pipeline
- *  phases mixed in from single-concern modules; 34 files, all
- *  pure-stdlib-anchored). */
+/** The Python files in the compile gate (v32.4: gui/main_window.py became
+ *  the gui/main_window/ package — window.py assembles MainWindow from 13
+ *  single-concern mixins; v32.3 split gui/app.py into cli.py + packages;
+ *  50 files, all pure-stdlib-anchored). */
 export const PY_FILES = [
   "main.py",
   "gitcurator/cli.py",
   "gitcurator/gui/app.py",
-  "gitcurator/gui/main_window.py",
+  "gitcurator/gui/main_window/__init__.py",
+  "gitcurator/gui/main_window/_deps.py",
+  "gitcurator/gui/main_window/window.py",
+  "gitcurator/gui/main_window/styles.py",
+  "gitcurator/gui/main_window/ui_setup.py",
+  "gitcurator/gui/main_window/settings_tests.py",
+  "gitcurator/gui/main_window/search.py",
+  "gitcurator/gui/main_window/config_ui.py",
+  "gitcurator/gui/main_window/processing_ctl.py",
+  "gitcurator/gui/main_window/log_panel.py",
+  "gitcurator/gui/main_window/vault_ops.py",
+  "gitcurator/gui/main_window/bot_queue.py",
+  "gitcurator/gui/main_window/bot_links.py",
+  "gitcurator/gui/main_window/dialogs.py",
+  "gitcurator/gui/main_window/backup_tab.py",
+  "gitcurator/gui/main_window/publish_services.py",
   "gitcurator/gui/workers/__init__.py",
   "gitcurator/gui/workers/_deps.py",
   "gitcurator/gui/workers/_auth.py",
