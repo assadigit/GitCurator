@@ -18,4 +18,11 @@ except ImportError:
     class Fore:
         GREEN = ''; YELLOW = ''; RED = ''; CYAN = ''; WHITE = ''; RESET = ''
     Style = Fore
+    # v32.4 fix: ``__all__`` above promises a ``colorama`` name, and the
+    # back-compat facade (gui/app.py) imports it — binding it here keeps
+    # that contract on bare installs. Previously the missing binding made
+    # ``from gitcurator.utils.terminal import colorama`` raise a raw
+    # ImportError on dependency-less environments BEFORE the friendly
+    # PyQt6 guard could print its message.
+    colorama = None
     print("colorama not installed; colored output disabled.")
