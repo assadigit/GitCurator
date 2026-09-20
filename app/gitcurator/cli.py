@@ -15,9 +15,16 @@ Extracted verbatim from ``gitcurator/gui/app.py`` (v32.3 modularization):
 v32.3 CLI hardening: ``--config`` / ``--import-file`` / ``app.lock`` /
 ``cache.db`` / ``system_prompt.txt`` / ``session.session`` / ``logs/`` are
 all APP_DIR-anchored now (cwd-first for user-supplied relative paths), so
-the CLI works from any launch directory.
+the CLI works from any launch directory. Headless runs exit with their
+real status code. ``--help`` / ``-h`` route to the headless argument
+parser BEFORE any PyQt6/PyGithub/ollama import (the README always
+promised "python main.py --help :: headless mode options" — the old
+code launched the GUI instead). Redirected stdout/stderr are
+reconfigured to UTF-8 so the emoji-rich log lines cannot raise
+UnicodeEncodeError on Windows cp1252 pipes.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -25,24 +32,43 @@ from datetime import datetime
 
 from gitcurator.constants import APP_DIR, CONFIG_FILE, resolve_app_path
 
-from gitcurator.gui._qt import QCoreApplication, QApplication, Qt
-from gitcurator.gui.workers import ProcessingWorker
-from gitcurator.gui.main_window import MainWindow
-from gitcurator.core import storage as _storage
-from gitcurator.integrations import vaultseal as _vaultseal
-from gitcurator.integrations import goodrepos as _goodrepos
+__all__ = ["main", "run_headless", "build_arg_parser"]
 
-# Import Telethon fetcher with graceful error
-try:
-    from gitcurator.integrations.telethon_fetcher import fetch_github_urls_sync, TelegramFetcherError
-except ImportError as e:
-    print(f"Failed to import telethon_fetcher: {e}")
-    print("Make sure telethon is installed: pip install telethon")
-    def fetch_github_urls_sync(*args, **kwargs):
-        return {"success": False, "error": "Telethon not installed"}
-    TelegramFetcherError = Exception
 
-__all__ = ["main", "run_headless"]
+def _force_utf8_stdio() -> None:
+    """Windows CLI hardening: redirected stdout/stderr default to the ANSI
+    code page (e.g. cp1252), where the emoji-rich log lines (📬 ✅ ❌ …)
+    raise UnicodeEncodeError. Reconfigure both streams to UTF-8 with
+    ``errors='replace'`` — a no-op on UTF-8 terminals and on the Windows
+    console (already UTF-8 via PEP 528); only piped/redirected output
+    changes, from crash to readable."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass  # exotic streams (captured, closed) — leave untouched
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """The headless-mode argument parser.
+
+    v32.3: hoisted to module level (it used to live inside run_headless)
+    so ``--help`` can be answered BEFORE PyQt6 / PyGithub / ollama are
+    imported — ``python main.py --help`` works on a bare Python install.
+    """
+    parser = argparse.ArgumentParser(description="GitHub Project Curator (headless mode)")
+    parser.add_argument('--headless', action='store_true', help='Run without GUI')
+    parser.add_argument('--from-id', type=int, help='Start message ID (Telegram range mode)')
+    parser.add_argument('--to-id', type=int, help='End message ID (Telegram range mode)')
+    parser.add_argument('--offset-start', type=int, help='Offset start ID (Telegram offset mode)')
+    parser.add_argument('--count', type=int, help='Number of messages (offset mode)')
+    parser.add_argument('--import-file', type=str, help='Path to .txt file with URLs')
+    parser.add_argument('--vault', type=str, required=True, help='Obsidian vault path')
+    parser.add_argument('--config', type=str, default=CONFIG_FILE, help='Config file path (default: the app\'s own config.json, resolved against APP_DIR)')
+    parser.add_argument('--single-id', type=int, help='Single Telegram message ID')
+    return parser
 
 
 # ============================================================================
@@ -57,19 +83,23 @@ def run_headless(args):
         python main.py --headless --import-file "urls.txt" --vault "/path/to/vault" --config "config.json"
         python main.py --headless --single-id 12345 --vault "/path/to/vault"
     """
-    import argparse
+    _force_utf8_stdio()
 
-    parser = argparse.ArgumentParser(description="GitHub Project Curator (headless mode)")
-    parser.add_argument('--headless', action='store_true', help='Run without GUI')
-    parser.add_argument('--from-id', type=int, help='Start message ID (Telegram range mode)')
-    parser.add_argument('--to-id', type=int, help='End message ID (Telegram range mode)')
-    parser.add_argument('--offset-start', type=int, help='Offset start ID (Telegram offset mode)')
-    parser.add_argument('--count', type=int, help='Number of messages (offset mode)')
-    parser.add_argument('--import-file', type=str, help='Path to .txt file with URLs')
-    parser.add_argument('--vault', type=str, required=True, help='Obsidian vault path')
-    parser.add_argument('--config', type=str, default=CONFIG_FILE, help='Config file path (default: the app\'s own config.json, resolved against APP_DIR)')
-    parser.add_argument('--single-id', type=int, help='Single Telegram message ID')
-    parsed = parser.parse_args(args)
+    # v32.3: parse FIRST — --help / usage errors exit here, before any
+    # PyQt6 / PyGithub / ollama import (works on a bare Python install).
+    parsed = build_arg_parser().parse_args(args)
+
+    # Heavy imports AFTER argparse. Importing the gui.app facade preserves
+    # the historical '[main] LOADED version …' stderr stamp and provides
+    # the telethon-guarded fetch_github_urls_sync (the facade runs its own
+    # import guards; the modules below are already loaded by then).
+    import gitcurator.gui.app as _gui_app  # noqa: F401 — version stamp + deps
+    from gitcurator.gui._qt import QCoreApplication
+    from gitcurator.gui.workers import ProcessingWorker
+    from gitcurator.core import storage as _storage
+    from gitcurator.integrations import vaultseal as _vaultseal
+    from gitcurator.integrations import goodrepos as _goodrepos
+    fetch_github_urls_sync = _gui_app.fetch_github_urls_sync
 
     # Load config
     # v32.3 fix (root cause): the default was the CWD-relative 'config.json'.
@@ -266,9 +296,23 @@ def _is_process_running(pid):
         return False
 
 def main():
-    # Check for headless mode
-    if '--headless' in sys.argv:
-        sys.exit(run_headless(sys.argv[1:]))
+    _force_utf8_stdio()
+    argv = sys.argv[1:]
+
+    # v32.3 fix: route --headless AND --help/-h to the headless parser
+    # BEFORE any Qt import. The README always promised "python main.py
+    # --help :: headless mode options" — the old code only checked for
+    # '--headless', so --help launched the GUI instead (and on a
+    # display-less machine died with a Qt platform-plugin error).
+    if argv and ('--headless' in argv or '--help' in argv or '-h' in argv):
+        sys.exit(run_headless(argv))
+
+    # GUI path — the heavy imports happen here, after the arg routing.
+    # The facade import preserves the historical '[main] LOADED version …'
+    # stderr stamp and pulls in MainWindow + every dependency.
+    import gitcurator.gui.app  # noqa: F401 — version stamp + heavy deps
+    from gitcurator.gui._qt import QApplication, Qt
+    from gitcurator.gui.main_window import MainWindow
 
     # Single instance check — detects stale locks from crashed sessions.
     # v32.3 fix: anchor app.lock to APP_DIR (was CWD-relative — two
