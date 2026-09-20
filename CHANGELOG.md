@@ -3,16 +3,92 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
-## [Unreleased] — v32.3 · Modularization & CLI Hardening (branch `refactor/modularization`)
+## [Unreleased] — v32.4 · Modularization, CLI Hardening & Dependency-Truth (branch `refactor/modularization`)
 
 A behavior-preserving refactor of the 9,770-line `gui/app.py` monolith
 (51% of the Python codebase) into focused single-responsibility modules,
-plus four CLI bug fixes with regression tests. Baseline before the work:
-73/73 tests green; every commit on the branch was verified against that
-baseline (tests + import smokes + offscreen GUI construction + headless
-end-to-end runs byte-compared against pre-refactor output).
+plus four CLI bug fixes with regression tests — then a v32.4 continuation
+that finished the job: the two remaining giants (`gui/main_window.py`,
+6,130 lines; `gui/workers.py`, 2,138 lines) were split into
+single-concern mixin packages with the same discipline. Baseline before
+the work: 73/73 tests green; every commit on the branch was verified
+against that baseline (tests + import smokes + offscreen GUI construction
++ headless end-to-end runs byte-compared against pre-refactor output);
+method moves are machine-verified verbatim (per-method md5) rather than
+hand-copied.
 
-### Changed — codebase refactoring & modularization (no behavior changes)
+### Changed — v32.4 continued modularization (no behavior changes)
+
+- **`app/gitcurator/gui/workers.py` (2,138 lines) → the `gui/workers/`
+  package (11 modules).** `ProcessingWorker(QThread, …)` is assembled in
+  `workers/processing.py` — the eight queued signals and `__init__`
+  state stay on the concrete QObject subclass (where PyQt requires
+  them) — while the pipeline phases mix in verbatim from
+  single-concern modules: `_auth.py` (interactive Telegram/LLM auth),
+  `fetch.py` (telegram/import intake), `llm.py` (ollama/cloud analysis),
+  `assets.py` (banner download + 429 throttle), `scoring.py`
+  (credibility/notes/ratings), `notes.py` (master index / final report /
+  summary log) and `pipeline.py` (the 848-line `run()` orchestrator —
+  kept as ONE method: splitting it would be a rewrite, not a refactor).
+  `TestWorker` moved whole to `workers/test_worker.py`. The guarded
+  PyGithub/ollama imports now live once in `workers/_deps.py` (the
+  single-site pattern `gui/_qt.py` established for PyQt6).
+- **`app/gitcurator/gui/main_window.py` (6,130 lines, 116 methods) →
+  the `gui/main_window/` package (16 modules).** `MainWindow` is
+  assembled in `main_window/window.py` (QMainWindow first in the MRO,
+  mixins define no `__init__`, so `super().__init__()` resolves exactly
+  as before) from 13 single-concern mixins: `styles` (theming/fonts),
+  `ui_setup` (`initUI`), `settings_tests` (per-tab Test buttons),
+  `search`, `config_ui` (config/vaults/proxy), `processing_ctl`
+  (start/stop/progress), `log_panel`, `vault_ops` (dashboard/verify/
+  recategorize/undo), `bot_queue`, `bot_links`, `dialogs` (finished/
+  disk-full/LLM-failure handlers), `backup_tab` and `publish_services`
+  (VaultSeal/GoodRepos/dashboard). Their dependency imports live once
+  in `main_window/_deps.py`.
+- **Safety of both splits:** the extraction is script-driven — every
+  method body is moved byte-identically (md5-verified per method; the
+  script asserts the mixin partition covers exactly the original
+  method set with no overlap), per-module stdlib imports are computed
+  from actual usage, and pyflakes reports zero new module-level issues.
+  Verified per commit: compile, import facade, 89/89 tests, offscreen
+  GUI construction (all 9 tabs, 36 buttons, 30 line edits), CLI matrix.
+- The compile gate (CI + dashboard `/api/verify`) widened 24 → 50
+  modules; the test suite grew 87 → 89 cases.
+
+### Fixed — v32.4 dependency-guard truthfulness
+
+- **`utils/terminal.py`'s no-colorama fallback forgot to bind the
+  `colorama` name its own `__all__` promises** (and the `gui/app.py`
+  facade imports it). On dependency-less installs the headless CLI
+  crashed with a raw `ImportError: cannot import name 'colorama'`
+  BEFORE the friendly PyQt6 guard could print its message. Fix: the
+  fallback binds `colorama = None`. Bare-install headless now prints
+  both friendly messages and exits 1.
+- **`gui/_qt.py` claimed "PyQt6 is not installed" even when PyQt6 WAS
+  installed but its native Qt libraries failed to load** (missing
+  libEGL/libGL — exactly what headless test environments hit). Fix:
+  `importlib.util.find_spec` distinguishes the two cases; the
+  not-installed message and exit code are unchanged, the
+  installed-but-broken branch reports the real error and names the
+  system-runtime cause.
+
+### Added — v32.4
+
+- `gitcurator/__main__.py` — `python -m gitcurator` now works (PEP 338);
+  previously it failed with "No module named gitcurator.__main__"
+  while `python -m gitcurator.cli`, `python main.py` and
+  `python app/main.py` all worked. The shim delegates to
+  `cli.main()`, so `--help` still answers before any PyQt6 import.
+- `tests/test_cli.py` — 2 more smoke tests (the `-m` package entry +
+  the terminal fallback contract). Suite: 87 → 89 tests.
+
+### Removed — v32.4
+
+- `app/{01_categorize,02_summarize,03_crosscheck}.txt` — byte-identical
+  (md5-verified) duplicates of the `app/prompts/` copies the SWOT
+  flagged as drift risk; no code reads either location.
+
+### Changed — v32.3 modularization (no behavior changes)
 
 - **`app/gitcurator/gui/app.py`: 9,770 → 164 lines.** It is now a thin
   back-compat facade that re-exports the public surface the monolith
@@ -22,8 +98,8 @@ end-to-end runs byte-compared against pre-refactor output).
 - New focused modules (bodies moved verbatim, docstrings + explicit
   import headers added):
   - `gitcurator/cli.py` — `run_headless`, `_is_process_running`, `main`
-  - `gitcurator/gui/main_window.py` — MainWindow (the PyQt6 GUI, ~6,130 lines)
-  - `gitcurator/gui/workers.py` — ProcessingWorker + TestWorker
+  - `gitcurator/gui/main_window/` — MainWindow package (see v32.4 above)
+  - `gitcurator/gui/workers/` — the worker package (see v32.4 above)
   - `gitcurator/gui/log_handler.py` — logging → Qt signal bridge
   - `gitcurator/gui/_qt.py` — the guarded PyQt6 import (single site)
   - `gitcurator/core/vault.py` — VaultIndex, find_obsidian_vaults, _safe_moc_name
@@ -32,8 +108,8 @@ end-to-end runs byte-compared against pre-refactor output).
   - `gitcurator/core/inbox.py` — non-GitHub link routing (classify/PLATFORM_INFO/write)
   - `gitcurator/utils/` — logging_setup + terminal (guarded colorama)
   - `gitcurator/integrations/telegram_jobs.py` — subprocess Telegram fetch jobs
-- The compile gate (CI + dashboard `/api/verify`) widened from 12 to 24
-  modules; the test suite grew from 73 to 87 cases (see Added).
+- The v32.3 compile gate widened from 12 to 24 modules; the v32.4 split
+  took it to 50. The test suite grew from 73 to 89 cases (see Added).
 
 ### Fixed — CLI investigation (root causes, fixes, verification)
 
@@ -88,9 +164,10 @@ end-to-end runs byte-compared against pre-refactor output).
 
 ### Added
 
-- `tests/test_cli.py` — 14 CLI smoke tests (parser surface, path
-  resolution, `main.py --help` subprocess behavior on bare Python, and a
-  PyQt6-guarded end-to-end). Suite: 73 → 87 tests.
+- `tests/test_cli.py` — 16 CLI smoke tests (parser surface, path
+  resolution, `main.py --help` subprocess behavior on bare Python, the
+  `-m` package entry, the terminal fallback contract, and a
+  PyQt6-guarded end-to-end). Suite: 73 → 89 tests.
 - `docs/SWOT_ANALYSIS.md` — evidence-based SWOT audit of v0.0.10.
 - `gitcurator/constants.resolve_app_path()` — the one canonical
   relative-path resolver (cwd-first, APP_DIR fallback).

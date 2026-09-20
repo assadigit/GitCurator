@@ -1,27 +1,32 @@
-# GitHub-to-Obsidian — GitCurator app (v32.3 modular layout)
+# GitHub-to-Obsidian — GitCurator app (v32.4 modular layout)
 
-> **v32.3 update** — the 9,770-line `main.py`-lineage monolith
-> (`gitcurator/gui/app.py`) has been split into focused modules; the file
-> itself is now a 164-line back-compat facade. The layout:
+> **v32.4 update** — the modularization is complete: besides the
+> 9,770-line monolith becoming a 164-line facade, the two remaining
+> giants were split the same way (script-driven, every method moved
+> byte-identically — md5-verified). The layout:
 >
 > | Module | Responsibility |
 > |---|---|
 > | `gitcurator/cli.py` | headless CLI (`run_headless`) + `main()` dispatch, app.lock, QApplication bootstrap |
-> | `gitcurator/gui/main_window.py` | the PyQt6 MainWindow (tabs, theming, log panel, Backup tab) |
-> | `gitcurator/gui/workers.py` | ProcessingWorker (curation pipeline) + TestWorker |
-> | `gitcurator/gui/_qt.py` · `log_handler.py` | guarded PyQt6 import · logging→signal bridge |
+> | `gitcurator/__main__.py` | `python -m gitcurator` entry (PEP 338) |
+> | `gitcurator/gui/main_window/` | MainWindow assembled in `window.py` from 13 mixins (`styles`, `ui_setup`, `settings_tests`, `search`, `config_ui`, `processing_ctl`, `log_panel`, `vault_ops`, `bot_queue`, `bot_links`, `dialogs`, `backup_tab`, `publish_services`) |
+> | `gitcurator/gui/workers/` | `processing.py` (signals + `__init__`), phase mixins (`_auth`, `fetch`, `llm`, `assets`, `scoring`, `notes`, `pipeline`), `test_worker.py`, `_deps.py` (guarded deps) |
+> | `gitcurator/gui/_qt.py` · `log_handler.py` · `app.py` | guarded PyQt6 import · logging→signal bridge · back-compat facade |
 > | `gitcurator/core/` | `links` · `storage` · `note_builder` · `llm_client` · `vault` · `cache_db` · `link_tracker` · `inbox` (pure stdlib, testable) |
 > | `gitcurator/utils/` | `logging_setup` · `terminal` |
 > | `gitcurator/integrations/telegram_jobs.py` | subprocess Telegram fetch jobs |
 >
-> **CLI hardening (v32.3):** the headless CLI works from any launch
+> **CLI hardening (v32.3, kept):** the headless CLI works from any launch
 > directory (all runtime paths are anchored to this folder via
 > `constants.resolve_app_path`), failed runs exit `1`, `--help` is
 > answered by argparse before any PyQt6 import, and requirements.txt now
-> declares PySocks. The sections below are the historical v30 notes —
-> still accurate for behavior, outdated only where they describe file
-> layout; see the root `README.md` + `CHANGELOG.md` for the current
-> state.
+> declares PySocks. **v32.4:** `python -m gitcurator` works, and the
+> dependency guards tell the truth (a broken native Qt install is no
+> longer reported as "PyQt6 is not installed"; the no-colorama fallback
+> honors its `__all__` contract). The sections below are the historical
+> v30 notes — still accurate for behavior, outdated only where they
+> describe file layout; see the root `README.md` + `CHANGELOG.md` for the
+current state.
 
 ## Quick Start
 

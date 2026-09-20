@@ -5,12 +5,14 @@
 > and writes clean, structured notes into your **Obsidian vault**.
 
 **Version:** `0.0.10` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** v32.3 modular layout — the 9,770-line `gui/app.py` monolith is
-now a 164-line back-compat facade over focused modules (`cli.py`,
-`gui/main_window`, `gui/workers`, `core/{vault,cache_db,link_tracker,inbox}`
-`utils/`, `integrations/telegram_jobs`) · 87/87 automated tests green ·
-headless CLI works from any launch directory · credential-free git tree
-(v0.0.10). Also see [docs/SWOT_ANALYSIS.md](docs/SWOT_ANALYSIS.md).
+**Status:** v32.4 modular layout — the 9,770-line `gui/app.py` monolith
+became a 164-line back-compat facade over focused modules, and the two
+remaining giants followed: `gui/main_window.py` (6,130 lines) and
+`gui/workers.py` (2,138 lines) are now single-concern mixin packages
+(`gui/main_window/` with 13 mixins, `gui/workers/` with the pipeline
+phases) · 89/89 automated tests green · headless CLI works from any
+launch directory (and via `python -m gitcurator`) · credential-free git
+tree (v0.0.10). Also see [docs/SWOT_ANALYSIS.md](docs/SWOT_ANALYSIS.md).
 
 ---
 
@@ -184,13 +186,14 @@ history (`GET /api/goodrepos`).
 | `app/` | The Python application: PyQt6 GUI + headless CLI (start with `app/README.md`) |
 | `app/main.py` | Thin launcher — the real entry point is `gitcurator.cli.main` (re-exported by the `gui/app.py` facade) |
 | `app/gitcurator/cli.py` | Headless CLI (`run_headless`) + argv dispatch / app.lock / QApplication bootstrap (`main`) |
-| `app/gitcurator/gui/` | `main_window.py` (MainWindow) · `workers.py` (ProcessingWorker/TestWorker) · `log_handler.py` · `_qt.py` (guarded PyQt6 import) · `app.py` (back-compat facade) |
+| `app/gitcurator/gui/` | `main_window/` package (MainWindow assembled in `window.py` from 13 mixins: styles · ui_setup · settings_tests · search · config_ui · processing_ctl · log_panel · vault_ops · bot_queue · bot_links · dialogs · backup_tab · publish_services) · `workers/` package (ProcessingWorker signals+init in `processing.py`, phase mixins: `_auth` · `fetch` · `llm` · `assets` · `scoring` · `notes` · `pipeline`; TestWorker) · `log_handler.py` · `_qt.py` (guarded PyQt6 import) · `app.py` (back-compat facade) |
 | `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` · `vault` · `cache_db` · `link_tracker` · `inbox` |
 | `app/gitcurator/utils/` | `logging_setup` · `terminal` (guarded colorama) |
 | `app/gitcurator/integrations/` | `telegram_jobs` (subprocess fetch jobs) · Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
 | `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful — currently dormant) |
 | `app/gitcurator/constants.py` | Shared design tokens, config defaults and the APP_DIR path anchoring (`resolve_app_path`) |
-| `app/tests/` | 87 tests (34 unit + 11 e2e + 28 goodrepos + 14 CLI smoke) — fake Ollama + fake GitHub, zero pip |
+| `app/gitcurator/__main__.py` | `python -m gitcurator` entry (PEP 338) — delegates to `cli.main` |
+| `app/tests/` | 89 tests (34 unit + 11 e2e + 28 goodrepos + 16 CLI smoke) — fake Ollama + fake GitHub, zero pip |
 | `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
 | `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
 | `docs/SWOT_ANALYSIS.md` | Evidence-based SWOT audit of v0.0.10 (Phase-2 deliverable) |
