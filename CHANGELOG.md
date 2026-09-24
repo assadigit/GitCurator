@@ -10,6 +10,89 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.09.4] — the bot queue can no longer look fully-unprocessed — 2026-09-22
+
+Owner report: "it finds all 618 links in the bot to be processed, but in
+reality 99.5% of them are already processed — the app thinks none of them
+is processed. We had a special mechanism to make sure the app knows what
+is already done (so it doesn't repeat, or duplicate by mistake)."
+
+### Diagnosis
+The GUI's anti-repeat design is **four layers**: (1) the vault index —
+`VaultIndex`, rebuilt from every note's `source:` frontmatter, is the
+ground truth for "already done" and filters the queue check AND every URL
+during processing; (2) `cache.db` (`processed_repos` + the 404 quarantine
++ the retry queue); (3) `last_processed_msg_id` — "Process New" fetches
+only bot messages newer than the last **fully-verified** batch; (4) Phase
+5 CLEAR — the bot messages are only marked read when every link verified.
+The CLI `--auto` flow only ever used layers 1–2 — and both could silently
+fail, with no diagnostic, in ways the GUI was immune to:
+
+- **`cache.db` was CWD-relative** (`CacheDB(db_path="cache.db")`). The GUI
+  and every documented launcher run with cwd = the app folder, so it always
+  opened `<app>/cache.db` — but a CLI run started from ANY other directory
+  (scheduled task, `python C:\…\app\main.py --cli --auto` from a project
+  folder) silently created a **parallel empty cache** in that cwd:
+  processed repos, quarantine and retry queue all read 0. Split state —
+  the app "thinks none of the links is processed".
+- **The vault filter degrades silently**: when `vault_path` in
+  config.json doesn't match the vault the notes actually live in (the GUI
+  reads its live vault dropdown; the CLI only has the file — and any
+  past drift, a typo in `--init`, or a moved vault is invisible), the
+  classification indexes 0 notes → every queue link comes back "pending"
+  → a full re-processing run into the wrong vault, duplicating ~all notes.
+- **No min_id, no CLEAR**: `--auto` always re-fetched the entire bot
+  history and never advanced `last_processed_msg_id` or marked the queue
+  read, so every run carried the full 618-link history through the only
+  two (silently fallible) dedup layers.
+
+### Fixed
+- **`cache.db` is anchored to the app folder** (`CacheDB` default path).
+  One cache per installation, shared by the GUI and the CLI regardless of
+  the working directory. Behavior is byte-identical for every documented
+  launch path (cwd == app folder); explicit `db_path` arguments (tests)
+  are untouched. This also fixes `--status` / `--list-dead` /
+  `--reset-dead` / `--retry-failed`, which were equally cwd-sensitive.
+- **`--auto` fetches like the GUI's "Process New"**: it passes
+  `min_id=last_processed_msg_id` (printed as "Skipping bot messages up to
+  ID N"), so previously-verified messages are never re-fetched at all.
+  0 (first run) keeps the full-history + vault-classification behavior.
+- **Phase 5 CLEAR, CLI edition**: after a successful bot-queue batch the
+  LinkTracker's verdict decides — **all clear** → the bot messages are
+  marked read (same engine as the GUI's auto-mark) and
+  `last_processed_msg_id` is advanced and persisted to config.json;
+  **anything unverified** → an explicit `⏸️ N link(s) not verified — the
+  bot queue stays UNREAD and last_processed_msg_id is NOT advanced; the
+  next --auto re-fetches and retries them`. Nothing is lost, nothing
+  repeats — the GUI's exact semantics.
+- **Dedup visibility + wrong-vault guard**: the queue summary now also
+  prints the ground-truth counts ("Dedup ground truth — vault index: N
+  note(s) · cache: M processed repo(s)"). On the wrong-vault signature
+  (pending links, **zero** in-vault, **zero** notes indexed, but the cache
+  knows processed repos) the CLI stops before processing and says so:
+  which vault indexed 0 notes, what the cache knows, why processing now
+  would duplicate, and the three ways to fix it (`--init`, a one-off
+  `--vault` run, or editing config.json). `--yes` mode never re-processes
+  on this signature; interactive mode asks `[y/N]` (default No). Fresh
+  installs (empty cache + empty vault) are unaffected.
+
+### Verification
+- Reproduction harness (stubbed fetch worker, real VaultIndex/CacheDB):
+  correct vault → 4 in-vault / 3 pending across quoted, unquoted,
+  trailing-slash and `www.` note formats; empty-wrong vault → the exact
+  owner symptom (all pending) — now caught by the guard: diagnostics,
+  exit 1, batch never started.
+- Phase 5 CLEAR harness (fake worker in the real Qt loop): all-clear →
+  exit 0, `last_processed_msg_id` 100→777 persisted, queue marked read;
+  one failed link → nothing advanced, nothing marked, retry message.
+- min_id wiring: `last_processed_msg_id: 42` in config → the fetch
+  receives `min_id=42`.
+- Cache anchor: `CacheDB()` instantiated from a foreign cwd opens
+  `<app>/cache.db`; no stray cache.db in that cwd.
+- Full suite: 106/106 green (gc-venv, offscreen Qt). CLI smoke matrix:
+  `--help`, `--status` / `--list-dead` from a foreign cwd, banner v0.09.4,
+  PYTHONIOENCODING=cp1252 simulation — no tracebacks, correct exit codes.
+
 ## [0.09.3] — CLI `--login`: configs + Telegram verification code in the terminal — 2026-09-21
 
 Owner request: "Update the CLI version, so the user can also enter configs

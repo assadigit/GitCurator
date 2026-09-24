@@ -245,7 +245,7 @@ def banner() -> None:
   ███    ███ ███    ███ ████    ████ ▄███████████  ▀█████▀  ███    █████
 """
     print(paint(art, C.CYAN, C.BOLD), end="")
-    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.3", C.MAGENTA)
+    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.4", C.MAGENTA)
           + paint("  ·  colored · animated · fully automatic", C.DIM))
     print()
 
@@ -926,6 +926,52 @@ def fetch_bot_queue(cfg: dict, status: StatusLine, min_id: int = 0) -> dict:
     return result_box.get("r", {"success": False, "error": "fetch thread died"})
 
 
+def _mark_bot_queue_read(cfg: dict, status: "StatusLine") -> bool:
+    """v0.09.4 — Phase 5 CLEAR's final step for the CLI: mark every bot
+    message as read (the same call the GUI's auto-mark makes after a
+    fully-verified batch). Best-effort — a failure is logged and returns
+    False; it never fails the run (the vault index still dedups).
+
+    Runs _bot_queue_job(mark_read=True) in a worker thread while the main
+    thread animates the spinner — same pattern as fetch_bot_queue."""
+    try:
+        _bot_queue_job = _gui_symbol("_bot_queue_job")
+    except ImportError as exc:
+        status.log(f"Could not mark the bot queue read: {exc}", "warning")
+        return False
+    shim = _LogShim(status)
+    result_box: dict = {}
+    done = threading.Event()
+
+    def _job():
+        try:
+            result_box["r"] = _bot_queue_job(
+                str(cfg.get("telegram_api_id", 0) or 0),
+                cfg.get("telegram_api_hash", ""),
+                cfg.get("telegram_phone", ""),
+                cfg.get("proxy", {}) or {},
+                cfg.get("bot_username", ""),
+                shim, code_callback=_code_prompt, mark_read=True,
+            )
+        except Exception as exc:                       # pragma: no cover
+            result_box["r"] = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            done.set()
+
+    threading.Thread(target=_job, name="cli-bot-mark-read", daemon=True).start()
+    while not done.is_set():
+        while shim.queue:
+            status.log(*shim.queue.popleft())
+        status.tick()
+        time.sleep(0.09)
+    while shim.queue:
+        status.log(*shim.queue.popleft())
+    r = result_box.get("r", {})
+    if not r.get("success"):
+        status.log(f"Mark-read failed: {r.get('error', 'unknown')}", "warning")
+    return bool(r.get("success"))
+
+
 # ----------------------------------------------------------------------------
 # Batch phase: ProcessingWorker inside a Qt loop, rendered by StatusLine
 # ----------------------------------------------------------------------------
@@ -934,12 +980,21 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
                      range_from=None, range_to=None, offset_start=None,
                      offset_count=None, bot_source=False, non_github=None,
                      intake_duplicates=0, raw_url_count=0,
-                     vault_arg: str | None = None) -> int:
+                     vault_arg: str | None = None,
+                     bot_queue_max_id: int = 0) -> int:
     """Run one ProcessingWorker batch with colors + spinner + progress bar.
 
     Mirrors run_headless()'s wiring (signals received, VaultSeal + GoodRepos
     best-effort on finish) but every log line is colored and the bottom line
-    is a live spinner/progress renderer. Returns a process exit code."""
+    is a live spinner/progress renderer. Returns a process exit code.
+
+    v0.09.4 — ``bot_queue_max_id`` (set by cmd_auto): after a SUCCESSFUL
+    bot-queue batch that the LinkTracker fully verifies, the CLI now runs
+    the GUI's Phase 5 CLEAR — the bot messages are marked read and
+    last_processed_msg_id is advanced (persisted to config.json) so the
+    next --auto fetches only newer messages. A batch with any unverified
+    link advances nothing and keeps the queue unread: the failed links are
+    re-fetched and retried next run (nothing is lost, nothing repeats)."""
     try:
         from PyQt6.QtCore import QCoreApplication, QTimer
         ProcessingWorker = _gui_symbol("ProcessingWorker")
@@ -1047,6 +1102,58 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
             status.log(f"Good Repos: {gr.describe()}", "success" if gr.ok else "warning")
         except Exception as exc:
             status.log(f"Good Repos error: {exc}", "warning")
+
+        # v0.09.4 — Phase 5 CLEAR for the CLI (the GUI's anti-repeat final
+        # step, previously missing here): the bot queue is only ever
+        # "consumed" when EVERY link in the batch verified. get_all_clear()
+        # treats failed/pending GitHub links as NOT clear, so a half-finished
+        # batch leaves the messages un-read and the ID un-advanced — the
+        # next run re-fetches exactly those messages and retries them.
+        if success and bot_source:
+            tracker = getattr(worker, "link_tracker", None)
+            if bot_queue_max_id > 0 and tracker is not None:
+                if tracker.get_all_clear():
+                    old_id = 0
+                    try:
+                        old_id = int(cfg.get("last_processed_msg_id", 0) or 0)
+                    except (TypeError, ValueError):
+                        old_id = 0
+                    if bot_queue_max_id > old_id and config_path:
+                        cfg["last_processed_msg_id"] = int(bot_queue_max_id)
+                        try:
+                            from gitcurator.core.storage import write_config_file
+                            write_config_file(config_path, _clean_config_for_save(cfg))
+                            status.log(
+                                f"📌 last_processed_msg_id advanced: {old_id} → "
+                                f"{bot_queue_max_id} — the next --auto fetches only "
+                                f"messages newer than that.", "success")
+                        except Exception as exc:
+                            status.log(
+                                f"⚠️ Could not save last_processed_msg_id ({exc}) — "
+                                f"this run is verified, but the next --auto will "
+                                f"re-scan (dedup still protects against duplicates).",
+                                "warning")
+                    _clear_status = StatusLine()
+                    _clear_status.start("Marking bot queue as read")
+                    ok = _mark_bot_queue_read(cfg, _clear_status)
+                    _clear_status.stop()
+                    if ok:
+                        status.log("✓ Bot queue marked as read — all links verified "
+                                   "(Phase 5 CLEAR).", "success")
+                else:
+                    unverified = [
+                        l for l in tracker.manifest.get("links", [])
+                        if l.get("status") in ("failed", "processing", "pending")
+                        and l.get("type") == "github"
+                    ]
+                    status.log(
+                        f"⏸️ {len(unverified)} link(s) not verified — the bot queue "
+                        f"stays UNREAD and last_processed_msg_id is NOT advanced; "
+                        f"the next --auto re-fetches and retries them.", "warning")
+            elif bot_queue_max_id > 0 and tracker is None:
+                status.log("⏸️ No link manifest for this batch (empty vault path?) — "
+                           "last_processed_msg_id not advanced; dedup still protects "
+                           "against duplicates.", "warning")
 
         print()
         app.quit()
@@ -1309,10 +1416,26 @@ def cmd_auto(args) -> int:
         return 1
 
     status = StatusLine()
+    # v0.09.4 — Layer 3 of the anti-repeat mechanism (the GUI's "Process
+    # New" semantics): fetch only bot messages NEWER than the last VERIFIED
+    # batch. last_processed_msg_id is advanced ONLY after a fully-verified
+    # run (see run_batch_visual's Phase 5 CLEAR), so a failed link keeps its
+    # messages un-skipped and gets retried next run. 0 (first run) = full
+    # history + vault-dedup classification, exactly like the GUI.
+    last_id = 0
+    try:
+        last_id = int(cfg.get("last_processed_msg_id", 0) or 0)
+    except (TypeError, ValueError):
+        last_id = 0
+    if last_id > 0:
+        print(paint(f"Skipping bot messages up to ID {last_id} "
+                    f"(last verified batch — set last_processed_msg_id to 0 in "
+                    f"config.json to re-scan the full history).", C.DIM))
+        print()
     print(paint("Phase 1 — SYNC: fetching undone items from the bot queue…", C.BOLD))
     print()
     status.start("Fetching bot queue")
-    result = fetch_bot_queue(cfg, status)
+    result = fetch_bot_queue(cfg, status, min_id=last_id)
     status.stop()
     print()
 
@@ -1329,12 +1452,75 @@ def cmd_auto(args) -> int:
     in_vault = result.get("in_vault_count", 0)
     decomm = result.get("decommissioned_count", 0)
     non_github = result.get("non_github_urls", []) or []
+    vault_index_count = result.get("vault_index_count")
 
     print(paint("Queue: ", C.BOLD)
           + paint(f"{len(pending)} pending", C.GREEN if pending else C.DIM) + paint(" · ", C.DIM)
           + paint(f"{in_vault} already in vault", C.DIM) + paint(" · ", C.DIM)
           + paint(f"{decomm} decommissioned", C.DIM) + paint(" · ", C.DIM)
           + paint(f"{len(non_github)} non-GitHub", C.DIM))
+
+    # v0.09.4 — visibility + guard for the dedup layers. The vault index is
+    # the app's ground truth for "already done" (a URL with a note in the
+    # vault is processed, regardless of what any cache says). The queue
+    # classification above silently degrades to "everything is pending"
+    # when vault_path points at a directory that contains none of the
+    # notes (wrong path in config.json — the GUI uses its live vault
+    # dropdown, the CLI only has the file). That exact signature (pending
+    # links, ZERO in vault, ZERO notes indexed) previously meant a full
+    # re-processing run into the wrong vault. Show the counts and stop.
+    cache_processed = -1  # -1 = unknown (PyQt6-stack unavailable)
+    try:
+        CacheDB = _gui_symbol("CacheDB")
+        _cache = CacheDB()
+        cache_processed = len(_cache.get_all_processed_urls())
+        _cache.close()
+    except Exception:
+        pass
+    if vault_index_count is not None or cache_processed >= 0:
+        parts = []
+        if vault_index_count is not None:
+            parts.append(f"vault index: {vault_index_count} note(s)")
+        if cache_processed >= 0:
+            parts.append(f"cache: {cache_processed} processed repo(s)")
+        print(paint("Dedup ground truth — " + " · ".join(parts), C.DIM))
+
+    if (pending and in_vault == 0
+            and (vault_index_count or 0) == 0 and cache_processed > 0):
+        print()
+        cli_print("This looks like a WRONG VAULT PATH, so I stopped before "
+                  "processing:", "warning")
+        cli_print(f"  · the vault at {vault} indexed 0 notes (no 'source:' "
+                  "frontmatter found)", "info")
+        cli_print(f"  · the cache knows {cache_processed} already-processed "
+                  "repos — your notes live somewhere else", "info")
+        cli_print("  · processing now would duplicate ~all "
+                  f"{len(pending)} link(s) into that empty vault", "info")
+        print()
+        cli_print("Fix: point vault_path at the vault your notes are actually "
+                  "written to —", "info")
+        cli_print("  · re-run " + paint("python main.py --cli --init", C.BOLD)
+                  + " (Enter keeps every current value; fix only the vault), or",
+                  "info")
+        cli_print("  · run once with " + paint("--vault C:\\path\\to\\your\\real\\vault", C.BOLD)
+                  + " to test it, or", "info")
+        cli_print("  · fix \"vault_path\" in config.json directly.", "info")
+        if getattr(args, "yes", False):
+            print()
+            cli_print("(--yes mode never re-processes on this signature. If you "
+                      "REALLY want a fresh vault re-run, start the same command "
+                      "without --yes and confirm.)", "info")
+            return 1
+        try:
+            ans = input(paint("? ", C.CYAN)
+                        + f"Process all {len(pending)} links into this empty "
+                          "vault anyway? " + paint("[y/N] ", C.CYAN)).strip().lower()
+        except EOFError:
+            ans = "n"
+        if not ans.startswith("y"):
+            cli_print("Cancelled — nothing was processed. Fix vault_path first.",
+                      "warning")
+            return 1
 
     if not pending:
         cli_print("All caught up — nothing to process. 🎉", "success")
@@ -1356,6 +1542,7 @@ def cmd_auto(args) -> int:
         intake_duplicates=result.get("duplicates_removed", 0),
         raw_url_count=result.get("raw_url_count", len(pending) + len(non_github)),
         vault_arg=args.vault,
+        bot_queue_max_id=int(result.get("max_message_id", 0) or 0),
     )
 
 

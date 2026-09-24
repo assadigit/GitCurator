@@ -612,6 +612,19 @@ class CacheDB:
     """
 
     def __init__(self, db_path="cache.db"):
+        # v0.09.4 — Fix (split-state root cause): the default path used to be
+        # CWD-relative "cache.db". Every documented launcher (both .bat files,
+        # `python main.py` from app/) runs with cwd == APP_DIR, so the GUI
+        # always used <app>/cache.db — but a CLI run started from ANY other
+        # directory (scheduled task, `python C:\...\app\main.py --cli --auto`
+        # from a project folder) silently created a parallel EMPTY cache in
+        # that cwd: processed_repos, the 404 quarantine and the retry queue
+        # all read 0 → the app "thinks none of the links is processed" and
+        # re-processes the whole bot queue (duplication). The default is now
+        # anchored to APP_DIR so the GUI and the CLI ALWAYS share one cache;
+        # explicit db_path arguments (tests) are passed through unchanged.
+        if db_path == "cache.db":
+            db_path = os.path.join(APP_DIR, "cache.db")
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
         self.conn.execute("PRAGMA busy_timeout = 30000")
