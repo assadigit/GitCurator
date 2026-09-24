@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  GitCurator-CLI.bat — one double-click, fully automatic run
+REM  GitCurator-CLI.bat - one double-click, fully automatic run
 REM  (bot SYNC -> PROCESS -> VaultSeal -> Good Repos)
 REM
 REM  First time? Run GitCurator-CLI-Setup.bat once to save your
@@ -10,10 +10,16 @@ setlocal
 title GitCurator CLI - automatic run
 cd /d "%~dp0"
 
-REM v0.09.1: UTF-8 codepage — the banner's block glyphs crash Python's
-REM print() on legacy cp437/cp1252 consoles (UnicodeEncodeError killed the
-REM CLI before any command ran). 65001 + the in-app reconfigure = safe.
-chcp 65001 >nul
+REM v0.09.2: this file is PURE ASCII and never changes the codepage.
+REM v0.09.1 ran "chcp 65001" here; a codepage switch INSIDE a batch
+REM file makes cmd.exe re-parse the file at a shifted byte offset (the
+REM dash characters in the header comments are 3 bytes in UTF-8 but 1
+REM in ANSI), so fragments of those REM lines ran as commands - the
+REM "'tlocal' / 'Double-click' / 'pre-flight' is not recognized" error
+REM wall before the app started. Python handles all console encoding
+REM itself at startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std
+REM streams), so the chcp was redundant anyway. Launchers stay
+REM ASCII-only and codepage-free.
 
 where python >nul 2>nul
 if errorlevel 1 (

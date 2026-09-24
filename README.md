@@ -4,7 +4,7 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.09.1` — CLI-not-running root-cause fix (Windows legacy-codepage UnicodeEncodeError) · UI polish pass (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Version:** `0.09.2` — launcher regression fixed: the `.bat` double-click wall of "'tlocal' / 'Double-click' is not recognized" errors (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
 **Status:** redesigned PyQt6 GUI (v0.03 two-stage SYNC: fetch undone bot items → PROCESS → run; v0.05 auto-starts `ollama serve` when the server is down; v0.06 reliability fixes; **v0.07 main screen rebuilt per design review** — one unified SVG icon set, one-accent palette, labeled `PROCESSED x / y` counter, active-state log filter tabs; **v0.07.1 hotfix** — official Lucide icons bundled verbatim, proxy pre-flight, DC-rotating connect retries, token whitespace healing; **v0.08** — every icon re-fit to its area (they were rendering 2× too big and clipped — the "partial sun"), window re-proportioned 1000×375 → **900×600 (exact 6:4)**, **404 QUARANTINE** (dead links confirmed after 3 consecutive 404s across sessions are silently skipped in every input path), and a **visualized CLI companion** — `cli.py` + `Start-GitCurator-CLI.bat`, colors/spinners/live progress, zero flags needed) on the modular `gitcurator` package · 101/101 automated tests green · v0.04 ships the owner's real credentials pre-filled in `app/config.json` + `installer.config.json` (private repo, owner's explicit request — the v0.0.10 credential-free guarantee is lifted for this release line).
 
 ---

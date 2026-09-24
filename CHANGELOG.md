@@ -10,6 +10,58 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.09.2] — launcher regression fixed (the "'tlocal' is not recognized" wall) — 2026-09-21
+
+Owner report: double-clicking `Start-GitCurator-CLI.bat` printed a wall of
+`'GitCurator' / 'Double-click' / '1.' / 'pre-flight' / 'Kept' / 'M' /
+'tlocal' / 'tle' / '/d' is not recognized as an internal or external
+command` errors **before the app started**. The app itself then ran fine.
+
+### Root cause
+- v0.09.1's belt-and-suspenders fix #2 — `chcp 65001` **inside** the
+  `.bat` launchers — backfired. `cmd.exe` re-parses a batch file after a
+  mid-file codepage switch, and it recomputes its file position under the
+  NEW codepage: the em-dash (`—`) characters v0.09.1 also added to the REM
+  comments are **3 bytes in UTF-8 but 1 byte in ANSI**, so the parser's
+  byte offset shifted, cmd jumped back into the REM header block, and
+  executed line fragments as commands (entering `setlocal` at +2 bytes →
+  `'tlocal'`, `title` at +2 → `'tle'`, `cd /d` at +3 → `'/d'`, REM lines
+  at +2/+5 → `'M'`/`'GitCurator'`/`'Double-click'`/…). It then re-synced
+  at the `chcp` line and the run continued — hence "errors, then the app
+  worked anyway".
+- The `chcp` was **redundant from day one**: fix #1 (the in-app
+  `_harden_stdio()` in `gitcurator/cli.py`: `SetConsoleOutputCP(65001)` +
+  `SetConsoleCP(65001)` + UTF-8/replace std streams, at import time)
+  already handles every console — and is the layer that made the owner's
+  banner render perfectly in the very same run that showed the garbage.
+
+### Fixed
+- All three `.bat` launchers (`Start-GitCurator-CLI.bat`,
+  `GitCurator-CLI.bat`, `GitCurator-CLI-Setup.bat`):
+  - `chcp 65001` **removed** — a batch file never switches the codepage
+    mid-run, so the cmd re-parse bug cannot trigger; console encoding is
+    exclusively the app's job.
+  - Content is now **pure ASCII** (em-dashes → `-`): a byte-identical
+    parse under cp437/cp850/cp1252/65001, immune to any codepage.
+  - Line endings normalized to **CRLF** (canonical Windows batch format).
+- No Python changes — v0.09.1's in-app encoding fix is untouched and
+  remains the single source of truth for console encoding.
+
+### Verified
+- Byte-level: all three `.bat` files are pure ASCII with CRLF terminators
+  (`file` → "DOS batch file, ASCII text, with CRLF line terminators").
+- Full test suite re-run (106/106 green) + CLI command matrix from three
+  working directories; banner and output unchanged.
+- Note for the run log that motivated this: the same console session also
+  showed `Fetch failed: IncompleteReadError … Telegram closed the
+  connection through your proxy (exit node blocked / DPI). Try a different
+  v2ray node.` — that part is **environmental** (proxy exit node blocked
+  + the Telegram session needing re-login), not a code defect: the app's
+  pre-flight, proxy check, DC-rotation connect retry, and the actionable
+  error all behaved exactly as designed. After switching to a working
+  v2ray node, re-running the launcher will prompt for the Telegram login
+  code (the CLI's interactive login path) and resume.
+
 ## [0.09.1] — CLI-not-running root-cause fix · UI polish — 2026-09-20
 
 Two jobs, nothing else: **make the CLI actually run** and **polish the UI**.

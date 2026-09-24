@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  GitCurator-CLI-Setup.bat — FIRST-RUN wizard (run me once)
+REM  GitCurator-CLI-Setup.bat - FIRST-RUN wizard (run me once)
 REM
 REM  Asks for your Telegram / GitHub / LLM credentials and saves
 REM  them locally to config.json (same file the GUI uses).
@@ -11,9 +11,13 @@ setlocal
 title GitCurator CLI - first-run setup
 cd /d "%~dp0"
 
-REM v0.09.1: UTF-8 codepage — the wizard's glyphs crash Python's print()
-REM on legacy cp437/cp1252 consoles. 65001 + the in-app reconfigure = safe.
-chcp 65001 >nul
+REM v0.09.2: this file is PURE ASCII and never changes the codepage.
+REM v0.09.1 ran "chcp 65001" here; a codepage switch INSIDE a batch
+REM file makes cmd.exe re-parse the file at a shifted byte offset, so
+REM fragments of the REM header ran as commands ("'GitCurator' is not
+REM recognized" error wall). Python handles console encoding itself at
+REM startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std streams), so
+REM the chcp was redundant anyway. ASCII-only, codepage-free.
 
 where python >nul 2>nul
 if errorlevel 1 (
