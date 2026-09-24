@@ -3,9 +3,9 @@
 # Every push to main, every tag, and every PR compiles the 16 audited
 # Python modules and runs the full 106-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine — v0.09 merged lineage).
-# The testable core is pure stdlib — no pip install step required.
-# PyQt6/telethon/ollama are GUI/runtime deps that the test suite
-# deliberately does not touch.
+# test_quarantine imports gitcurator/gui/app.py (CacheDB lives there),
+# so the app requirements are installed first; the suite runs headless
+# on the offscreen Qt platform and never launches the GUI.
 
 name: CI
 
@@ -24,6 +24,8 @@ jobs:
     defaults:
       run:
         working-directory: app
+    env:
+      QT_QPA_PLATFORM: offscreen
 
     steps:
       - name: Checkout
@@ -33,6 +35,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install app requirements (the quarantine suite imports the GUI package)
+        run: python -m pip install --quiet -r requirements.txt
 
       - name: Compile the 16 audited modules
         run: >
