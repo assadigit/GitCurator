@@ -1,7 +1,8 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 12 audited
-# Python modules and runs the full 73-case suite (34 unit + 11 e2e + 28 goodrepos).
+# Every push to main, every tag, and every PR compiles the 16 audited
+# Python modules and runs the full 106-case suite (34 core + 11 e2e +
+# 28 goodrepos + 19 reliability + 14 quarantine — v0.09 merged lineage).
 # The testable core is pure stdlib — no pip install step required.
 # PyQt6/telethon/ollama are GUI/runtime deps that the test suite
 # deliberately does not touch.
@@ -18,7 +19,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 73 tests)
+    name: Python gate (compile + 106 tests + reliability + quarantine)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,11 +34,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Compile the 12 audited modules
+      - name: Compile the 16 audited modules
         run: >
           python -m py_compile
           main.py
           gitcurator/gui/app.py
+          gitcurator/gui/icons.py
+          gitcurator/gui/telegram_lock.py
           gitcurator/core/links.py
           gitcurator/core/storage.py
           gitcurator/core/note_builder.py
@@ -47,11 +50,13 @@ jobs:
           gitcurator/integrations/telegram_fetch_worker.py
           gitcurator/integrations/telethon_fetcher.py
           gitcurator/integrations/backfill_manager.py
+          gitcurator/integrations/subprocess_runner.py
           gitcurator/cloud/cloudflare_sync.py
+          gitcurator/cli.py
 
-      - name: Run the test suite (34 unit + 11 e2e + 28 goodrepos)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine -v
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 12 compiles + 73 tests."
+        run: echo "Gate mirrors dashboard POST /api/verify — 16 compiles + 106 tests (core/e2e/goodrepos/reliability/quarantine; v0.09 merged lineage)."

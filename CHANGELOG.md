@@ -3,6 +3,848 @@
 All notable changes to GitCurator are documented here.
 Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
 
+> **v0.09 lineage note** — the tree forked after v0.07: the owner's local
+> lineage shipped **0.07.1 / 0.08** (Lucide icons, main-screen redesign,
+> 404 quarantine, its own rich-based CLI) while the sandbox lineage shipped
+> **0.07.2 / 0.07.3** (CLI model picker + pre-flight, GUI strike manager).
+> Both branches are preserved below, as-is. **v0.09 is the merge**: one
+> tree, one CLI, one dead-link system, going forward.
+
+## [0.09.1] — CLI-not-running root-cause fix · UI polish — 2026-09-20
+
+Two jobs, nothing else: **make the CLI actually run** and **polish the UI**.
+No restructuring, no layout changes, no behavior changes.
+
+### Fixed — the CLI was not running on Windows
+- **Root cause found and reproduced**: on a Windows console with a legacy
+  codepage (cp437 / cp850 / cp1252 — anything but 65001, still the default
+  on many systems), the CLI's very first `print()` — the banner's
+  block-drawing glyphs — raised
+  `UnicodeEncodeError: 'charmap' codec can't encode characters` and killed
+  the process **before any command could run**. Every `main.py --cli …`
+  invocation and both double-click `.bat` launchers therefore appeared
+  simply "not to run" (window with a traceback, or flash-and-close).
+  **Fix (two layers):**
+  1. `gitcurator/cli.py` now reconfigures stdout/stderr to UTF-8 with
+     `errors="replace"` at import time (covers `--help` too, before
+     argparse prints anything) and switches the Windows console codepage
+     to 65001 via `kernel32.SetConsoleOutputCP` — the glyphs render, not
+     just encode. No-op on already-UTF-8 streams (Windows Terminal,
+     modern Linux, pipes).
+  2. All three `.bat` launchers (`Start-GitCurator-CLI.bat`,
+     `GitCurator-CLI.bat`, `GitCurator-CLI-Setup.bat`) now run
+     `chcp 65001` before launching Python.
+- **CLI no longer dies mid-command when GUI packages are missing**: the
+  lazy imports of the pipeline engine (`gitcurator.gui.app`) hit that
+  module's dependency guards, which call `sys.exit(1)` — a
+  *BaseException* invisible to plain `except Exception` — so
+  `--status` / `--list-dead` / `--reset-dead` / `--auto` could TERMINATE
+  the whole process mid-command on a machine without the full GUI stack
+  (despite the "no extra packages needed" launcher promise). A new
+  `_gui_symbol()` helper converts the guard's exit (and any unguarded Qt
+  ImportError, e.g. from `gui/icons.py`) into a clean, actionable
+  `ImportError` — commands now print "pip install -r requirements.txt"
+  and exit non-zero instead of a traceback or a silent kill.
+- **CLI output noise removed**: importing the pipeline engine printed a
+  2 KB one-line `[main] LOADED version …` blob to stderr in the middle of
+  `--status` output (between banner and stats). The stamp now only prints
+  for GUI loads, never in `--cli` mode.
+- Verified: full command matrix (`--help`, `--status`, `--list-dead`,
+  `--reset-dead`, no-args help, `--auto` paths) under simulated
+  cp1252 / cp850 / latin1 consoles, from three different working
+  directories, with and without PyQt6 present — correct output, correct
+  exit codes, zero tracebacks. 106/106 automated tests green.
+
+### UI polish (visual-only: tokens + stylesheets, zero layout changes)
+- **The SYNC hero button finally pops** — its lavender fill was so pale
+  (#C4BCF5) it read muted/disabled against the cream background (design
+  review: "looks disabled"). Deepened to #B3A7F2 in both themes, and
+  hover now DARKENS the fill (a real press affordance — the old
+  lighter-hover felt inert).
+- **Saturated status colors in dark mode** — the pastel log colors read
+  muddy on plum ("warning yellow and error red lack saturation"). Now:
+  mint #7CE2A9, butter #FFD37E, rose #FF9AAB, lifted info grey — all
+  ≥7.5:1 on the plum panels. Light-mode warning deepened to #75510A.
+- **Progress bar is visible now** — the track was nearly invisible on
+  both themes. Light: warmer, darker track (#E3DACA); dark: recessed
+  "well" track (#17131F, matching the log well figure-ground).
+- **Log toolbar row aligned** — filter buttons (All/Errors/Warnings/
+  Success) were ~25 px next to a 31 px search box. Filters are taller,
+  the search box got height-harmonizing QSS (and the missing
+  `setObjectName("log_search")` that the QSS needed), and focus states
+  keep constant height.
+- **Test Connectivity no longer a ghost in dark mode** — its fill was
+  the sheet color itself (invisible body, outline only). Now the raised
+  panel tone (#352F4A), balancing the saturated SYNC button.
+- **Dim text lifted** — "PROCESSED" caption and breadcrumb brighter and
+  11 px (was 10 px); header spacing 8 → 10 px.
+- Verified with rendered offscreen screenshots in both themes, before/
+  after design review: primary-action hierarchy, log scannability and
+  toolbar alignment all confirmed improved; no regressions.
+
+## [0.09] — Lineage Merge — one tree again — 2026-09-18
+
+The owner asked for a single proper merged lineage instead of two parallel
+fix-zips. This is it: **their v0.08 GUI work + our v0.07.2/3 pipeline
+fixes, unified** — and one deliberate design reconciliation.
+
+### Kept from v0.08 (the owner's local lineage)
+- **Official Lucide SVG icons** everywhere (`gui/icons.py` — verbatim
+  lucide-static v0.544.0 geometry, QSvgRenderer at 2× HiDPI, theme-tinted
+  at render time; graceful degradation to text if QtSvg is missing).
+  The icon-button clipping problem is solved by vector icons (34×30),
+  superseding the v0.07 38×36 emoji workaround.
+- **Main-screen redesign** — hero lavender CTA row (SYNC grows, Test
+  Connectivity beside it), PROCESSED pipeline strip with caption, recessed
+  log well as the stretch-growable region, status dots as tinted SVGs.
+- **404 quarantine machinery** — batch-start dead-set pre-filter (dead
+  links never reach the GitHub API), attempt counting in
+  `decommissioned_repos.fail_count`, one aggregate summary line instead
+  of per-URL spam, `notfound_links.md` written ONCE at confirmation,
+  `More ▸ View 404 Quarantine` viewer + reset.
+- **Telegram worker v3.4** — proxy pre-flight, own connect-retry policy
+  with DC rotation (only for unauthorized sessions), session-copy tip,
+  actionable network errors.
+- **Config credential healing** — hand-edited trailing whitespace in
+  tokens can no longer poison PyGithub headers.
+
+### Kept from v0.07.2/0.07.3 (the sandbox lineage)
+- **The 3-layer model picker** (owner report: *"it didn't let me choose a
+  new model … Model wasn't found = failed cli"*): pre-flight numbered menu
+  BEFORE any work, warmup stand-in resolution before the first repo,
+  mid-batch recovery through `_wait_for_llm_decision(err, client, model)`
+  + `model_prompt_callback`; `_pick_best_model` heuristic (embedders
+  excluded → same family → same size → biggest); every choice persists to
+  `config.json`. A missing Ollama model can no longer fail or degrade a
+  batch in any mode.
+- **Our zero-dependency visual CLI** (`main.py --cli` → `gitcurator/cli.py`,
+  plain ANSI) — `--init`, `--auto`, `--status`, `--retry-failed`,
+  `--mark-read`, all batch modes, `--strikes N`.
+- **GUI threshold manager** (Settings → Dashboard) — rebadged as the
+  quarantine manager below.
+
+### Unified (the reconciliation)
+- **ONE CLI** — the v0.08 companion (`app/cli.py` + `cli_app.py`, rich-
+  based, with the green-✓-on-missing-model pre-flight that caused the
+  owner's report) is retired; our engine absorbs its good ideas:
+  `--list-dead` / `--reset-dead` are ported. `Start-GitCurator-CLI.bat`
+  keeps its name (muscle memory) and now drives `main.py --cli --auto`.
+  The `rich` dependency is gone.
+- **ONE dead-link system** — the v0.08 quarantine keeps its machinery but:
+  - the threshold is **configurable again** (`notfound_strike_threshold`,
+    default 3, min 2 — GUI spinbox, `--strikes N`, config.json; v0.08
+    hardcoded 3);
+  - **consecutive semantics restored** — a successful fetch calls
+    `reset_dead_links(url)` (v0.08 never reset, so stale attempts could
+    quarantine a live repo after one transient miss);
+  - **v0.07 caches auto-migrate** — `notfound_strikes` rows move into
+    `fail_count` on first open (higher count wins), the old table is
+    dropped;
+  - `get_quarantine_stats()` added for viewers that show in-progress
+    attempts AND confirmed rows.
+- **Both quarantine viewers kept** on the one system: Settings →
+  Dashboard manager (attempts + ⛔ + spinbox + reset) and the More-menu
+  viewer (confirmed + reset).
+
+### Tests & verification
+- `tests/test_quarantine.py` extended 9 → 14 (configurable threshold,
+  threshold-parameter steering, success-reset consecutive semantics,
+  v0.07 strike-table migration incl. max-wins, stats in-progress rows).
+- `tests/smoke_v007.py` rewritten for the merged design: 40 checks
+  (900×600, 34×30 SVG icon buttons, icon pack renders, theme round-trip
+  via tooltip, log-group stretch, quarantine API + manager + More-menu
+  viewer, model-picker presence + heuristic).
+- Full suite: **106/106 unit tests**, 40/40 smoke, 4/4 runner self-tests,
+  16 modules compile; offline model-picker harness scenarios A/C/D re-run
+  **PASS** against the merged worker; CLI `--status`/`--list-dead`/
+  `--reset-dead` verified; GUI spinbox→config.json persistence +
+  merge-safety re-verified; strike→quarantine migration verified e2e.
+- CI: compile gate 16 modules (adds `gui/icons.py`), suite swaps
+  `test_strikes` for `test_quarantine`.
+
+## [0.08] — Icon Fix · 6:4 Window · 404 Quarantine · Visualized CLI — 2026-09-17
+
+Four owner requests, all delivered. The headliners: every icon was
+silently rendering 2× too big and clipped (the "partial sun"), the window
+was an ultra-wide strip, dead repos kept being re-404'd every session,
+and the app gained a fully visualized one-click CLI companion.
+
+### Fixed — icons were big for their area ("only parts of the sun visible")
+- **Root cause**: `QSvgRenderer.render(painter)` without a target rect
+  paints the SVG at its NATURAL 24×24-unit size inside the painter's
+  LOGICAL coordinate system. The icons render onto a DPR-2 pixmap whose
+  logical area is the icon size (16 px) — so every glyph painted at
+  24/16 = 1.5× (and 2× at the 12 px proxy dot) of its area and was
+  clipped at the right and bottom edges. Pixel-probe before the fix:
+  ink bbox `(2,2)-(31,31)` on a 32-device-px canvas touching both edges;
+  after: `(1,1)-(30,30)`, no edge contact, all 12 glyphs verified.
+- `icons.pixmap()` now passes an explicit `QRectF(0, 0, size, size)` so
+  the viewBox maps exactly onto the icon area — the sun, moon, gear,
+  layers, loader, search, trash, dots: every glyph is complete at last.
+
+### Changed — window re-proportioned 1000×375 → 900×600 (exact 6:4)
+- Owner: "the app is unnecessarily long — too much width, low height; I
+  prefer a ratio like 6×4". The v33 1000×375 window was a 2.67:1
+  ultra-wide strip; the new 900×600 is an exact 3:2. The extra 225 px of
+  height goes to the log panel (the main view's growable region) — long
+  batches show far more history without scrolling.
+
+### Added — 404 QUARANTINE (dead links ignored after 3 tries, across sessions)
+- Owner: "6-8 GitHub repos are deleted and became 404; the app repeats to
+  find and 404 them again and add to the logs. After 2-3 tries across
+  different sessions, ignore those links."
+- **Why it kept happening**: the decommissioned-repos table existed, but
+  `is_decommissioned()` was consulted ONLY on the bot-queue path. The
+  Telethon channel fetch (keyword/marker/single-ID) and import-file paths
+  funneled straight into `get_repo()` → 404 → log → re-decommission →
+  repeat, every single session, forever.
+- `decommissioned_repos` gains a `fail_count` column (with a migration:
+  pre-v0.08 rows were 404'd in earlier sessions, so they start CONFIRMED
+  dead — the fix takes effect on the owner's cache immediately).
+- `record_404()` counts consecutive failures in cache.db — the count
+  survives restarts by construction. Attempts 1-2 log normally ("attempt
+  1/3"); at the threshold (3) the link is CONFIRMED dead, the log line
+  says QUARANTINED, and `_inbox/notfound-links/notfound_links.md` gets
+  its single permanent row (previously one duplicate row per run,
+  forever).
+- **The ProcessingWorker now skips confirmed-dead links BEFORE any
+  GitHub API call** — this covers every input path at once (bot queue,
+  channel fetch, imports, retries). Skipped links are counted silently
+  and reported in ONE aggregate line in the batch summary instead of
+  per-URL spam.
+- Queue/verify filters use the confirmed-dead set only — unconfirmed
+  entries (1-2 attempts) still surface as pending so they receive their
+  remaining attempts.
+- **Management**: GUI `More ▸ 🚫 View 404 Quarantine` lists every
+  confirmed-dead link with attempts + date and offers a one-click reset
+  (for false positives — a repo that went PRIVATE reads as 404 to an
+  unauthorized token). CLI: `--list-dead` / `--reset-dead`.
+
+### Added — VISUALIZED CLI companion (`cli.py` + `Start-GitCurator-CLI.bat`)
+- Owner: "I want a CLI version — store the credentials in the project
+  folder, start it via a .bat for easy clicking, and it automatically
+  does the rest as long as credentials are okay. I want a visualized CLI
+  — different colors, loading animations."
+- **One-click launch**: `Start-GitCurator-CLI.bat` (double-click on
+  Windows; `cli.sh` on Linux/macOS) finds Python, one-time-installs
+  `rich`, and runs the pipeline. Credentials come from the SAME
+  `config.json` the GUI uses.
+- **The default flow needs zero flags**: colored ASCII banner → config
+  summary panel (masked secrets) → spinner-driven pre-flight checks
+  (GitHub token + rate limit, proxy socket, LLM provider) → bot-queue
+  fetch through the same hardened subprocess worker (proxy pre-flight,
+  DC rotation) → queue stats table → rich live progress bar with the
+  current repo, M/N, elapsed → level-colored log lines → post-run
+  (mark-read, VaultSeal, Good Repos) → summary table (processed /
+  warnings / retry queue / quarantined total / elapsed).
+- Shares the pipeline code with the GUI verbatim (ProcessingWorker,
+  CacheDB, quarantine) — identical behavior by construction, including
+  headless-mode safety (LLM failure → fallback note, Ctrl+C → graceful
+  stop, single-instance lock so it refuses to run beside the GUI).
+- Flags: `--check`, `--dry-run`, `--import-file F`, `--list-dead`,
+  `--reset-dead`, `--skip-checks`, `--no-seal`, `--quiet`, `--config`,
+  `--vault`, `--version`.
+- Signal bridging: the worker's cross-thread Qt signals are delivered to
+  the rich renderer through a main-thread QObject bridge (rich's Live
+  display is not thread-safe — plain callables would have run the
+  callbacks on the worker thread, exactly like `run_headless` could get
+  away with only because `print()` is thread-safe).
+
+### Verification
+- 101/101 tests (92 existing + 9 new quarantine regression tests:
+  schema, migration, cross-session counting, confirmed-only filtering,
+  reset, legacy shape, threshold).
+- End-to-end CLI run: 4 consecutive sessions against a real 404 repo —
+  attempt 1/3 → 2/3 → 3/3 QUARANTINED → silently skipped with zero log
+  spam and zero GitHub API calls; `notfound_links.md` gained exactly one
+  row; summary table rendered each time.
+- Offscreen smoke: 33/33 UI checks; window exactly 900×600; VLM visual
+  review of light + dark screenshots: sun/moon/gear all fully rendered,
+  layout balanced, no defects.
+- `python -m py_compile` on all 17 audited modules (CI gate updated,
+  which also finally fixes the `branches: ain]` trigger typo at its
+  source — the v0.06 fix had not persisted).
+
+
+## [0.07.3] — GUI 404-Strike Manager — 2026-09-18
+
+Closes the v0.07 P1 follow-up: the deleted-repo threshold existed in
+`config.json` / CLI (`--strikes N`) only — now it's a first-class citizen
+of the GUI.
+
+### Settings → Dashboard → "Deleted Repos — 404 Strike Counter"
+- **Threshold spinbox** (2–10, default 3) — every change is saved to
+  `config.json` immediately through the merge-safe `save_config` (unknown
+  keys survive; `ProcessingWorker` reads the value per batch, so the next
+  run picks it up without a restart). The initial `setValue` is
+  signal-blocked so launching the app never rewrites `config.json`.
+- **Live strike table** — every URL currently carrying 404 strikes
+  (highest first, last-seen timestamp, ⛔ flag once the threshold is
+  reached), capped at 30 rows with a pointer to `--status`. Refreshed by
+  its own 🔄 button and rides along with **Refresh Dashboard**.
+- **♻️ Reset Counters** — confirmation, then clears every strike row so
+  restored/repos-that-came-back get re-checked on the next run instead of
+  being auto-ignored.
+- `refresh_strike_view` is best-effort: missing vault / cache.db shows a
+  friendly empty-state message, never a dialog or crash.
+
+### Tests & docs
+- `tests/smoke_v007.py` extended 15 → **24 checks** (spin exists, range
+  2–10, initial value matches config, group/text widgets, all three new
+  methods, render-without-vault path).
+- E2E verified offscreen: spin→`config.json` persistence, merge safety
+  (probe key survives), strike table lists a threshold-reached URL with
+  the ⛔ flag.
+- `VERSION` → 0.07.3, `__VERSION__` stamp, README (GUI strike-manager
+  section + changelog pointer).
+
+## [0.07.2] — CLI Model Picker + Pre-flight Checks — 2026-09-18
+
+Owner report: *"See it didn't let me choose a new model … Model wasn't found
+= failed cli."* — with several Ollama models installed but the configured one
+not pulled, the CLI logged *"The first LLM-failure dialog lets you pick one"*,
+but that dialog only exists in the GUI: headless mode silently skipped every
+repo's LLM analysis, so the whole batch degraded to placeholder notes.
+
+### 1. Pre-flight checks (`gitcurator/cli.py`, all batch modes)
+- **Run-configuration card** — boxed vault / bot-queue / proxy / LLM /
+  masked-token snapshot before `--auto` runs (matches the GUI's settings
+  summary).
+- **GitHub token** — validated live (`authenticated as <login>`); a rejected
+  token (401) aborts with a fix hint (interactive runs may override); no
+  token warns about the 60 req/h unauthenticated limit.
+- **Proxy** — TCP reachability + latency of the configured proxy (the Telethon
+  fetch depends on it); unreachable → actionable warning.
+- **Ollama + model** — the v0.08-lineage pre-flight showed a green ✓ while
+  noting "(configured '…' not pulled)" and then failed the whole batch. Now:
+  server down → warning (the pipeline's auto-start still gets its chance),
+  no models → abort with `ollama pull` hint, **configured model missing →
+  interactive numbered model menu BEFORE any fetching happens**:
+  - smart recommendation first (same family + parameter size as the
+    configured model, embedding models like `nomic-embed-text` flagged
+    *"(embedding — cannot analyze)"* and never recommended),
+  - pick by number or unique name substring; `Enter` takes the
+    recommendation; `q` aborts with the `ollama pull` hint,
+  - the choice is **saved to config.json** (GUI + CLI share it),
+  - non-interactive runs (piped stdin / scheduled) auto-pick the
+    recommendation and log the switch — a missing model can no longer
+    fail a whole scheduled batch.
+
+### 2. Pipeline headless model resolution (`gui/app.py`)
+- **`model_prompt_callback`** — the CLI registers a console-menu callback on
+  `ProcessingWorker`; the warmup-failure path (configured model missing,
+  several installed) now asks the host instead of logging a promise no
+  headless run could keep. The choice is applied to the whole batch
+  (`_apply_model_choice`), persisted, and the stand-in is **re-warmed to
+  verify it actually works** before the batch starts.
+- **Auto-pick fallback** — headless without a console (or after declining):
+  `_pick_best_model` chooses the closest stand-in (embedding models
+  excluded → same family → same size → biggest) and logs the switch —
+  never again does the batch continue with a known-missing model.
+- **Mid-batch recovery** — `_wait_for_llm_decision` gained `err / client /
+  model` context: a model-not-found failure mid-run (model deleted while
+  the batch was running) triggers the same console menu / auto-pick via the
+  existing retry plumbing; connection errors still skip with the
+  "start the server" hint; after one decline the menu never nags again.
+- GUI behavior is unchanged (the first LLM-failure dialog still offers the
+  list and persists the choice batch-wide).
+
+### 3. Fixes & polish
+- **`--status`** now reports whether the configured model is actually
+  installed (`N model(s) installed · 'X' ready` / warning + fix hint) and
+  still degrades silently when the server is down.
+- **`__config_path__` leak** — CLI model-switch saves wrote the private key
+  into `config.json`; all saves now filter `__…__` keys.
+- **Direct-launch `sys.path`** — `python gitcurator/cli.py …` computed the
+  app root one directory too high (worked only via `main.py`); fixed.
+- Verification: 110/110 unit tests, 15/15 GUI smoke checks, and a 4-scenario
+  offline e2e (mock Ollama reproducing the owner's exact model list + fake
+  PyGithub): non-interactive auto-pick, interactive menu pick honored,
+  warmup-callback switch with re-warm verification, mid-batch
+  decision matrix (choice / decline→auto-pick / decline-once / connection
+  error). All batches completed 2/2 repos with the switched model and
+  exit code 0.
+
+## [0.07.1] — Connectivity Hotfix + Official Lucide Icons — 2026-09-18
+
+The first v0.07 build failed to connect on the owner's machine for three
+separate reasons (two app bugs, one environmental) — all three are fixed,
+and the hand-drawn "Lucide-style" icons are replaced by the real thing.
+
+### Connectivity — what the failure log actually said
+- **Proxy disabled on the first queue check** (`build_proxy received:
+  {'enabled': False}`): the Proxy checkbox state is the source of truth
+  and had been toggled off on the machine — the queue check then spawned
+  the worker SILENTLY on a direct connection (blocked in Iran) and burned
+  four cryptic `ConnectionRefusedError [WinError 1225]` retries.
+  `check_bot_queue` now logs a loud warning before the spawn, and the
+  worker prints a proxy-disabled banner and pre-flights the proxy port
+  (2s socket test) with an actionable error when v2rayN is down. The app
+  NEVER silently falls back to a direct connection — in censored regions
+  that both fails and leaks Telegram usage to the ISP.
+- **GitHub header crash** (`Invalid … character(s) in header value:
+  'token ghp_…\n'`): a token pasted with a trailing newline. The direct
+  token test stripped its input, the combined Telegram+GitHub test did
+  not — same field, six seconds apart, one passed and one crashed. Every
+  token read strips now, `load_config` heals already-poisoned files, and
+  `save_config` strips at the source so the newline can never persist.
+- **`IncompleteReadError` was never retried** (`Server closed the
+  connection: 0 bytes read on a total of 8 expected bytes`): Telethon's
+  internal `connection_retries` only retries `ConnectionError` subclasses,
+  so the classic DPI / exit-node reset aborted instantly with zero
+  retries. The worker now owns the retry policy: 3 attempts, 3s/6s sleeps,
+  clear per-attempt logs, alternate Telegram DCs on attempts 2-3 (fresh
+  sessions only — auth keys are DC-bound), and a plain-language hint that
+  a reset usually means the v2ray EXIT NODE is blocked (the remaining
+  `IncompleteReadError` the owner saw at 02:18-02:19 was exactly this:
+  their proxy exit node was being reset by Telegram/DPI — app-side
+  retries now make it robust, changing the node fixes it outright).
+- **Session guidance**: a fresh extract has no `session.session`, so
+  every Telethon flow asked for a login code. The worker now prints a
+  tip to copy `session.session` from the previous install instead of
+  re-authenticating.
+- Worker version bumped to 3.4 (visible in the log's first line —
+  confirms the fixed worker is the one running).
+
+### Icons — official Lucide pack, verbatim
+- The v0.07 draft shipped hand-redrawn "Lucide-style" paths; the owner
+  rejected self-drawn icons. `gitcurator/gui/icons.py` now embeds the
+  REAL `lucide-static` v0.544.0 SVGs (ISC license, full text in the
+  module) — layers, settings, moon/sun, refresh-cw, square (solid stop),
+  play (solid), loader-circle, activity, search, trash-2, circle (status
+  dot). Same tint-at-render machinery (QSvgRenderer, 2× HiDPI), same
+  public API, graceful QtSvg-less fallback.
+
+### Upgrade notes
+- If Telegram still resets the connection with the proxy ON, the exit
+  node is blocked — switch to a different v2ray/xray node (the app now
+  says so in the log).
+- Copy `session.session` from your previous app folder to skip the login
+  code (the worker prints this tip too).
+
+## [0.07] — Main-Screen Design Release — 2026-09-18 *(local lineage)*
+
+## [0.07] — Visual CLI + 404 Strike Policy + 6:4 Window — 2026-09-18 *(sandbox lineage — same zip, other half of the story)*
+
+Owner requests: *sun icon clipped in the theme toggle* · *window aspect
+ratio 6:4 or 5:7* · *deleted repos: persist the 404 failure count locally
+and auto-ignore after 2–3 misses* · *a visual CLI version with colored
+output, spinners/progress bars, locally stored credentials, a double-click
+.bat launcher, fully automatic*.
+
+### 1. Visual CLI (`gitcurator/cli.py`, ~700 lines, zero new dependencies)
+- **Colored output** — per-level colors + icons (`•` info, `✔` success,
+  `▲` warning, `✖` error), dimmed timestamps, ASCII banner. Honors
+  `NO_COLOR`, `--no-color`, and auto-disables on non-TTY pipes;
+  colorama (already in requirements.txt) enables ANSI on legacy Windows
+  consoles.
+- **Spinner + progress bar** — a braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`)
+  owns the terminal's bottom line; during batches it renders
+  `⠹ Processing batch  ██████████░░░░░░░ 12/40 (30%) owner/repo`.
+  Log lines print above it (clear → print → redraw), driven by a 100 ms
+  QTimer so Ctrl+C stays responsive.
+- **`--auto` — fully automatic run**: bot-queue SYNC (fetch UNDONE,
+  vault-filtered) → PROCESS (same ProcessingWorker pipeline as the GUI)
+  → VaultSeal git commit → Good Repos publish. Interactive Telegram
+  login codes are prompted in-terminal; `>10`-repo confirmation is
+  skippable with `--yes`.
+- **`--init` — first-run wizard**: asks for Telegram/GitHub/LLM/proxy
+  settings and saves them to the SAME `config.json` the GUI uses
+  (credentials stay local; secrets are masked in every status view).
+- **`--status`** — masked config summary + cache.db stats: processed,
+  decommissioned, retry-queue size, and every URL currently on a 404
+  strike with its count and last-seen time.
+- **Manual modes** — `--import-file`, `--from-id/--to-id`,
+  `--offset-start/--count`, `--single-id`, `--retry-failed` (reprocesses
+  the whole retry queue), `--mark-read` (clears the bot's unread queue).
+  All batch modes share the visual renderer and return proper exit
+  codes (a failed batch exits 1 — the .bat shows the setup hint).
+- **`--strikes N`** — per-run override of the 404 threshold.
+- **Entry points** — `python main.py --cli …` (shim dispatches before the
+  GUI import so `--status` never loads the widget stack),
+  `python gitcurator/cli.py …`, `python -m gitcurator.cli …`.
+
+### 2. Double-click launchers (Windows + Unix)
+- `GitCurator-CLI.bat` — one double-click → the fully automatic run
+  (`--cli --auto --yes`), with Python detection and exit-code hints.
+- `GitCurator-CLI-Setup.bat` — one-time first-run wizard (`--cli --init`).
+- `gitcurator-cli.sh` — Unix launcher (defaults to `--auto --yes`;
+  forwards any flags).
+
+### 3. 404 strike policy (deleted repos, persisted)
+- New `notfound_strikes` table in `cache.db` (`url`, `strikes`,
+  `first_seen`, `last_seen`); the counter is **persisted across
+  sessions** — each batch run that sees a 404 for a URL increments it.
+- A URL is only **decommissioned (auto-ignored)** after
+  `notfound_strike_threshold` consecutive 404s (config key, default 3,
+  clamped to ≥2). Sub-threshold misses are marked failed so the URL
+  returns with the next SYNC / Retry-Failed run and gets another chance
+  (protects against transient GitHub hiccups and false 404s).
+- A successful fetch **resets** the counter (repo restored / rename
+  reverted). Applies to both 404 paths (direct and post-rate-limit-wait).
+- Decommission reasons now record the strike count
+  (`404 Not Found (after 3 strikes)`), and the permanent
+  `_inbox/notfound-links/notfound_links.md` record includes it too.
+
+### 4. GUI fixes
+- **Sun-icon clipping fixed** — the theme-toggle and settings icon
+  buttons were 32×30 while the icon-button design spec (and the emoji
+  glyph metrics at 16 px, which render ~20 px tall with padding on
+  Windows display scaling) call for a 38×36 target. Both buttons are now
+  38×36 — `☀️`/`🌙`/`⚙️` never clip at 100–150% DPI.
+- **6:4 aspect-ratio window** — the main window is now 900×600 (was the
+  ultra-compact 1000×375; 5:7 portrait was rejected because the toolbar
+  and progress row are landscape-oriented). The +225 px of height flows
+  entirely into the always-visible Progress Logs panel (its minimum grew
+  64 → 180 px, ~4× the visible log lines); hero CTAs and the progress
+  row keep their compact sizes.
+
+### 5. Tests & CI
+- New `tests/test_strikes.py` — 18 tests: strike persistence across DB
+  reopens (the counter's whole point), URL normalization, clear-on-
+  success, stats listing, `_handle_404` sub-threshold vs decommission
+  paths, threshold clamping (min 2 / default 3 / junk → 3), notfound
+  record contents, CLI parser/masking/bar/no-color behavior.
+- Full suite: **110/110 green** (92 previous + 18 new; PyQt6-dependent
+  suites still auto-skip cleanly without Qt).
+- CI compile gate now includes `gitcurator/cli.py`; the suite runs
+  `tests.test_strikes` too.
+- CLI verified end-to-end headlessly: `--help`, no-arg friendly banner,
+  `--status` (with live strike rows), and a full `--import-file` batch
+  (spinner + progress rendering, inbox notes for non-GitHub links,
+  manifest, VaultSeal git commit `5108f88`, Good Repos skip, exit code
+  propagation).
+
+
+A full design review of the main/status screen graded it **C overall**
+(D+ design-system consistency): four icon languages on one screen, a log
+panel indistinguishable from the background, a status counter that said
+`- / -` while the real numbers sat in a log line, no active state on the
+filter tabs, and a hue soup (pink STOP, mint CTA, green dot, blue text,
+lavender everything else). v0.07 fixes every named finding.
+
+### One icon system (was: pixel-art + emoji + outline + solid mixed)
+- New `gitcurator/gui/icons.py` — a single flat-outline, Lucide-style
+  SVG set (layers, settings, moon/sun, refresh, stop, play, loader,
+  activity, search, trash, dot), tinted per theme at render time via
+  `QSvgRenderer` (rendered at 2× for HiDPI). No new dependency — QtSvg
+  ships with PyQt6, and the helpers degrade to text-only buttons if it
+  is ever unavailable.
+- Every main-screen glyph replaced: logo tile, settings, theme toggle,
+  SYNC/PROCESS/FETCHING/STOP hero states, Test Connectivity, proxy
+  status dot, log search (leading action), clear-log button.
+
+### Palette collapsed to one accent + semantic states
+- SYNC/PROCESS hero fill is now the **lavender anchor** (`#C4BCF5` +
+  deep-plum text, 9.0:1) — the app's single interactive-chrome accent.
+  The old mint CTA made the primary button read as a second, unrelated
+  hue; mint/green is now reserved for success states only.
+- STOP is a decisive red kill-switch (`#D63A24`, white text 4.7:1 AA;
+  hover `#C43320` 5.5:1). It only renders while a batch runs, so the
+  screen's loudest element is also its most urgent one.
+- Progress-bar chunk is the accent (was mint — a success-state color
+  doing chrome work). Semantic dot/label colors for proxy health.
+
+### The status readout says something real
+- The `– / –` counter is now labeled **PROCESSED x / y** and is
+  truthful at all times: live counts during a batch, `0 / n` for a
+  fetched queue, and the last batch manifest's real totals while idle
+  (`_refresh_pipeline_counter()`, wired into init, vault change, SYNC
+  fetch, batch finish and progress-bar reset). Tooltips explain the
+  numbers. Nielsen "Visibility of System Status" restored.
+
+### Figure-ground for the log panel
+- Dark theme: the log well drops to a recessed `#17131F` (window
+  `#221E2E` → card `#2B2639` → well `#17131F` is now a visible depth
+  hierarchy; was `#241F31` ≈ 1.09:1 against the card). Log timestamps
+  re-tinted per theme (were fixed `#666`, ~2.4:1 on the new well).
+
+### Filter tabs with a legible active state
+- All/Errors/Warnings/Success became a segmented control: checked tab
+  gets a filled accent background (lavender/plum text dark, violet/white
+  light), hover states, focus rings. Was: four identical gray buttons
+  with zero state differentiation.
+
+### Whitespace redistributed, hierarchy corrected
+- SYNC and Test Connectivity share ONE horizontal row (SYNC grows) —
+  the stacked layout's wasted vertical space now belongs to the log
+  panel (min-height 72), so the empty state no longer reads as a void.
+- One 10px spacing rhythm between the four bands (top bar / CTA card /
+  pipeline strip / log) instead of uneven 8px gaps.
+- The counter, bar and proxy health sit in ONE connected strip — the
+  review noted the counter and "Connected" status were "two halves of
+  the same story at opposite screen edges."
+
+### Accessibility
+- Placeholder text lifted to AA: `#A6A2AC` on plum (5.8:1, was 4.30:1)
+  and `#7A7288` on white (4.6:1) via the `QPalette.PlaceholderText`
+  role (guarded for Qt < 6.5).
+- Accessible names on every icon-only control (settings, theme toggle,
+  clear log, proxy dot + label, search box).
+- Pointing-hand cursors on the filter tabs and clear button.
+
+### Verified
+- 92/92 tests green (incl. the 3 GUI worker-guarantee tests), 33/33
+  offscreen smoke checks of the new screen, and an independent vision
+  review of rendered light + dark screenshots: 14/14 checklist PASS.
+
+## [0.06] — Reliability & Performance Release — 2026-09-17
+
+Owner-reported symptom: *"it's buggy and doesn't work — it just says
+another project is running, but does nothing"* with the log showing
+`⏳ Another Telegram operation is already running` on every button from
+19:49 to 19:52 with no operation ever finishing.
+
+### Root causes (both reproduced, both fixed)
+
+**1. The Telegram busy-lock could stick at "held" forever.**
+- The subprocess runner read the telethon child's stderr with an
+  UNBOUNDED blocking loop; its `proc.wait(timeout=300)` only ran after
+  stderr closed, i.e. never for a stalled child (dead SOCKS proxy,
+  session-file contention). The startup auto bot-check acquired the
+  lock, hung there forever, and every subsequent Telegram operation was
+  denied — the exact log the owner captured.
+- 15 early-return paths (missing credentials / empty fields) exited
+  AFTER acquiring the lock without releasing it.
+- Two signal-ordering self-deadlocks guaranteed denials: the keyword-mode
+  finisher started the batch while its own worker still held the lock
+  (100% reproducible), and Verify All's finisher called
+  `clear_bot_queue()` the same way.
+- `ProcessingWorker.run()` had no top-level try/except: any crash in the
+  ~850-line pipeline killed the thread silently — no `finished_signal`,
+  no `processing_finished`, lock stuck for telegram batches.
+- `processing_finished` released the lock unconditionally, even for
+  direct/import batches that never acquired it (could free a live
+  worker's lock → two telethon children on one session).
+- closeEvent never killed telethon children; an orphan held
+  `session.session`'s SQLite, making the NEXT launch's auto-check stall.
+
+**2. A zombie process made the NEXT launch print "Another instance is
+already running" and exit.** The startup auto-check opens modal dialogs
+2s after launch; if the main window was closed in those 2s (or a hidden
+parented dialog outlived it), Qt never emitted `lastWindowClosed`,
+`app.exec()` never returned, the `finally` in `main()` never deleted
+`app.lock` — the lingering process then blocked every future launch.
+
+### Fixes
+- **New module `gitcurator/gui/telegram_lock.py`** — `TelegramLockManager`
+  with owner tracking, age reporting, owner-scoped release, force-release
+  and a context manager. The busy message now names the holder and its
+  age instead of a dead-end "please wait".
+- **New module `gitcurator/integrations/subprocess_runner.py`** — a
+  runner with a REAL timeout: idle-based kill (no child output for 180s
+  default; progress lines keep healthy fetches alive), a 30-min hard
+  cap, generous auth-grace while the user types a login code / 2FA
+  password, and a process registry so closeEvent kills every orphan.
+  Ships a 4-scenario self-test (`python -m
+  gitcurator.integrations.subprocess_runner`).
+- All 15 leak paths release on early return; every acquire site names
+  its owner; `_keep_worker` releases only if that worker still holds the
+  lock; the two self-deadlock finishers defer one event-loop tick
+  (`QTimer.singleShot(0, …)`); `TestWorker.run` catches BaseException
+  and always emits `finished_signal`; `ProcessingWorker.run` is wrapped
+  so the batch ALWAYS emits `finished_signal` exactly once.
+- **Watchdog** — a 60s QTimer force-releases any lock held > 35 min
+  (longer than the runner's hard cap) with a loud log line.
+- **Zombie fix** — `_closing` flag + guards in every modal helper and
+  the startup auto-check (dialogs are logged, not shown, during
+  shutdown); closeEvent stops the timers and ends with an explicit
+  `QApplication.quit()` so `app.exec()` always returns and `app.lock` is
+  always removed.
+- `telegram_fetch_worker.py`: Telethon `timeout=45`, bounded `connect()`
+  (90s), retry caps, and a progress heartbeat every 500 fetched messages
+  so large healthy fetches are never mistaken for stalls.
+- Startup lock-reset removed (fresh window = fresh lock; the old blind
+  reset could wipe a legitimately-acquired lock from the first 2s).
+
+### Performance
+- O(n²) link dedup → set-backed in all three extraction blocks
+  (telegram_fetch_worker ×2, message-range fetch; a 5,000-link bot chat
+  went from ~25M list comparisons to hash lookups).
+- SQLite: WAL journal + `synchronous=NORMAL` + indexes on the hot
+  lookup columns (`processed_repos.url/.note_path`, `failed_repos.url`);
+  verify-all now opens ONE CacheDB connection instead of two.
+- `check_bot_queue` vault filtering (VaultIndex rebuild — a full walk of
+  every note — plus decommissioned classification) moved from the GUI
+  thread into the background worker; the GUI used to freeze 0.5–5s on
+  every queue check including the startup auto-check.
+- `LinkTracker.mark_processing` no longer rewrites the entire manifest
+  JSON per link (~1,000 full-manifest writes per 500-link batch → 0;
+  crash recovery unaffected — reconciliation already retries "pending").
+- Telethon import deferred to the headless `--single-id` path
+  (~0.5–1s faster GUI cold start; the asyncio stack no longer loads in
+  the GUI process).
+
+### Modularity & hygiene
+- New testable modules (telegram_lock, subprocess_runner) with the bug
+  context documented at the top of each.
+- Dead files moved to `app/_attic/` (4 screenshot scripts, superseded
+  smoke script, 3 byte-identical prompt duplicates; `app/prompts/`
+  keeps the canonical copies).
+- `.gitignore` now excludes the live credential stores (config.json,
+  both installer.config.json) — an accidental `git add .` can no longer
+  commit five live tokens. New `app/config.example.json` template with
+  every secret masked.
+
+### Verification
+- 73/73 existing unit + e2e + goodrepos tests green.
+- Subprocess runner self-test: healthy worker / hung-worker kill /
+  interactive-auth grace / hard cap — all pass.
+- Offscreen GUI smoke: module import, MainWindow construction, lock
+  semantics (double-acquire denial, wrong-owner release protection,
+  watchdog force-release), TestWorker SystemExit → finished_signal,
+  clean event-loop exit.
+- **End-to-end forever-bug repro** through the real
+  `MainWindow.check_bot_queue()` path: (A) fast-fail child releases the
+  lock and a second Telegram operation is admitted; (B) a HUNG child
+  (simulated dead proxy, 600s sleep) is killed after 6.1s by the idle
+  timeout and the lock auto-releases; (C) `app.exec()` returns after
+  close — no zombie, no stale app.lock.
+
+### Standing security note (unchanged P0)
+Rotate every credential that has appeared in chat/logs (Telegram bot
+token + api_id/api_hash, Cloudflare tokens, GitHub PAT) and update them
+in the app and on the worker. Git history predating v0.0.10 still holds
+old blobs.
+
+## [0.05] — Ollama Auto-Start Release — 2026-09-17
+
+Owner-reported fix: "a problem that prevents processing… tried with
+different LLMs, but it fails to actually digest and process the new
+link." The log showed the classic wall:
+`HTTPConnectionPool(localhost:11434) … Connection refused` → retries →
+`❌ LLM failed for <repo>` five minutes later.
+
+### Root cause
+**The Ollama server was not running** (connection refused = nothing is
+listening on `localhost:11434`). Switching models can never fix a dead
+server — every model lives on the same server — yet the old failure UI
+presented a model-picker, sending the user down exactly that dead end.
+
+### What v0.05 does about it
+- **Auto-start at batch start** — the pre-flight check in `run()` now
+  spawns `ollama serve` detached (same flags as the 🚀 Start Server
+  button: survives the app on Windows/Unix), polls until the server
+  answers (16 probes × 1.5s), and continues the batch seamlessly.
+- **Clear failure trail** — if Ollama isn't installed / never comes up,
+  the log says exactly that (install URL, the Start Server button, the
+  `ollama serve` command) instead of a raw traceback.
+- **Per-repo diagnosis** — mid-batch LLM failures are now inspected: a
+  connection-refused family error (incl. the urllib3/requests wording
+  from the owner's log) logs "💡 That is a CONNECTION error… choosing a
+  different model will NOT fix it" BEFORE the model-picker dialog.
+- **Dialog warning** — the "LLM Analysis Failed" dialog now shows a
+  highlighted warning box when the server is unreachable, instead of a
+  silent empty model dropdown.
+- New helpers: `ProcessingWorker._autostart_ollama()` (thread-safe,
+  GUI only via the log signal) and `_looks_like_connection_error()`
+  (string+exception-type detection; `TimeoutError` explicitly excluded —
+  it is an `OSError` subclass in Python 3 and must NOT read as "down").
+
+### Verification
+- 85/85 offscreen GUI smoke checks (+7 new: connection-error detection
+  incl. the owner's exact urllib3 string, timeout non-detection, and the
+  auto-start not-installed branch).
+- 73/73 backend tests green.
+
+## [0.04] — Credentials Release — config pre-filled — 2026-09-17
+
+Owner-reported fix: "I still get the same error" — the v0.03 zip shipped a
+credential-free `config.json` (v0.0.10's sanitization), so on a fresh unzip
+SYNC bailed with **"❌ Telegram credentials required."** (`api_id` 0,
+`api_hash`/`phone` empty). Per the owner's explicit request this release
+**pre-fills the credentials into the app config**.
+
+### What's pre-filled now
+- `app/config.json`:
+  - `telegram_api_id` / `telegram_api_hash` — the owner's Telegram API pair.
+  - `bot_token` (@githubfetcherbot) + `bot_username`.
+  - `github_token` — the owner's PAT (repo fetching + VaultSeal/GoodRepos pushes).
+  - `cloudflare_worker_url` — the LIVE worker
+    (`https://github-to-obsidian-bot.aliassadi-plus.workers.dev`, verified
+    via `/health` before shipping).
+  - Reserved keys (kept alive by the v30 merge-save, no consumer yet):
+    `cloudflare_api_email`, `cloudflare_api_token`, `cloudflare_account_id`,
+    `cloudflare_workers_ai_token`, `telegram_user_id`.
+- `app/installer.config.json` + `app/cloudflare-bot/installer.config.json`:
+  `bot_token`, `github_pat`, `allowed_user_ids` (= the sole bot-chat user
+  92788333, recovered from the worker's D1 ledger), and a freshly generated
+  random `hmac_secret` — `node install.js` now validates out of the box.
+
+### The one field still empty
+- `telegram_phone` — the owner's own phone number was not in the provided
+  credential list. Every Telegram fetch (SYNC included) needs it once:
+  **Settings → Credentials → Phone** (`+98…` international format). The app
+  saves it on first SYNC and never asks again (the Telethon session survives
+  restarts).
+
+### Note
+- The Cloudflare Workers AI token is stored but not yet consumed by any
+  code path — it's parked as a reserved key for future use.
+- Zip note: this release intentionally ships real credentials inside
+  `config.json`/`installer.config.json` (private repo + owner's explicit
+  request). The v0.0.10 "credential-free tree" guarantee is lifted for
+  this release line.
+
+## [0.03] — GUI Redesign Release — two-stage SYNC — 2026-09-17
+
+Owner-reported fix: clicking SYNC used to raise the "Nothing to Process"
+error box. SYNC now runs the fetch itself, per the requested flow:
+**click SYNC → it fetches all undone items in the Telegram bot → the button
+turns into PROCESS → click PROCESS → it starts.**
+
+### The new hero-button flow (GUI-only, zero pipeline changes)
+- **SYNC** — fetches every undone item from the Telegram bot (the bot-queue
+  check: already-in-vault and decommissioned repos are skipped), logging the
+  queue summary; the button reads `⏳ FETCHING…` while it runs.
+- **PROCESS (N)** — after the fetch, the button shows the pending count and
+  the progress bar reads `N ready to process`; clicking starts the batch
+  through the existing confirm-gated path.
+- **STOP** — while the batch runs (unchanged mirror behavior), then back to
+  SYNC when it finishes.
+- Nothing fetched (0 pending) with an Input mode selected → PROCESS runs
+  that mode (Markers/Single/Range/Import keep their launcher); 0 pending and
+  no mode → "✅ All caught up".
+- Bot not configured → SYNC falls back to the legacy input-mode path, or
+  shows a friendly setup hint instead of the old error.
+- `check_bot_queue()` gained an optional `on_done(name, result)` completion
+  callback + `bool` return for early bails (backward compatible).
+
+### Fixes
+- **Progress-bar text never rendered while idle** — a fresh QProgressBar
+  holds `value = -1` (unset, out of range), so the QSS-styled bar drew no
+  text until the first batch ran; the idle "Ready" (and the new "N ready to
+  process") label was invisible. Pinned to `setValue(0)` at construction.
+- "Nothing to Process" / SYNC tooltips re-worded for the new flow.
+
+### Verification
+- 78/78 offscreen GUI smoke checks (20 new for the two-stage state machine:
+  fetching render, PROCESS (N), count refresh, 0-pending/error fallbacks,
+  PROCESS routing, busy-lock bail, full SYNC→PROCESS→STOP→SYNC cycle).
+- 73/73 backend tests green. `VERSION` → `0.03`; `gui/app.py` stamp → `0.03`.
+
+## [0.02] — GUI Redesign Release — compact pass — 2026-09-17
+
+New owner-requested release-zip line for the GUI redesign deliveries
+(`gitcurator-v0.02.zip`; numbering v0.01, v0.02, … — each new delivery
+bumps the version). Not related to the deleted early session zips that
+happened to use v0.01–v0.09 names. Built with `git archive` from the
+`gui-redesign-v33` branch: tracked tree only — no `.git`, no runtime
+caches, no sessions.
+
+### GUI redesign (GUI-only, zero business-logic changes)
+- **v0.01 — wireframe redesign (first delivery):** minimal main view —
+  logo + SYNC CTA + Test Connectivity + progress + logs — with every one
+  of the 9 tabs moved into a Settings window (sidebar master-detail).
+- **v0.02 — compact pass (this release):**
+  - Main window halved to 1000×375; log panel height halved.
+  - Settings > Vault: the giant gap is gone — pages are top-aligned at
+    natural height inside the scroll area.
+  - Settings > LLM: everything fits the viewport — combo min-width caps,
+    🔄 Refresh + 🚀 Start Server share the Model row.
+  - Verification: 73/73 backend tests + 60/60 offscreen GUI checks green.
+- `VERSION` → `0.02`; `gui/app.py` version stamp → `0.02`.
+
 ## [0.0.10] — Security Hygiene & Deploy Kit — 2026-09-17
 
 Session wrap-up release: closes the Session-1 audit finding *live secrets

@@ -35,3 +35,16 @@ desktop.ini
 
 # Live Telethon sessions — never commit (audit finding v0.0.10)
 app/session.session*
+
+# v0.06 — SECURITY: live credential stores. config.json currently holds the
+# owner's real tokens (private-repo convenience from v0.04); gitignoring it
+# prevents an accidental `git add .` from committing five live secrets.
+# Use config.example.json as the template for fresh installs.
+app/config.json
+app/installer.config.json
+app/cloudflare-bot/installer.config.json
+app/config.local.json
+
+# v0.06 — runtime logs / single-instance locks anywhere in the tree
+**/logs/
+app/app.lock

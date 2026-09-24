@@ -4,8 +4,8 @@
 > Saved Messages for GitHub repositories, curates them with a **local LLM**,
 > and writes clean, structured notes into your **Obsidian vault**.
 
-**Version:** `0.0.10` (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** modular `gitcurator` package + public Good Repos directory + pastel UI · 73/73 automated tests green · credential-free git tree (v0.0.10).
+**Version:** `0.09.1` — CLI-not-running root-cause fix (Windows legacy-codepage UnicodeEncodeError) · UI polish pass (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
+**Status:** redesigned PyQt6 GUI (v0.03 two-stage SYNC: fetch undone bot items → PROCESS → run; v0.05 auto-starts `ollama serve` when the server is down; v0.06 reliability fixes; **v0.07 main screen rebuilt per design review** — one unified SVG icon set, one-accent palette, labeled `PROCESSED x / y` counter, active-state log filter tabs; **v0.07.1 hotfix** — official Lucide icons bundled verbatim, proxy pre-flight, DC-rotating connect retries, token whitespace healing; **v0.08** — every icon re-fit to its area (they were rendering 2× too big and clipped — the "partial sun"), window re-proportioned 1000×375 → **900×600 (exact 6:4)**, **404 QUARANTINE** (dead links confirmed after 3 consecutive 404s across sessions are silently skipped in every input path), and a **visualized CLI companion** — `cli.py` + `Start-GitCurator-CLI.bat`, colors/spinners/live progress, zero flags needed) on the modular `gitcurator` package · 101/101 automated tests green · v0.04 ships the owner's real credentials pre-filled in `app/config.json` + `installer.config.json` (private repo, owner's explicit request — the v0.0.10 credential-free guarantee is lifted for this release line).
 
 ---
 
@@ -38,32 +38,154 @@
    directory** (`goodrepos.py`) organized like *AI → Skills → …*, with the
    notes mirrored into category folders of the public `good-repos` repo.
 
-## UI standards (v0.0.6 + v0.0.7 pastel, v0.0.8 toggle)
+
+## The CLI companion (v0.09 — one click, fully visualized, zero extra deps)
+
+Prefer a terminal? Keep `config.json` in the project folder (the SAME
+file the GUI uses) and double-click:
+
+```
+Start-GitCurator-CLI.bat      (Windows — same engine as GitCurator-CLI.bat)
+GitCurator-CLI-Setup.bat      (Windows — first-run credential wizard)
+./gitcurator-cli.sh           (Linux/macOS)
+```
+
+v0.09 merges the two lineages' CLIs into ONE engine (`main.py --cli` →
+`gitcurator/cli.py` — plain ANSI, no `rich` dependency). It carries the
+v0.07.2 **model picker**: pre-flight checks run BEFORE any work, and when
+the configured Ollama model isn't pulled you get an interactive numbered
+menu (smart recommendation first — same family/size as the configured
+model, embedding models flagged and never recommended); scheduled/piped
+runs auto-pick the closest stand-in so a missing model can never fail or
+degrade a batch. The choice is saved to `config.json`.
+
+That's the whole interface. The CLI then runs the complete pipeline
+automatically, in color, with loading animations:
+
+```
+  ╔════════════════════════════════════════╗
+  ║   GitCurator — Telegram → GitHub →     ║   ← ASCII banner + version
+  ║            Ollama → Obsidian           ║
+  ╚════════════════════════════════════════╝
+  ── run configuration ────────────────────   ← masked secrets, vault, proxy
+  ── pre-flight checks ────────────────────   ← spinner per check
+    ✓ GitHub token   authenticated as you · 4996 API calls left
+    ✓ Proxy          127.0.0.1:10808 reachable (socks5, 3 ms)
+    ✓ LLM provider   Ollama up · 3 model(s)
+  ── fetching the bot queue ───────────────   ← live worker log + spinner
+     Bot queue: 42 total · 18 in vault · 7 dead · 12 to process
+  ── processing 12 repo(s) ────────────────   ← live bar: repo · ██ 7/12 · 0:42
+  ── VaultSeal / Good Repos ───────────────   ← post-run, same as the GUI
+  run summary: processed / warnings / retry queue / quarantined / elapsed
+```
+
+Useful flags: `--init` (credential wizard) · `--auto` (SYNC → process →
+seal → publish) · `--status` (config + cache + quarantine summary) ·
+`--retry-failed` · `--mark-read` · `--import-file urls.txt` ·
+`--from-id/--to-id`, `--offset-start/--count`, `--single-id` ·
+`--list-dead` / `--reset-dead` (quarantine management, ported from the
+v0.08 companion) · `--strikes N` (quarantine threshold for this run) ·
+`--vault` / `--config` overrides.
+
+The CLI supports Ctrl+C as a graceful stop and delivers the worker's
+signals to the renderer through a main-thread bridge so the live
+display stays thread-safe.
+
+## The 404 quarantine (v0.09 — dead links stop wasting runs, tunably)
+
+A GitHub link that returns **404 N times in a row — counted across
+sessions** — is confirmed dead and silently skipped from every input
+path (bot queue, Telethon channel fetch, import files, retries) before
+any GitHub API call. Attempt logging stays quiet (`🗑️ 404, attempt 1/N`);
+reaching the threshold logs `QUARANTINED` and writes its single permanent
+row into `_inbox/notfound-links/notfound_links.md`. Batch summaries
+report the skipped count in one aggregate line — no more per-URL 404 spam
+from the same six dead repos every run.
+
+**v0.09 unifications (from the merged lineage):**
+
+- **The threshold is configurable again** — `notfound_strike_threshold`
+  in `config.json` (default 3, min 2), set from the GUI
+  (*Settings → Dashboard → "Deleted Repos — 404 Quarantine"*) or the CLI
+  (`--strikes N`). v0.08 had it hardcoded to 3.
+- **Consecutive semantics restored** — a SUCCESSFUL fetch resets the
+  counter (v0.08 counted attempts forever, so stale strikes from months
+  ago could quarantine a live repo after one more transient miss).
+- **v0.07 caches migrate automatically** — the old `notfound_strikes`
+  table moves into `decommissioned_repos.fail_count` on first open
+  (higher count wins when a URL exists in both).
+- **Two viewers** — Settings → Dashboard shows in-progress attempts AND
+  confirmed rows (⛔) with the threshold spinbox; `More ▸ 🚫 View 404
+  Quarantine` lists confirmed-dead with one-click reset. CLI:
+  `--list-dead` / `--reset-dead`.
+
+False positives recover: a repo that went PRIVATE reads as 404 to an
+unauthorized token, so a reset gives every link a fresh set of attempts.
+
+## Reliability (v0.06 — the "another operation is already running" fix)
+
+The v0.05 forever-bug had two independent root causes, both fixed and both
+covered by automated reproduction tests:
+
+- **Stuck Telegram lock** — a hung telethon subprocess (dead proxy, session
+  contention) could block the fetch worker forever, so the single-operation
+  lock never released and every Telegram button logged
+  `⏳ Another Telegram operation is already running`. The new
+  `integrations/subprocess_runner.py` kills stalled children (idle timeout +
+  30-min hard cap, interactive-auth grace), `gui/telegram_lock.py` tracks
+  lock OWNERS (the busy message now names the holder and its age), 15
+  early-return paths release correctly, two signal-ordering self-deadlocks
+  are deferred, every worker always emits its finished signal, and a
+  watchdog force-releases anything held implausibly long.
+- **Zombie process → "Another instance is already running"** — modal dialogs
+  fired by the 2-second startup timer outlived the main window;
+  `app.exec()` never returned, `app.lock` was never cleaned up, and the next
+  launch refused to start. Shutdown is now guarded (`_closing` flag + modal
+  guards + explicit `QApplication.quit()`), so the process always dies and
+  the lock file always gets removed.
+
+Same release: set-backed link dedup (O(n²) → O(n)), SQLite WAL + hot-column
+indexes, vault filtering moved off the GUI thread, no more per-link manifest
+rewrites, and telethon imports deferred out of the GUI process.
+
+## UI standards (v0.0.6 + v0.0.7 pastel, v0.0.8 toggle, v0.07 main screen)
 
 The desktop GUI follows a small, explicit set of visual rules:
 
-- **Fixed 1000×750 window** — never resizes between tabs; every tab scrolls
-  independently and starts at the same top position at its natural height.
-- **One growable region per tab** — the results/list/log panel absorbs the
+- **Fixed 1000×375 main window** — never resizes; the log panel is the one
+  growable region, every Settings page scrolls independently at its natural
+  height.
+- **One growable region per screen** — the results/list/log panel absorbs the
   leftover vertical space; forms and buttons stay content-sized.
-- **Always-visible light/dark toggle (v0.0.8)** — a compact 🌙/☀️ icon button
-  in the action row flips the full cream/plum pastel theme and persists the
-  choice; the tooltip always names the current mode (never color alone).
-- **Three button variants** — filled pastel-mint primary (exactly one per
-  tab, deep-forest text), outlined violet secondary, filled pastel-rose
-  danger; everything infrequent (tests, verify, export, retry,
-  recategorize) lives in the **More ⋯ menu**.
+- **One icon system (v0.07.1)** — every glyph is the REAL Lucide icon
+  pack (v0.544.0, ISC license) bundled verbatim in `gitcurator/gui/icons.py`
+  — official geometry, not redraws — tinted per theme at render time (no
+  emoji, no pixel-art, no mixed rendering styles).
+- **One accent + semantic states (v0.07)** — lavender is the only
+  interactive-chrome accent (hero CTA fill, filter-tab active state,
+  progress chunk, links); green/amber/red appear ONLY as success/warning/
+  error states (proxy health, log levels, the STOP kill-switch).
+- **Status always labeled and truthful (v0.07)** — the `PROCESSED x / y`
+  counter shows live batch counts, fetched-queue counts, or the last
+  manifest's real totals — never a blank placeholder; the proxy dot reads
+  `Connected / Idle / Error` with a matching semantic text color.
+- **Always-visible light/dark toggle (v0.0.8)** — a compact moon/sun icon
+  button in the top bar flips the full cream/plum pastel theme and persists
+  the choice; the tooltip always names the current mode (never color alone).
+- **Button variants** — filled lavender hero (main screen), filled pastel-mint
+  primary (Settings, exactly one per page), outlined violet secondary, red
+  filled danger (`#D63A24`, white text) for destructive actions only;
+  everything infrequent (tests, verify, export, retry, recategorize) lives
+  in the **More ⋯ menu**.
 - **Pastel palette, AA contrast** — cream day (`#FBF8F2` + white sheets +
-  warm-sand borders) / plum night (`#2B2639` sheets + lavender accents);
-  mint `#B9E3C9`+`#17402B`, violet `#5F54B4`, rose `#F6C6CD`+`#5E1120` —
-  every text pair ≥ 4.5:1; red only for errors; pending counts neutral.
-- **Status always labeled** — the proxy dot reads `Connected / Idle / Error`;
-  the progress bar appears only while a batch runs
-  (`Processing X of Y — owner/repo`), and batches over 10 items confirm
-  their exact count first.
+  warm-sand borders) / plum night (`#2B2639` sheets, recessed `#17131F` log
+  well, lavender accents); every text pair ≥ 4.5:1 including placeholder
+  text (`QPalette.PlaceholderText`); red only for errors; pending counts
+  neutral.
 - **Design tokens** — 4/8/16/24/32/48px spacing scale; type scale of four
   sizes (16 titles / 13 labels / 12 body / 12 mono); 2px focus outlines
-  on every interactive element, both themes.
+  on every interactive element, both themes; accessible names on every
+  icon-only control.
 
 ## Resilience (v0.0.8)
 
@@ -176,15 +298,16 @@ history (`GET /api/goodrepos`).
 
 | Path | What it is |
 |---|---|
-| `app/` | The Python application: PyQt6 GUI + headless CLI (start with `app/README.md`) |
+| `app/` | The Python application: PyQt6 GUI + visualized CLI (start with `app/README.md`) |
 | `app/main.py` | Thin launcher — the real entry point is `gitcurator.gui.app.main` |
+| `app/cli.py` + `Start-GitCurator-CLI.bat` | **Visualized CLI** (v0.08) — one-click, zero flags; real code in `gitcurator.cli_app` |
 | `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` |
 | `app/gitcurator/integrations/` | Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
 | `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful) |
-| `app/gitcurator/gui/` | `app.py` — MainWindow, pipeline worker, headless CLI |
+| `app/gitcurator/gui/` | `app.py` — MainWindow, pipeline worker, headless CLI · `icons.py` — the Lucide pack |
 | `app/gitcurator/tools/` | Developer utilities (diagnostics, import-surface docs) |
 | `app/gitcurator/constants.py` | Shared design tokens + config defaults |
-| `app/tests/` | 73 tests (34 unit + 11 e2e + 28 goodrepos) — fake Ollama + fake GitHub, zero pip |
+| `app/tests/` | 101 tests (34 unit + 11 e2e + 28 goodrepos + 19 reliability + 9 quarantine) — fake Ollama + fake GitHub, zero pip |
 | `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
 | `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
 

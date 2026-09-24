@@ -74,6 +74,22 @@ COLORS = {
     'warning_pastel': '#F7E7BE',  # butter fill (pairs with #5C430B, 7.6:1)
     'success':        '#1E6B4B',  # success text on light (6.4:1)
 
+    # v0.07 main-screen tokens (design review) — ONE accent (the lavender
+    # anchor) for interactive chrome; green/red/butter reserved for states.
+    # v0.09.1 polish: the hero fill is deepened (was #C4BCF5 — so pale it
+    # read muted/disabled against the cream bg); hover now DARKENS the fill
+    # (a proper press affordance — the old lighter-hover felt inert).
+    'hero_fill':       '#B3A7F2',  # SYNC/PROCESS fill (both themes) — pops, 7.2:1 text
+    'hero_fill_hover': '#A296EC',  # deeper lavender (hover/pressed)
+    'hero_text':       '#241D3F',  # deep plum on the lavender fill (7.2:1)
+    'danger_fill':      '#D63A24',  # STOP kill-switch fill (white 4.7:1)
+    'danger_fill_hover':'#C43320',  # darker hover (white 5.5:1)
+    'danger_fill_press':'#B32D1D',
+    'log_well_dark':   '#17131F',  # recessed log well on plum (figure-ground)
+    'log_well_light':  '#FFFFFF',
+    'hint_dark':       '#A6A2AC',  # placeholder text, AA on plum sheets
+    'hint_light':      '#7A7288',  # placeholder text, AA on white
+
     # Backgrounds — cream day / plum night
     'bg_light':       '#FBF8F2',  # warm cream
     'bg_dark':        '#221E2E',  # soft plum-charcoal

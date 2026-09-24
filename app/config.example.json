@@ -1,0 +1,55 @@
+{
+  "telegram_api_id": 12345,
+  "telegram_api_hash": "YOUR_TELEGRAM_API_HASH_HERE",
+  "telegram_phone": "+15550001111",
+  "proxy": {
+    "enabled": true,
+    "type": "socks5",
+    "host": "127.0.0.1",
+    "port": 10808
+  },
+  "ollama": {
+    "base_url": "http://localhost:11434",
+    "model": "Qwen3.8-27B-UD-IQ2_S-Instruct-Vision-No-think-DynamicV3-Unsloth:latest"
+  },
+  "llm_provider": "ollama",
+  "cloud_api_url": "https://api.openai.com/v1",
+  "cloud_api_key": "",
+  "cloud_model": "gpt-4o-mini",
+  "github_token": "YOUR_GITHUB_TOKEN_HERE",
+  "bot_token": "YOUR_BOT_TOKEN_HERE",
+  "bot_username": "YOUR_BOT_USERNAME_HERE",
+  "vault_path": "YOUR_VAULT_PATH_HERE",
+  "vaults_history": [
+    "G:/Docs/Github Projects Obsidian Vault/Github Projects(Automated)"
+  ],
+  "log_level": "INFO",
+  "timeout_per_repo": 60,
+  "max_retries": 3,
+  "delay_between_api_calls": 0.5,
+  "notfound_strike_threshold": 3,
+  "dark_mode": true,
+  "last_processed_msg_id": 1252264,
+  "large_batch_extra_delay": 1.5,
+  "banner_throttle_10": 2.0,
+  "banner_throttle_50": 5.0,
+  "cloudflare_worker_url": "https://github-to-obsidian-bot.aliassadi-plus.workers.dev",
+  "backup_enabled": false,
+  "backup_folder": "",
+  "backup_max": 10,
+  "vaultseal": {
+    "enabled": true,
+    "repo_name": "",
+    "auto_push": true
+  },
+  "goodrepos": {
+    "enabled": true,
+    "auto_push": true,
+    "repo_name": "good-repos"
+  },
+  "telegram_user_id": "92788333",
+  "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
+  "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+  "cloudflare_account_id": "20b665b0bc839144c1e9f16aaf07953d",
+  "cloudflare_workers_ai_token": "YOUR_CLOUDFLARE_WORKERS_AI_TOKEN_HERE"
+}

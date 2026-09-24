@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v30.0 (Core Extraction & Reliability Release)
+# GitHub-to-Obsidian v0.08 (Core Extraction & Reliability Release)
 
 ## Quick Start
 
@@ -8,7 +8,22 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Headless (no GUI)
+### Visualized CLI (v0.09 — one click, colors + animations, zero extra deps)
+```cmd
+Start-GitCurator-CLI.bat     (double-click it — same engine as GitCurator-CLI.bat)
+python main.py --cli --auto --yes    (fully automatic run)
+python main.py --cli --init          (first-run credential wizard)
+python main.py --cli --status        (config + cache + 404-quarantine summary)
+python main.py --cli --list-dead     (show the 404 quarantine)
+```
+The CLI reads `config.json` from this folder — the SAME file the GUI
+uses — and runs pre-flight checks (GitHub token, proxy, Ollama **model**)
+→ bot queue → processing → Obsidian notes → seal, automatically. A
+configured Ollama model that isn't pulled opens an interactive numbered
+picker (or auto-picks in unattended runs) — a missing model can never
+fail the batch.
+
+### Headless (no GUI, plain output — the original interface)
 ```cmd
 python main.py --headless --import-file urls.txt --vault "C:\path\to\vault"
 python main.py --headless --from-id 123 --to-id 456 --vault "C:\path\to\vault"
