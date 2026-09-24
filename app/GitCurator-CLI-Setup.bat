@@ -37,8 +37,8 @@ set EXITCODE=%ERRORLEVEL%
 echo.
 if "%EXITCODE%"=="0" (
     echo  [GitCurator] Setup complete! Next: double-click GitCurator-CLI.bat
-    echo                for the fully-automatic run, or run:
-    echo                    python main.py --cli --status
+    echo                for the fully-automatic run. Re-login any time:
+    echo                    python main.py --cli --login
 ) else (
     echo  [GitCurator] Setup exited with code %EXITCODE%.
 )

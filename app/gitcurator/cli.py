@@ -21,6 +21,7 @@ applies here too — but the output is a live terminal experience:
 Usage
 -----
     python main.py --cli --init          # first-run wizard (saves config.json)
+    python main.py --cli --login         # Telegram login: enter the verification code
     python main.py --cli --auto          # fully automatic run (bot → vault)
     python main.py --cli --status        # config + cache + strike summary
     python main.py --cli --import-file urls.txt
@@ -244,7 +245,7 @@ def banner() -> None:
   ███    ███ ███    ███ ████    ████ ▄███████████  ▀█████▀  ███    █████
 """
     print(paint(art, C.CYAN, C.BOLD), end="")
-    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.2", C.MAGENTA)
+    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.3", C.MAGENTA)
           + paint("  ·  colored · animated · fully automatic", C.DIM))
     print()
 
@@ -563,9 +564,150 @@ def cmd_init(args) -> int:
     print(paint("│ ", C.GREEN) + paint("config.json", C.BOLD) + paint(" written — credentials stay local", C.GREEN).ljust(64) + paint("│", C.GREEN))
     print(paint("└──────────────────────────────────────────────────┘", C.GREEN))
     print()
-    cli_print("Next: double-click " + paint("GitCurator-CLI.bat", C.BOLD) + " (Windows) or run:", "success")
+
+    # v0.09.3 — the Telegram verification-code login used to be GUI-only;
+    # offer it right here so the setup wizard is a complete first-run
+    # experience. Non-interactive stdin (pipes / CI) skips the offer.
+    interactive = False
+    try:
+        interactive = bool(sys.stdin.isatty())
+    except Exception:
+        pass
+    logged_in = False
+    if interactive:
+        ans = _ask("Log in to Telegram now (enter the verification code)? (Y/n)", "y").strip().lower()
+        if ans.startswith("y"):
+            print()
+            logged_in, why = _run_login_flow(cfg)
+            if not logged_in:
+                cli_print(f"Login not completed ({why}).", "warning")
+                cli_print("Retry any time with: " + paint("python main.py --cli --login", C.BOLD), "info")
+
+    print()
+    if logged_in:
+        cli_print("Setup complete and logged in — double-click "
+                  + paint("GitCurator-CLI.bat", C.BOLD) + " (Windows) or run:", "success")
+    else:
+        cli_print("Setup complete. Log in before the first run when convenient:", "success")
+        print(paint("      python main.py --cli --login", C.CYAN))
+        cli_print("then double-click " + paint("GitCurator-CLI.bat", C.BOLD) + " (Windows) or run:", "info")
     print(paint("      python main.py --cli --auto", C.CYAN))
     return 0
+
+
+# ----------------------------------------------------------------------------
+# --login : interactive Telegram login (v0.09.3 — the verification-code entry
+# used to be reachable only through the GUI's dialogs)
+# ----------------------------------------------------------------------------
+
+def _run_login_flow(cfg: dict) -> tuple:
+    """Connect to Telegram with the saved credentials (through the proxy).
+
+    If the session is missing or expired, the worker sends the verification
+    code to the configured phone and the user types it here (plus the 2FA
+    password when the account has one). On success the session file is
+    saved — every future run (CLI or GUI) skips the login. Runs the SAME
+    subprocess engine as the GUI's Test Connectivity button. Returns
+    ``(ok, error_summary)``.
+    """
+    try:
+        _telegram_test_job = _gui_symbol("_telegram_test_job")
+    except ImportError as exc:
+        cli_print(f"{exc}", "error")
+        return False, "pipeline engine unavailable"
+
+    phone = cfg.get("telegram_phone", "")
+    proxy = cfg.get("proxy", {}) or {}
+    px_note = (f"{proxy.get('host', '?')}:{proxy.get('port', '?')} (on)"
+               if proxy.get("enabled") else "direct")
+    print(paint("Telegram login", C.BOLD)
+          + paint(f"  ·  {phone}  ·  proxy {px_note}", C.DIM))
+    print(paint("A code will be sent only if the saved session is missing/expired.", C.DIM))
+    print()
+
+    status = StatusLine()
+    status.start("Connecting to Telegram")
+    shim = _LogShim(status)
+    result_box: dict = {}
+    done = threading.Event()
+
+    def _job():
+        try:
+            result_box["r"] = _telegram_test_job(
+                str(cfg.get("telegram_api_id", 0) or 0),
+                cfg.get("telegram_api_hash", ""),
+                phone,
+                proxy,
+                shim,
+                code_callback=_code_prompt,
+            )
+        except Exception as exc:                       # pragma: no cover
+            result_box["r"] = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            done.set()
+
+    threading.Thread(target=_job, name="cli-telegram-login", daemon=True).start()
+    while not done.is_set():
+        while shim.queue:
+            msg, lvl = shim.queue.popleft()
+            status.log(msg, lvl)
+        status.tick()
+        time.sleep(0.09)
+    while shim.queue:
+        msg, lvl = shim.queue.popleft()
+        status.log(msg, lvl)
+    status.stop()
+    print()
+
+    result = result_box.get("r") or {"success": False, "error": "login thread died"}
+    if result.get("success"):
+        return True, ""
+    return False, str(result.get("error", "unknown error"))
+
+
+def cmd_login(args) -> int:
+    """Interactive Telegram login from the terminal (the GUI equivalent:
+    Test Connectivity / any fetch with an expired session)."""
+    banner()
+    path = _config_path(args.config)
+    cfg = load_config(path)
+    if cfg is None:
+        cli_print(f"No config at {path}. Run " + paint("python main.py --cli --init", C.BOLD) + " first.", "error")
+        return 1
+    cfg["__config_path__"] = path
+
+    missing = [name for name, val in [
+        ("telegram_api_id", cfg.get("telegram_api_id")),
+        ("telegram_api_hash", cfg.get("telegram_api_hash")),
+        ("telegram_phone", cfg.get("telegram_phone")),
+    ] if not val]
+    if missing:
+        cli_print("Missing settings: " + paint(", ".join(missing), C.RED), "error")
+        cli_print("Fix with: " + paint("python main.py --cli --init", C.BOLD), "info")
+        return 1
+
+    ok, err = _run_login_flow(cfg)
+    if ok:
+        print(paint("┌─ telegram ────────────────────────────────────────┐", C.GREEN))
+        print(paint("│ ", C.GREEN) + paint("session saved", C.BOLD)
+              + paint(" — future runs skip the login", C.GREEN).ljust(66) + paint("│", C.GREEN))
+        print(paint("└───────────────────────────────────────────────────┘", C.GREEN))
+        print()
+        cli_print("Next: double-click " + paint("GitCurator-CLI.bat", C.BOLD)
+                  + " or run " + paint("python main.py --cli --auto", C.BOLD), "info")
+        return 0
+
+    cli_print(f"Login failed: {err}", "error")
+    err_l = err.lower()
+    if "flood" in err_l or "rate-limited" in err_l:
+        cli_print("Telegram rate-limited the code request — wait the stated time, then rerun.", "info")
+    elif any(k in err_l for k in ("code", "auth", "session", "password", "sign in", "login")):
+        cli_print("Rerun " + paint("python main.py --cli --login", C.BOLD)
+                  + " once your proxy node works — a fresh code will be sent.", "info")
+    else:
+        cli_print("Check the proxy (v2ray running? exit node reachable?) and rerun "
+                  + paint("python main.py --cli --login", C.BOLD) + ".", "info")
+    return 1
 
 
 # ----------------------------------------------------------------------------
@@ -1175,7 +1317,12 @@ def cmd_auto(args) -> int:
     print()
 
     if not result.get("success"):
-        cli_print(f"Fetch failed: {result.get('error', 'unknown error')}", "error")
+        err = str(result.get("error", "unknown error"))
+        cli_print(f"Fetch failed: {err}", "error")
+        # v0.09.3 — session/auth failures now have a CLI remedy
+        if any(k in err.lower() for k in ("code", "auth", "session", "password", "sign in", "login")):
+            cli_print("Tip: run " + paint("python main.py --cli --login", C.BOLD)
+                      + " to (re-)authenticate with a fresh verification code.", "info")
         return 1
 
     pending = result.get("pending_urls") or []
@@ -1407,6 +1554,8 @@ def build_parser():
     )
     p.add_argument("--init", action="store_true",
                    help="first-run wizard: ask for credentials and save config.json locally")
+    p.add_argument("--login", action="store_true",
+                   help="Telegram login: connect, enter the verification code (and 2FA password), save the session")
     p.add_argument("--auto", action="store_true",
                    help="fully automatic run: bot SYNC → process → seal → publish")
     p.add_argument("--list-dead", action="store_true",
@@ -1446,6 +1595,8 @@ def cli_main(argv=None) -> int:
 
     if args.init:
         return cmd_init(args)
+    if args.login:
+        return cmd_login(args)
     if args.status:
         return cmd_status(args)
     if args.list_dead:
@@ -1469,6 +1620,7 @@ def cli_main(argv=None) -> int:
     banner()
     print(paint("Nothing to do — pick a mode:\n", C.BOLD))
     print(f"  {paint('--init', C.CYAN):24} first-run wizard (saves credentials locally)")
+    print(f"  {paint('--login', C.CYAN):24} Telegram login: enter the verification code")
     print(f"  {paint('--auto', C.CYAN):24} fully automatic run (SYNC → PROCESS → SEAL)")
     print(f"  {paint('--status', C.CYAN):24} config + cache + 404-quarantine summary")
     print(f"  {paint('--list-dead', C.CYAN):24} list the 404 quarantine (dead links)")

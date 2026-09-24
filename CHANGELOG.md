@@ -10,6 +10,46 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.09.3] — CLI `--login`: configs + Telegram verification code in the terminal — 2026-09-21
+
+Owner request: "Update the CLI version, so the user can also enter configs
+there, like telegram api id etc. and the telegram verification number —
+currently it's only available on GUI."
+
+### Added
+- **`--login` command** (`python main.py --cli --login`) — the interactive
+  Telegram login, end-to-end in the terminal: connects with the saved
+  credentials (through the configured proxy, DC-rotation retries), and
+  when the session is missing/expired the worker sends the verification
+  code and the CLI prompts for it (`📩 Enter the Telegram login code:`),
+  including the 2FA password when the account has one. On success the
+  session file is saved — **the same `session.session` the GUI uses**, so
+  every future run (CLI or GUI, `--auto` included) skips the login.
+  Reuses the exact same subprocess engine as the GUI's Test Connectivity
+  button (`_telegram_test_job` via `_gui_symbol`) — no new worker code,
+  one code path. Failure output is actionable: rate-limited → wait and
+  rerun; session/auth errors → "rerun `--login` once your proxy node
+  works"; otherwise → proxy checklist.
+- **`--init` now finishes the setup**: after saving config.json the wizard
+  offers "Log in to Telegram now (enter the verification code)? (Y/n)" —
+  `GitCurator-CLI-Setup.bat` becomes a complete first-run experience
+  (credentials → code → ready). Non-interactive stdin (pipes/CI) skips
+  the offer automatically; a failed login never fails the wizard itself.
+- **`--auto` fetch failures now name the remedy**: when the error smells
+  like session/auth ("code", "auth", "session", "password", "login"),
+  the CLI prints "Tip: run `python main.py --cli --login` to
+  (re-)authenticate with a fresh verification code."
+
+### Changed
+- Banner/version stamps: `v0.09.3` (cli.py banner, VERSION, README).
+
+### Verified
+- Flow simulation with a stubbed engine (success path: code typed via
+  stdin → "session saved" card, exit 0; failure path: actionable retry
+  advice, exit 1); no-config and missing-credentials paths exit 1 with
+  the right guidance; `--help` and the no-args help list show `--login`;
+  106/106 tests green after the change.
+
 ## [0.09.2] — launcher regression fixed (the "'tlocal' is not recognized" wall) — 2026-09-21
 
 Owner report: double-clicking `Start-GitCurator-CLI.bat` printed a wall of
