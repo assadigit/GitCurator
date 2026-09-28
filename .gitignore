@@ -11,6 +11,10 @@ app.lock
 app/cache.db
 app/error_outbox.db
 
+# v0.09.5 — Phase 0 tool output (vault scans, snapshots, dry-run reports).
+# Generated artifacts for the owner, never source code.
+app/reports/
+
 # ── Node / Next.js (dashboard/) ─────────────────────────────────
 node_modules/
 .next/
