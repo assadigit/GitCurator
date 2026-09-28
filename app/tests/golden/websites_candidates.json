@@ -1,0 +1,197 @@
+{
+  "description": "Candidate golden set for the Websites pipeline (Phase 2). NOT yet approved — Phase 2 finalizes tests/golden/websites.json from this list with the owner.",
+  "generated": "2026-09-28T22:16:44",
+  "source_csv": "/home/z/GitCurator/unique_links.csv",
+  "counts": {
+    "csv_rows": 784,
+    "duplicate_urls_removed": 2,
+    "unique_urls": 782,
+    "github_links_excluded": 5,
+    "non_github_links": 777,
+    "domains_represented": 30,
+    "selected": 30,
+    "target": 30
+  },
+  "candidates": [
+    {
+      "url": "http://ui-skills.com/skills/emilkowalski/emil-design-eng",
+      "domain": "ui-skills.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://icons8.com/",
+      "domain": "icons8.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://designs.ai/graphicmaker",
+      "domain": "designs.ai",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://pixabay.com",
+      "domain": "pixabay.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://t.co/Mxdio85wvQ",
+      "domain": "t.co",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://mixkit.co",
+      "domain": "mixkit.co",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://www.figma.com/resources/learn-design/",
+      "domain": "www.figma.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://www.reddit.com/r/FREEMEDIAHECKYEAH/wiki/reading",
+      "domain": "www.reddit.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://60fps.design/",
+      "domain": "60fps.design",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://cleanup.pictures",
+      "domain": "cleanup.pictures",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://cobalt.tools/",
+      "domain": "cobalt.tools",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://colormind.io/bootstrap/",
+      "domain": "colormind.io",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://colors.dopely.top/palettes",
+      "domain": "colors.dopely.top",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://coolors.co/",
+      "domain": "coolors.co",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://designdetails.fm/episodes",
+      "domain": "designdetails.fm",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://designmd.me/",
+      "domain": "designmd.me",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://developer.apple.com/design/resources/",
+      "domain": "developer.apple.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://iconscout.com/free-icons",
+      "domain": "iconscout.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://informationisbeautiful.net",
+      "domain": "informationisbeautiful.net",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://kinetics.colorion.co/",
+      "domain": "kinetics.colorion.co",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://letsenhance.io",
+      "domain": "letsenhance.io",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://mobbin.com/",
+      "domain": "mobbin.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://motionsites.ai",
+      "domain": "motionsites.ai",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://namethatui.com/",
+      "domain": "namethatui.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://neuform.ai/",
+      "domain": "neuform.ai",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://pageflows.com",
+      "domain": "pageflows.com",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://posts.design/",
+      "domain": "posts.design",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://recent.design/",
+      "domain": "recent.design",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "http://remove.bg",
+      "domain": "remove.bg",
+      "category": "",
+      "title": null
+    },
+    {
+      "url": "https://styles.refero.design/",
+      "domain": "styles.refero.design",
+      "category": "",
+      "title": null
+    }
+  ]
+}

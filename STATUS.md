@@ -32,7 +32,7 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 ## Inputs still needed from the owner
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
-- [ ] **Path to `unique_links.csv`** (needed to run `pick_golden_links.py` for real — asked in the Phase 0 session; the tool is built and tested with synthetic data)
+- [x] **`unique_links.csv`** (done — the owner committed it to the repo root on `main`; the picker ran for real: 784 rows → 30 candidates across 30 domains → `app/tests/golden/websites_candidates.json`, committed on `phase-0-groundwork`)
 - [ ] Websites vault folder location and a private GitHub repo for its backup (needed by Phase 1)
 - [ ] Manual Notes vault path (needed by Phase 5)
 - [ ] Path of a **copy** of the GitHub vault, for the Phase 0 owner review (scan a copy, read the report)
@@ -59,11 +59,17 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 
 ## Open questions for the owner
 
-- Path to `unique_links.csv` (re-asked in the Phase 0 report).
 - Where will the COPY of the GitHub vault for the owner-review scan live?
+
+## Notes for Phase 2 (from the real golden-set run)
+
+- The candidate list contains **one unresolved t.co short link** (`https://t.co/Mxdio85wvQ`, likely `phosphoricons.com` per the CSV's own Domain column — the CSV flags it "Short link unresolved — domain guessed from display text, please verify"). The owner should confirm or swap it when approving the final list.
+- The CSV's `Category` column is **empty in all 784 rows** — expected categories are assigned with the owner in Phase 2, as the spec says.
+- The CSV has a `Needs Review` column (61 rows flagged, 4 unresolved t.co short links) the picker does not use; Phase 2 may want it when finalizing the golden set.
 
 ## Session log
 
 (Agents: one line per session: date, phase, what was done, test result.)
 
 - 2026-09-29, Phase 0 — groundwork on branch `phase-0-groundwork` (NOT merged): dry-run mechanism + `--dry-run` CLI flag, scan/snapshot/golden tools, 24 new tests, CI updated to 20 modules + 130 tests, VERSION 0.09.5, CHANGELOG + README, `docs/reports/PHASE-0-report.md`. Baseline 106 tests green before changes; final 130/130 green; end-to-end dry-run rehearsal on a synthetic vault left it byte-identical (one deadlock found and fixed on the way). Waiting for owner review.
+- 2026-09-29, Phase 0 (same day, follow-up) — the owner committed `unique_links.csv` to `main`; ran `pick_golden_links.py` on the real file: 784 rows, 2 duplicates removed, 5 GitHub links excluded, 777 non-GitHub links, **30 candidates across 30 domains** selected deterministically (two runs identical). Real candidates JSON committed to the branch; full gate re-run green (20 compiles + 130/130 tests). One unresolved t.co short link noted for Phase 2.

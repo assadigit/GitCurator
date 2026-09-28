@@ -77,11 +77,31 @@ Note: a dry-run still contacts GitHub/Ollama (it rehearses the *writes*, it is n
 - **A dry-run is not offline:** it really calls the GitHub API, your LLM and the banner CDN. It rehearses *writes*, not network traffic.
 - **Cosmetic:** during a dry-run a few log lines still say "saved/updated" (e.g. "Final report saved: …"). Read them as "would save" — the closing "DRY-RUN COMPLETE" line and the report are the truth. Fixing every log line would have meant many more hooks in the 11,500-line GUI file; left for a later phase.
 - **Link-tracker verification "fails" inside a dry-run** ("note file missing") — correct behavior, since nothing was written; it is in-memory only and persists nothing. The next real run is unaffected.
-- **The golden picker has not run against your real `unique_links.csv` yet** (path still pending). Its column detection is heuristic; on an exotic file it exits with a clear error listing the columns it saw, so nothing silent can go wrong.
+- **The golden picker had not run against your real `unique_links.csv` at original writing time** — it has now; see §8. Its column detection worked on the real file unmodified.
 - The end-to-end rehearsal used a **stubbed GitHub API and a fake local LLM** (this sandbox's network blocks api.github.com). Everything between those two boundaries — parser, pre-flight, worker, note builder, write gating, report — was the real code.
 - SPEC §5 said non-GitHub links land in `_inbox/non_github_links.md`; in reality they land in **per-platform** files (`_inbox/x_twitter_links.md` etc.) via `write_inbox_links_by_platform()`. Recorded in STATUS.md; changes nothing in Phase 0, but Phase 2's hook point is that function.
 
 ## 7. Questions for you
 
-1. **What is the path to your `unique_links.csv`?** I'll run the golden-set picker on it at the start of the next session (or you can run the command in §3.4 yourself — the output JSON is what Phase 2 reviews).
+1. ~~**What is the path to your `unique_links.csv`?**~~ **Answered** — you committed it to the repo root on `main`; the picker ran for real (see §8).
 2. For your Phase 0 owner-review: the spec asks you to run the scan on a **copy** of the GitHub vault. When you've made that copy, tell me its path and I'll give you the one-line command — or just run §3.1 yourself; the report is written for reading, not for code readers.
+
+---
+
+## 8. Addendum — the real golden-set run (same day)
+
+You committed `unique_links.csv` to the repo, so I ran the picker on the **real file** (no synthetic data this time):
+
+```text
+Golden-set candidates written: app/tests/golden/websites_candidates.json
+  CSV rows:                 784
+  Duplicate URLs removed:   2
+  GitHub links excluded:    5 (they belong to the GitHub pipeline)
+  Non-GitHub links:         777
+  Selected candidates:      30 of 30 target across 30 domains
+```
+
+- The 30 candidates are all design-related sites (mobbin.com, coolors.co, remove.bg, cobalt.tools, …), one per domain — maximum spread, as the spec asked. The full list is in the JSON, committed to this branch; **you approve or edit the final list in Phase 2**.
+- **One candidate needs your eye:** `https://t.co/Mxdio85wvQ` is an unresolved Twitter short link. Your CSV itself says the domain was guessed from the display text (`phosphoricons.com`) and flags it "please verify". When we finalize the golden set in Phase 2, you can confirm it or I'll swap in the next candidate.
+- Your CSV's **Category column is empty in all 784 rows** — that's fine; expected categories are chosen *with* you in Phase 2, exactly as the spec plans.
+- Two runs of the picker produced an identical list (it is deterministic, as designed), and the full gate was re-run afterwards with the real JSON in place: **20 modules compiled, 130/130 tests passing**.
