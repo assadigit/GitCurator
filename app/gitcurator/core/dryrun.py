@@ -221,10 +221,11 @@ def shadow_cache_path(source_db: str) -> str:
     when disable() cleans the temp dir — so a dry run can never make the
     next REAL run skip links.
 
-    If the real cache cannot be copied, a fresh empty path is returned
-    and a warning entry is recorded (the dry-run then reports "would
-    process everything" — misleading but safe; the real cache is never
-    written and never lost).
+    A missing ``source_db`` (fresh install — no cache yet) is normal: the
+    shadow is simply a fresh empty database. If a real cache EXISTS but
+    cannot be copied, a warning is recorded and the dry-run proceeds with
+    an empty shadow (its "would process" numbers are then pessimistic —
+    misleading but safe; the real cache is never written and never lost).
     """
     global _shadow_dir, _shadow_cache
     with _lock:
@@ -233,6 +234,11 @@ def shadow_cache_path(source_db: str) -> str:
         if _shadow_dir is None:
             _shadow_dir = tempfile.mkdtemp(prefix='gitcurator-dryrun-')
         shadow = os.path.join(_shadow_dir, 'cache.db')
+        _shadow_cache = shadow
+    # The copy happens OUTSIDE the lock — record() takes the same lock,
+    # and copying while holding it would deadlock on failure paths
+    # (caught live during the Phase 0 end-to-end demo, fresh-install case).
+    if os.path.exists(source_db):
         try:
             shutil.copy2(source_db, shadow)
             # A live SQLite database may keep recent commits in its WAL
@@ -243,9 +249,13 @@ def shadow_cache_path(source_db: str) -> str:
                     shutil.copy2(side, shadow + suffix)
         except Exception as exc:
             record('warning', shadow,
-                   note=f'could not copy real cache ({exc}); using an empty shadow')
-        _shadow_cache = shadow
-        return shadow
+                   note=f'could not copy the real cache ({exc}); '
+                        'the dry-run sees an empty cache')
+    else:
+        record('info', shadow,
+               note='no real cache.db yet — the dry-run starts from an '
+                    'empty shadow cache')
+    return shadow
 
 
 def _cleanup_shadow_dir():
