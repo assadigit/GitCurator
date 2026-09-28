@@ -510,6 +510,38 @@ def seal_from_config(config: Dict[str, Any],
     return sealer.seal(run_summary)
 
 
+def websites_seal_from_config(config: Dict[str, Any],
+                              run_summary: Optional[Dict[str, Any]] = None,
+                              log: Optional[LogFn] = None) -> SealResult:
+    """Seal the WEBSITES vault into its own private repo (Phase 1, v0.10.0).
+
+    A second, independent VaultSeal instance (SPEC §4.1: each machine vault
+    gets its own backup repo). Reads: ``website_vault_path``,
+    ``website_repo_name``, ``github_token`` and the ``pipelines.websites``
+    switch. It is a no-op unless the websites pipeline is ON and a websites
+    vault path is configured — with the default switch (off) this never
+    runs, which is exactly the Phase 1 acceptance ("websites off behaves
+    exactly as v0.09.4").
+    """
+    cfg = config or {}
+    pipelines = cfg.get("pipelines") or {}
+    if not isinstance(pipelines, dict) or not pipelines.get("websites", False):
+        return SealResult(skipped_reason="websites pipeline is off")
+    vault_path = (cfg.get("website_vault_path") or "").strip()
+    if not vault_path:
+        return SealResult(skipped_reason="no websites vault configured")
+    repo_name = (cfg.get("website_repo_name") or "").strip()
+    sealer = VaultSeal(
+        vault_path=vault_path,
+        token=cfg.get("github_token") or "",
+        repo_name=repo_name,
+        auto_push=True,
+        enabled=True,
+        log=log,
+    )
+    return sealer.seal(run_summary)
+
+
 # ---------------------------------------------------------------------------
 # Standalone CLI (manual seals + the dashboard's "Seal vault now" button)
 # ---------------------------------------------------------------------------

@@ -9,9 +9,10 @@ byte inside it:
   2. Which notes are missing the ``source:`` frontmatter line (the app's
      identity key for every note)?
   3. Which notes share the same ``source:`` URL (duplicates)?
-  4. Which notes have human-written content in the three manual sections
-     ("My Ideas & Notes", "Social Signal (Manual)", "Journal") — i.e.
-     anything beyond the template placeholder text the app writes?
+  4. Which notes have human-written content in the three LEGACY manual
+     sections ("My Ideas & Notes", "Social Signal (Manual)", "Journal" —
+     present in notes created before v0.10.0) — i.e. anything beyond the
+     template placeholder text the app used to write?
 
 A readable Markdown report is written OUTSIDE the vault (default:
 ``app/reports/scan/``). The tool refuses to write anything inside the
@@ -54,9 +55,16 @@ DEFAULT_REPORT_DIR = os.path.join(APP_DIR, "reports", "scan")
 # those are real notes.
 SKIP_SUBSTRINGS = ['_moc', '_inbox', 'attachments', '.obsidian']
 
-# The three human sections of a GitHub note, with the EXACT placeholder
-# text a brand-new note contains (see core/note_builder.py build_note).
-# Anything other than this text counts as human-written content.
+# The three human sections of a LEGACY GitHub note (created before v0.10.0),
+# with the EXACT placeholder text such a note contained (see the v0.09.5
+# core/note_builder.py build_note). Anything other than this text counts as
+# human-written content.
+#
+# v0.10.0 — Phase 1: NEW notes no longer contain these sections (that
+# writing moves to the owner's Manual Notes vault, SPEC §4.5), so on a
+# freshly-built vault the scan reports the sections as 'missing' — which is
+# the expected, handled state. The strings stay because every vault built
+# before v0.10.0 (the owner's real 600+ notes) still has them.
 HUMAN_SECTIONS = [
     ("## 💡 My Ideas & Notes",
      "[Add your personal thoughts here]"),

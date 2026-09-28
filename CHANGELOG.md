@@ -10,6 +10,85 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.10.0] — Phase 1: the app learns there is more than one vault — 2026-09-29
+
+Phase 1 of the phased build (SPEC.md): **vault settings and ownership**.
+The GitHub pipeline behaves exactly as before (verified by test); what's
+new is the app's *awareness* of the vaults to come, and an ownership stamp
+on new notes so future phases can always tell machine writing from yours.
+
+### What you get
+
+1. **The 📁 Vault settings page grew a vault map.** Under the existing
+   GitHub vault picker you now find: a **Websites vault** path with a
+   live status under it — *not set / will be created / found* — plus the
+   private repo that will back it up; a **Manual Notes vault** path (for
+   Phase 5, optional today) with its own live status; and two **pipeline
+   switches**: GitHub (ON by default, today's behavior exactly) and
+   Websites (**OFF** — the Phase 2 pipeline it enables doesn't exist yet,
+   so the switch is wired but has nothing to drive).
+2. **`--cli --status` shows the same vault map** (plus the taxonomy file
+   status and a new *Note state* section — see #4) so you can check the
+   setup from the CLI: websites vault, manual vault, websites repo,
+   pipelines, taxonomy.
+3. **New notes carry ownership stamps** (SPEC §4.1/§4.5): frontmatter
+   `managed_by: gitcurator`, `schema_version`, `prompt_version`, and a
+   one-line banner at the top of the body — `> [!info] Managed by
+   GitCurator — machine-written note.` And the three human placeholder
+   sections (*My Ideas & Notes*, *Social Signal (Manual)*, *Journal*) are
+   **no longer written into new GitHub notes**: that writing now lives in
+   your future Manual Notes vault, so the placeholders had nothing to
+   hold. **Existing notes are untouched** — never rewritten, never
+   migrated.
+4. **The "moves are corrections" record (SPEC §4.4) now exists.** A new
+   `note_state` table in `cache.db` keeps, per note: its vault, source
+   URL, path, a content fingerprint, its folder-category, and a locked
+   flag. The **first real batch you run records the baseline silently**
+   (nothing acts on it yet — Phase 3 turns on the comparison that
+   accepts your folder moves as corrections and flags hand edits). The
+   fingerprint deliberately ignores a delimited "recall" block the app
+   may add in Phase 6, so the app's own future additions can never look
+   like your edits. The Phase 0 scan tool still detects your writing in
+   the three legacy sections of *old* notes — exactly as before.
+5. **A second VaultSeal for the Websites vault** — the backup mechanism
+   the GitHub vault already has, parameterized for the new vault and its
+   own private repo. It only ever runs when the Websites pipeline is ON
+   (it is OFF), so today it is dormant, tested machinery.
+6. **New optional config keys** (all safe defaults, old `config.json`
+   files load unchanged — tested): `website_vault_path`,
+   `manual_vault_path`, `website_repo_name`, `taxonomy_path`,
+   `pipelines: {github: true, websites: false}`. `vault_path` keeps
+   meaning "the GitHub Projects vault". `config.example.json` documents
+   them, pre-filled with your two new backup repos
+   (`my-awesome-github-directory`, `my-awesome-websites-directory`).
+
+### Diagnosis / notes
+- Baseline recording is skipped in a dry-run (a rehearsal must not write
+  bookkeeping either) — same principle as Phase 0's shadow cache.
+- The GitHub pipeline switch is checked **before anything is fetched**:
+  flipping it OFF consumes no queue, marks nothing, writes nothing.
+- `scan_vault_edits.py` needed no logic change: on new notes the three
+  legacy sections read as "missing" (a handled state since Phase 0); its
+  placeholder strings are now explicitly marked as the pre-v0.10.0
+  legacy format.
+- The record-on-write hook fingerprints the note **from the in-memory
+  content** (no re-read) right after the atomic write succeeds.
+
+### Verification
+- 38 new tests (`tests/test_phase1.py`): fingerprint stability + the
+  recall-block invisibility rule; folder→category mapping (including the
+  `<Category>/<Subcategory>` layout Phase 2 uses); baseline one-time
+  recording, unmanaged-notes exclusion, two-vault independence; every row
+  of the §4.4 table detected (moved / edited / deleted / duplicates /
+  unmanaged / unmapped / unknown); note format (stamps in, banner in,
+  legacy sections out, existing sections intact); old-config fallbacks
+  and the pipelines merge; VaultIndex on two synthetic vaults; the
+  websites seal's three skip paths + real seal; the CLI vault map; and a
+  REAL ProcessingWorker batch on a synthetic vault recording the
+  baseline (with a dry-run of the same batch recording nothing).
+- Full suite: **168 tests, all passing** (130 existing + 38 new). CI now
+  compiles 21 modules and runs the seven test modules.
+
 ## [0.09.5] — Phase 0 groundwork: rehearse before you touch the vault — 2026-09-29
 
 The phased build (SPEC.md) starts here. Phase 0 adds **tools and safety

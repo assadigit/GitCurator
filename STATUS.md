@@ -3,16 +3,16 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.09.4 (now 0.09.5 on the branch below)
+- **Version at start of this build:** 0.09.5 (now 0.10.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 0 — **approved** (owner waived the vault-copy scan review on 2026-09-29). Phase 1 not started.
+- **Current phase:** 1 — in review (agent finished, waiting for the owner). Phase 0 approved & merged.
 
 ## Phases
 
 | Phase | Name | Status | Branch | Version | Owner approval |
 |---|---|---|---|---|---|
-| 0 | Groundwork | approved | `phase-0-groundwork` (pushed, NOT merged) | 0.09.5 | yes — review waived by owner 2026-09-29 |
-| 1 | Vault settings and ownership | not started | | | |
+| 0 | Groundwork | approved | `phase-0-groundwork` (**merged into main 2026-09-29** by owner instruction) | 0.09.5 | yes — review waived by owner 2026-09-29 |
+| 1 | Vault settings and ownership | in review | `phase-1-vault-settings` (pushed, NOT merged) | 0.10.0 | pending |
 | 2 | Website pipeline | not started | | | |
 | 3 | Moves as corrections, and the backfill | not started | | | |
 | 4 | LLM backends | not started | | | |
@@ -28,6 +28,15 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - `app/gitcurator/tools/scan_vault_edits.py` (read-only vault scan → `app/reports/scan/`), `snapshot_vault.py` (zip backup → `app/reports/snapshots/`), `pick_golden_links.py` (CSV → `app/tests/golden/websites_candidates.json`).
 - Tests: `app/tests/test_phase0.py` (24). CI: 20 compiled modules, 130 tests. `app/reports/` is git-ignored.
 - Report for the owner: `docs/reports/PHASE-0-report.md`.
+
+## Phase 1 summary (what exists on `phase-1-vault-settings`)
+
+- `core/note_state.py` — the SPEC §4.4 record: `note_state` table in `cache.db` (vault, source URL, path, fingerprint, category, subcategory, locked), one-time silent baseline at run start, record-on-write, and the pure change detector (moved/edited/deleted/duplicates/unmanaged/unmapped/unknown) Phase 3 will act on. Dry-runs record nothing.
+- Ownership stamps on NEW notes (`managed_by`, `schema_version`, `prompt_version`, one-line banner); the three human placeholder sections are no longer written. Existing notes never rewritten.
+- Vault settings: `website_vault_path`, `manual_vault_path`, `website_repo_name`, `taxonomy_path`, `pipelines{github:on, websites:off}` — safe defaults, old configs load unchanged (tested). GUI 📁 Vault page (pickers + live status + switches) and `--cli --status` vault map.
+- `vaultseal.websites_seal_from_config` — second VaultSeal, wired into all three batch-finish paths, gated on `pipelines.websites` (default off → dormant).
+- Tests: `tests/test_phase1.py` (38). CI: 21 compiled modules, 168 tests.
+- Report for the owner: `docs/reports/PHASE-1-report.md`.
 
 ## Inputs still needed from the owner
 
@@ -71,8 +80,9 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 
 ## Open questions for the owner
 
-- **The word "go" to start Phase 1** (all Phase 1 inputs are in; see the Vault map above).
-- Optional: the word "merge" to fold the approved `phase-0-groundwork` into `main` first (recommended, not required — Phase 1 branches on top of it either way).
+- Phase 1 review: read `docs/reports/PHASE-1-report.md`; then "merge" (or tell me what to change first).
+- After merge + first real run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
+- For Phase 2 (when you say go): the golden-set list (30 candidates) needs your approval — including the one unresolved t.co short link.
 
 ## Notes for Phase 2 (from the real golden-set run)
 
@@ -88,3 +98,4 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - 2026-09-29, Phase 0 (same day, follow-up) — the owner committed `unique_links.csv` to `main`; ran `pick_golden_links.py` on the real file: 784 rows, 2 duplicates removed, 5 GitHub links excluded, 777 non-GitHub links, **30 candidates across 30 domains** selected deterministically (two runs identical). Real candidates JSON committed to the branch; full gate re-run green (20 compiles + 130/130 tests). One unresolved t.co short link noted for Phase 2.
 - 2026-09-29, Phase 0 (same day, close-out) — owner waived the vault-copy scan review; Phase 0 marked **approved**. Branch left unmerged; awaiting the owner's word on merging before Phase 1 starts on top of it.
 - 2026-09-29, pre-Phase-1 — owner provided all Phase 1 inputs (vault paths + backup repo names). Agent created both private repos via API and verified them (`assadigit/my-awesome-github-directory`, `assadigit/my-awesome-websites-directory` — both private, empty). Recorded in the Vault map. No code changes; bookkeeping only.
+- 2026-09-29, Phase 1 — owner said "merge, then go": phase-0-groundwork merged into main (34fdc63), `phase-1-vault-settings` branched. Built: note_state record + baseline, ownership stamps + banner on new notes (human placeholder sections dropped from NEW notes per SPEC §4.5), 5 new config keys + GUI vault page + CLI status vault map, pipeline switches (github default on / websites default off), second VaultSeal gated on the websites switch. 38 new tests; full gate 21 compiles + 168/168 green. `docs/reports/PHASE-1-report.md` written. Branch pushed, NOT merged — in review.

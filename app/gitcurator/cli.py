@@ -725,8 +725,34 @@ def cmd_status(args) -> int:
     vault = cfg.get("vault_path", "")
     print(paint("Configuration ", C.BOLD) + paint(f"({path})", C.DIM))
     print(rule())
+
+    # v0.10.0 — Phase 1: the vault map. Same live status as the GUI's 📁
+    # Vault page: websites folders that don't exist yet are "will be
+    # created" (its pipeline creates them); the Manual vault is the
+    # owner's to create.
+    def _vault_cell(raw, kind):
+        p = (raw or "").strip()
+        if not p:
+            return C.DIM + "(not set)" + C.RESET
+        if os.path.isdir(p):
+            return paint("  ✓ exists", C.GREEN)
+        if kind == "websites":
+            return paint("  ◌ will be created", C.YELLOW)
+        return paint("  ✗ not found", C.RED)
+
+    _pipes = cfg.get("pipelines") or {}
+    _gh_on = bool(_pipes.get("github", True))
+    _ws_on = bool(_pipes.get("websites", False))
+    _pipelines_cell = (
+        "github " + (paint("ON", C.GREEN) if _gh_on else paint("OFF", C.RED))
+        + " · websites " + (paint("ON", C.GREEN) if _ws_on else paint("OFF", C.DIM)))
+
     rows = [
         ("Vault", vault + (paint("  ✓ exists", C.GREEN) if vault and os.path.isdir(vault) else paint("  ✗ missing", C.RED))),
+        ("Websites vault", _vault_cell(cfg.get("website_vault_path", ""), "websites")),
+        ("Manual vault", _vault_cell(cfg.get("manual_vault_path", ""), "manual")),
+        ("Websites repo", (cfg.get("website_repo_name") or "").strip() or C.DIM + "(not set)" + C.RESET),
+        ("Pipelines", _pipelines_cell),
         ("Telegram API ID", str(cfg.get("telegram_api_id", "") or C.DIM + "(not set)" + C.RESET)),
         ("Telegram hash", mask(str(cfg.get("telegram_api_hash", "")))),
         ("Phone", mask(str(cfg.get("telegram_phone", "")), keep=5)),
@@ -741,6 +767,16 @@ def cmd_status(args) -> int:
     ]
     for key, val in rows:
         print(f"  {paint(key.ljust(22), C.BOLD)} {val}")
+
+    # v0.10.0 — Phase 1: the taxonomy file the Phase 2 pipeline will parse.
+    try:
+        from gitcurator.constants import resolve_taxonomy_path
+        _tax = resolve_taxonomy_path(cfg)
+        _tax_cell = (paint("  ✓ exists", C.GREEN) if os.path.isfile(_tax)
+                     else paint("  ✗ missing", C.RED))
+        print(f"  {paint('Taxonomy'.ljust(22), C.BOLD)} {os.path.basename(_tax)}{_tax_cell}")
+    except Exception:
+        pass  # never let a status command fail on this
 
     # v0.07.2 — is the configured Ollama model actually installed?
     if cfg.get("llm_provider", "ollama") == "ollama":
@@ -795,6 +831,29 @@ def cmd_status(args) -> int:
     except Exception as exc:
         cli_print(f"Cache stats unavailable ({exc})", "warning")
     print()
+
+    # v0.10.0 — Phase 1: the note-state baseline — the persistent per-note
+    # record (path + fingerprint + category) that lets Phase 3 treat the
+    # owner's folder moves as corrections instead of damage. Pure-stdlib
+    # module; the db file is only opened when it already exists (a status
+    # command must never create state).
+    try:
+        from gitcurator.core import note_state as _note_state
+        from gitcurator.constants import APP_DIR as _APP_DIR
+        _db_file = os.path.join(_APP_DIR, "cache.db")
+        if os.path.exists(_db_file):
+            _ns = _note_state.NoteStateDB(_db_file)
+            _gh_count = _ns.count(_note_state.VAULT_GITHUB)
+            _ns.close()
+            print(paint("Note state (moves-as-corrections record)", C.BOLD))
+            print(rule())
+            _extra = ("" if _gh_count else C.DIM
+                      + "  (the first real run records it)" + C.RESET)
+            print(f"  {paint('GitHub vault baseline'.ljust(22), C.BOLD)} "
+                  f"{_gh_count} note(s) recorded{_extra}")
+            print()
+    except Exception as exc:
+        cli_print(f"Note state unavailable ({exc})", "warning")
     return 0
 
 
@@ -1157,6 +1216,17 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
             status.log(f"Good Repos: {gr.describe()}", "success" if gr.ok else "warning")
         except Exception as exc:
             status.log(f"Good Repos error: {exc}", "warning")
+
+        # v0.10.0 — Phase 1: the WEBSITES vault's own private mirror (a
+        # second, independent VaultSeal). Silent no-op while the websites
+        # pipeline is OFF (the default).
+        try:
+            ws = _vaultseal.websites_seal_from_config(cfg, run_summary=summary)
+            if ws.sealed or ws.error:
+                status.log(f"Websites vault seal: {ws.describe()}",
+                           "success" if ws.ok else "warning")
+        except Exception as exc:
+            status.log(f"Websites vault seal error: {exc}", "warning")
 
         # v0.09.4 — Phase 5 CLEAR for the CLI (the GUI's anti-repeat final
         # step, previously missing here): the bot queue is only ever
@@ -1876,7 +1946,7 @@ def cli_main(argv=None) -> int:
     print(f"  {paint('--init', C.CYAN):24} first-run wizard (saves credentials locally)")
     print(f"  {paint('--login', C.CYAN):24} Telegram login: enter the verification code")
     print(f"  {paint('--auto', C.CYAN):24} fully automatic run (SYNC → PROCESS → SEAL)")
-    print(f"  {paint('--status', C.CYAN):24} config + cache + 404-quarantine summary")
+    print(f"  {paint('--status', C.CYAN):24} vault map + config + cache + note-state summary")
     print(f"  {paint('--list-dead', C.CYAN):24} list the 404 quarantine (dead links)")
     print(f"  {paint('--reset-dead', C.CYAN):24} clear the 404 quarantine")
     print(f"  {paint('--retry-failed', C.CYAN):24} reprocess the retry queue")

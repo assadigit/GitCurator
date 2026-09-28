@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.08 (Core Extraction & Reliability Release)
+# GitHub-to-Obsidian v0.10.0 (Phased Build — Vault Settings & Ownership)
 
 ## Quick Start
 
@@ -14,7 +14,7 @@ Start-GitCurator-CLI.bat     (double-click it — same engine as GitCurator-CLI.
 python main.py --cli --auto --yes    (fully automatic run)
 python main.py --cli --auto --yes --dry-run   (SAME run, but writes NOTHING — rehearsal)
 python main.py --cli --init          (first-run credential wizard)
-python main.py --cli --status        (config + cache + 404-quarantine summary)
+python main.py --cli --status        (vault map + config + cache + note-state summary)
 python main.py --cli --list-dead     (show the 404 quarantine)
 ```
 The CLI reads `config.json` from this folder — the SAME file the GUI
@@ -48,6 +48,30 @@ The scan tells you: notes per category, notes missing `source:`, duplicate
 Notes* / *Social Signal (Manual)* / *Journal* (the app must never overwrite
 those). Snapshot before any risky operation on a real vault; restore by
 unzipping over the vault folder.
+
+### Vault settings & pipelines (v0.10.0)
+
+The app now knows **three vaults** (Settings → 📁 Vault in the GUI, or
+`--cli --status`):
+
+| Vault | Who writes it | Backup | Status today |
+|---|---|---|---|
+| GitHub Projects (`vault_path`) | the app only | its private repo (VaultSeal) | working — unchanged |
+| Websites (`website_vault_path`) | the app only (Phase 2) | `my-awesome-websites-directory` | path can be set; pipeline OFF |
+| Manual Notes (`manual_vault_path`) | **you only** | your own repo | optional until Phase 5 |
+
+- Every picker shows a live status: *not set / will be created / found*.
+- Pipeline switches: **GitHub ON** (today's behavior exactly),
+  **Websites OFF** (Phase 2 will turn it on after your approval).
+- **New notes** carry ownership stamps — frontmatter `managed_by`,
+  `schema_version`, `prompt_version` + a one-line *Managed by GitCurator*
+  banner — and no longer include the three empty human placeholder
+  sections (that writing moves to your Manual Notes vault in Phase 5).
+  **Existing notes are never rewritten.**
+- The first real batch you run records a silent **baseline** of the
+  GitHub vault (a per-note record in `cache.db`). Phase 3 will use it to
+  treat your folder moves as corrections instead of damage; a dry-run
+  records nothing.
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd

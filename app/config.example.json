@@ -39,13 +39,21 @@
   "backup_max": 10,
   "vaultseal": {
     "enabled": true,
-    "repo_name": "",
+    "repo_name": "my-awesome-github-directory",
     "auto_push": true
   },
   "goodrepos": {
     "enabled": true,
     "auto_push": true,
     "repo_name": "good-repos"
+  },
+  "website_vault_path": "",
+  "manual_vault_path": "",
+  "website_repo_name": "my-awesome-websites-directory",
+  "taxonomy_path": "",
+  "pipelines": {
+    "github": true,
+    "websites": false
   },
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
