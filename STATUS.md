@@ -5,13 +5,13 @@ Keep it short, factual, and in plain language.
 
 - **Version at start of this build:** 0.09.4 (now 0.09.5 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 0 — in review (agent finished, waiting for the owner)
+- **Current phase:** 0 — **approved** (owner waived the vault-copy scan review on 2026-09-29). Phase 1 not started.
 
 ## Phases
 
 | Phase | Name | Status | Branch | Version | Owner approval |
 |---|---|---|---|---|---|
-| 0 | Groundwork | in review | `phase-0-groundwork` (pushed, NOT merged) | 0.09.5 | pending |
+| 0 | Groundwork | approved | `phase-0-groundwork` (pushed, NOT merged) | 0.09.5 | yes — review waived by owner 2026-09-29 |
 | 1 | Vault settings and ownership | not started | | | |
 | 2 | Website pipeline | not started | | | |
 | 3 | Moves as corrections, and the backfill | not started | | | |
@@ -35,7 +35,7 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - [x] **`unique_links.csv`** (done — the owner committed it to the repo root on `main`; the picker ran for real: 784 rows → 30 candidates across 30 domains → `app/tests/golden/websites_candidates.json`, committed on `phase-0-groundwork`)
 - [ ] Websites vault folder location and a private GitHub repo for its backup (needed by Phase 1)
 - [ ] Manual Notes vault path (needed by Phase 5)
-- [ ] Path of a **copy** of the GitHub vault, for the Phase 0 owner review (scan a copy, read the report)
+- [x] ~~Path of a **copy** of the GitHub vault, for the Phase 0 owner review~~ **waived by the owner 2026-09-29** ("this is unnecessary") — Phase 0 approved without the scan. The scan tool stays available any time via one command.
 
 ## Differences found between SPEC.md and the real code
 
@@ -56,10 +56,11 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - 2026-09-29, Phase 0 — Golden picker is deterministic (domain round-robin); category column carried as metadata. Rejected: random sampling (not comparable between runs).
 - 2026-09-29, Phase 0 — Tool output defaults to `app/reports/` (git-ignored), `--out` override; every tool refuses to write inside the vault it targets. Rejected: writing next to the vault.
 - 2026-09-29, Phase 0 — Inbox tables now written via `storage.atomic_write_text` (same bytes + fsync) instead of the duplicated inline copy. Rejected: keeping the private copy.
+- 2026-09-29, Phase 0 — **Owner waived the Phase 0 owner-review scan** of a GitHub-vault copy ("this is unnecessary" — the owner wants to move to the Websites vault). Phase 0 marked approved as-is. Consequence: no "before photo" of human-written sections; the spec's non-negotiables (human sections are never touched by the app) still stand, and the scan/snapshot tools remain available on demand.
 
 ## Open questions for the owner
 
-- Where will the COPY of the GitHub vault for the owner-review scan live?
+- (none for Phase 0 — closed.) For Phase 1, whenever the owner is ready: **where the Websites vault will live** (create it in Obsidian, tell me the path) and **which private GitHub repo** will back it up. Neither blocks starting Phase 1 (safe defaults, websites pipeline OFF until the owner switches it on).
 
 ## Notes for Phase 2 (from the real golden-set run)
 
@@ -73,3 +74,4 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 
 - 2026-09-29, Phase 0 — groundwork on branch `phase-0-groundwork` (NOT merged): dry-run mechanism + `--dry-run` CLI flag, scan/snapshot/golden tools, 24 new tests, CI updated to 20 modules + 130 tests, VERSION 0.09.5, CHANGELOG + README, `docs/reports/PHASE-0-report.md`. Baseline 106 tests green before changes; final 130/130 green; end-to-end dry-run rehearsal on a synthetic vault left it byte-identical (one deadlock found and fixed on the way). Waiting for owner review.
 - 2026-09-29, Phase 0 (same day, follow-up) — the owner committed `unique_links.csv` to `main`; ran `pick_golden_links.py` on the real file: 784 rows, 2 duplicates removed, 5 GitHub links excluded, 777 non-GitHub links, **30 candidates across 30 domains** selected deterministically (two runs identical). Real candidates JSON committed to the branch; full gate re-run green (20 compiles + 130/130 tests). One unresolved t.co short link noted for Phase 2.
+- 2026-09-29, Phase 0 (same day, close-out) — owner waived the vault-copy scan review; Phase 0 marked **approved**. Branch left unmerged; awaiting the owner's word on merging before Phase 1 starts on top of it.
