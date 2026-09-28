@@ -22,6 +22,13 @@ import re
 import tempfile
 from typing import Dict, Any
 
+# v0.09.5 — Phase 0 (dry-run): while a dry-run batch is active, every
+# canonical write performed through this module is recorded in
+# gitcurator.core.dryrun instead of touching the disk. The flag is OFF
+# by default and the GUI never turns it on, so default behavior is
+# unchanged. dryrun.py is pure stdlib — no circular import.
+from gitcurator.core import dryrun as _dryrun
+
 
 # ---------------------------------------------------------------------------
 # Atomic writes
@@ -33,7 +40,13 @@ def atomic_write_text(path: str, content: str, encoding: str = 'utf-8') -> None:
     Writes to a NamedTemporaryFile in the SAME directory (so os.replace
     stays on one filesystem), fsyncs, then os.replace()s over the target.
     Either the old file survives untouched or the new complete file exists.
+
+    v0.09.5 — Phase 0 (dry-run): when a dry-run batch is active the write
+    is logged (gitcurator.core.dryrun) instead of performed.
     """
+    if _dryrun.is_enabled():
+        _dryrun.record('atomic-write', path, content=content)
+        return
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
@@ -58,7 +71,14 @@ def atomic_write_text(path: str, content: str, encoding: str = 'utf-8') -> None:
 
 
 def atomic_write_bytes(path: str, data: bytes) -> None:
-    """Atomically write binary ``data`` to ``path`` (banners, images)."""
+    """Atomically write binary ``data`` to ``path`` (banners, images).
+
+    v0.09.5 — Phase 0 (dry-run): when a dry-run batch is active the write
+    is logged (gitcurator.core.dryrun) instead of performed.
+    """
+    if _dryrun.is_enabled():
+        _dryrun.record('atomic-write', path, content=data)
+        return
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(

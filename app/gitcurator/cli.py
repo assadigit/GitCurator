@@ -976,12 +976,37 @@ def _mark_bot_queue_read(cfg: dict, status: "StatusLine") -> bool:
 # Batch phase: ProcessingWorker inside a Qt loop, rendered by StatusLine
 # ----------------------------------------------------------------------------
 
+def _write_dryrun_report():
+    """v0.09.5 — Phase 0: save the dry-run write log as Markdown OUTSIDE the
+    vault (app/reports/dry-runs/) so the owner can read exactly what a
+    dry-run would have changed. Returns the report path, or None on failure.
+
+    Uses a plain open() on purpose: this runs from the finished_signal
+    handler, which can fire a hair BEFORE the worker thread's finally block
+    turns the dry-run switch off — a gated write here could end up recorded
+    instead of saved. The report itself is never inside a vault, so the
+    atomic-write rule for vault files does not apply."""
+    try:
+        from gitcurator.core import dryrun as _dryrun
+        from gitcurator.constants import APP_DIR
+        out_dir = os.path.join(APP_DIR, "reports", "dry-runs")
+        os.makedirs(out_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = os.path.join(out_dir, f"dry_run_{stamp}.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(_dryrun.render_report_markdown("GitCurator dry-run report"))
+        return path
+    except Exception:
+        return None
+
+
 def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
                      range_from=None, range_to=None, offset_start=None,
                      offset_count=None, bot_source=False, non_github=None,
                      intake_duplicates=0, raw_url_count=0,
                      vault_arg: str | None = None,
-                     bot_queue_max_id: int = 0) -> int:
+                     bot_queue_max_id: int = 0,
+                     dry_run: bool = False) -> int:
     """Run one ProcessingWorker batch with colors + spinner + progress bar.
 
     Mirrors run_headless()'s wiring (signals received, VaultSeal + GoodRepos
@@ -994,7 +1019,15 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
     last_processed_msg_id is advanced (persisted to config.json) so the
     next --auto fetches only newer messages. A batch with any unverified
     link advances nothing and keeps the queue unread: the failed links are
-    re-fetched and retried next run (nothing is lost, nothing repeats)."""
+    re-fetched and retried next run (nothing is lost, nothing repeats).
+
+    v0.09.5 — Phase 0 (``--dry-run``): when ``dry_run`` is True the worker
+    flips the global dry-run switch (gitcurator/core/dryrun.py), so every
+    vault write is logged instead of performed, the batch reads the real
+    cache through a throwaway copy (nothing persists), and this function
+    skips VaultSeal, the Good Repos publish, the bot-queue mark-read and
+    the last_processed_msg_id advance. A Markdown report of everything
+    that was withheld is saved to app/reports/dry-runs/."""
     try:
         from PyQt6.QtCore import QCoreApplication, QTimer
         ProcessingWorker = _gui_symbol("ProcessingWorker")
@@ -1019,6 +1052,7 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
         offset_start=offset_start, offset_count=offset_count,
         import_file=import_file, urls=urls,
         headless=True,  # no GUI dialogs: non-blocking defaults everywhere
+        dry_run=dry_run,  # v0.09.5 — Phase 0: --dry-run batches log, never write
     )
     worker._bot_source = bot_source
     if non_github:
@@ -1085,6 +1119,27 @@ def run_batch_visual(cfg: dict, mode: str, *, urls=None, import_file=None,
                   + paint(f"in {elapsed // 60}m {elapsed % 60:02d}s", C.DIM))
             print(paint(f"  {message}", C.RED))
         print(rule())
+
+        # v0.09.5 — Phase 0 (dry-run): a dry-run batch must be side-effect
+        # free EVERYWHERE. The vault writes were already withheld by the
+        # dry-run switch inside the worker; here the three post-batch
+        # side effects are skipped too: no git seal (VaultSeal), no Good
+        # Repos publish, no bot-queue mark-read / last_processed_msg_id
+        # advance. Then the withheld-writes report is saved and we stop.
+        if dry_run:
+            from gitcurator.core import dryrun as _dryrun
+            n = _dryrun.entry_count()
+            status.log(
+                f"🧪 DRY-RUN COMPLETE — {n} vault operation(s) were logged, "
+                "not performed. VaultSeal, Good Repos publish, bot-queue "
+                "mark-read and last_processed_msg_id were all skipped.",
+                "warning")
+            report_path = _write_dryrun_report()
+            if report_path:
+                status.log(f"🧪 Dry-run report: {report_path}", "info")
+            print()
+            app.quit()
+            return
 
         # VaultSeal — best-effort backup of whatever was written (runs for
         # failed batches too; notes saved before a mid-run failure are
@@ -1543,6 +1598,7 @@ def cmd_auto(args) -> int:
         raw_url_count=result.get("raw_url_count", len(pending) + len(non_github)),
         vault_arg=args.vault,
         bot_queue_max_id=int(result.get("max_message_id", 0) or 0),
+        dry_run=bool(getattr(args, "dry_run", False)),  # v0.09.5 — Phase 0
     )
 
 
@@ -1634,7 +1690,8 @@ def cmd_retry_failed(args) -> int:
 
     cli_print(f"Retrying {len(failed)} failed URL(s)…", "info")
     return run_batch_visual(cfg, "direct", urls=failed, bot_source=False,
-                            vault_arg=args.vault)
+                            vault_arg=args.vault,
+                            dry_run=bool(getattr(args, "dry_run", False)))  # v0.09.5 — Phase 0
 
 
 # ----------------------------------------------------------------------------
@@ -1664,7 +1721,8 @@ def cmd_manual_batch(args) -> int:
             cli_print(f"Import file not found: {args.import_file}", "error")
             return 1
         cli_print(f"Mode: import from {args.import_file}", "info")
-        return run_batch_visual(cfg, "import", import_file=args.import_file, vault_arg=args.vault)
+        return run_batch_visual(cfg, "import", import_file=args.import_file, vault_arg=args.vault,
+                                dry_run=bool(getattr(args, "dry_run", False)))  # v0.09.5 — Phase 0
 
     if args.single_id:
         cli_print(f"Mode: single Telegram message {args.single_id}", "info")
@@ -1709,19 +1767,22 @@ def cmd_manual_batch(args) -> int:
         cli_print(f"Fetched {len(urls)} GitHub URL(s).", "success")
         if not urls:
             return 0
-        return run_batch_visual(cfg, "direct", urls=urls, vault_arg=args.vault)
+        return run_batch_visual(cfg, "direct", urls=urls, vault_arg=args.vault,
+                                dry_run=bool(getattr(args, "dry_run", False)))  # v0.09.5 — Phase 0
 
     if args.from_id is not None and args.to_id is not None:
         cli_print(f"Mode: Telegram range {args.from_id} → {args.to_id}", "info")
         return run_batch_visual(cfg, "telegram_ids",
                                 range_from=args.from_id, range_to=args.to_id,
-                                vault_arg=args.vault)
+                                vault_arg=args.vault,
+                                dry_run=bool(getattr(args, "dry_run", False)))  # v0.09.5 — Phase 0
 
     if args.offset_start is not None and args.count is not None:
         cli_print(f"Mode: Telegram offset {args.offset_start} +{args.count}", "info")
         return run_batch_visual(cfg, "telegram_offset",
                                 offset_start=args.offset_start, offset_count=args.count,
-                                vault_arg=args.vault)
+                                vault_arg=args.vault,
+                                dry_run=bool(getattr(args, "dry_run", False)))  # v0.09.5 — Phase 0
 
     cli_print("Specify a mode: --auto, --retry-failed, --import-file, --single-id, "
               "--from-id/--to-id, --offset-start/--count (see --help).", "warning")
@@ -1767,6 +1828,12 @@ def build_parser():
                    help="override notfound_strike_threshold for this run (min 2)")
     p.add_argument("--yes", "-y", action="store_true",
                    help="skip the >10-repos confirmation in --auto")
+    p.add_argument("--dry-run", action="store_true",
+                   help="v0.09.5 — safety net: log every vault write instead of "
+                        "performing it (also skips sealing, publishing, "
+                        "marking the bot queue read, and state updates). "
+                        "Combine with any batch mode: --auto, --import-file, "
+                        "--retry-failed, ranges")
     p.add_argument("--no-color", action="store_true", help="disable colored output")
     return p
 
