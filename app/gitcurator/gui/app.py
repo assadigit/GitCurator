@@ -79,6 +79,9 @@ from gitcurator.core import llm_client as _llm_client
 # v0.09.5 — Phase 0 (dry-run): the global log-instead-of-write switch.
 # Pure stdlib, no PyQt — see gitcurator/core/dryrun.py.
 from gitcurator.core import dryrun as _dryrun
+# v0.10.0 — Phase 1 (note state): the per-note record in cache.db that
+# makes "moves are corrections" possible (SPEC §4.4). Pure stdlib, no PyQt.
+from gitcurator.core import note_state as _note_state
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
 # v0.06 — Fix (stuck Telegram lock, part 1): the single-operation lock now
@@ -1772,6 +1775,19 @@ class ProcessingWorker(QThread):
     def _run_impl(self):
         logger = logging.getLogger()
 
+        # v0.10.0 — Phase 1 (pipelines): the GitHub pipeline switch, checked
+        # BEFORE anything is fetched so an OFF switch consumes nothing (no
+        # queue reads, no marks, no cache writes). Default ON — existing
+        # users see no change (SPEC non-negotiable #4).
+        _pipelines_cfg = (self.config or {}).get('pipelines') or {}
+        if not _pipelines_cfg.get('github', True):
+            self.log_message.emit(
+                "⛔ GitHub pipeline is switched OFF (Settings → 📁 Vault). "
+                "Nothing was fetched or processed.", "warning")
+            self.finished_signal.emit(
+                True, "GitHub pipeline is off — nothing to do.")
+            return
+
         if self.mode == 'direct':
             urls = self.urls if self.urls else []
         elif self.mode == 'import':
@@ -2005,6 +2021,16 @@ class ProcessingWorker(QThread):
         else:
             cache = CacheDB()
 
+        # v0.10.0 — Phase 1 (note state): one connection for the whole batch.
+        # A dry-run NEVER touches the real cache.db, so it gets none — a
+        # rehearsal must not record bookkeeping either.
+        note_state_db = None
+        if not _dryrun.is_enabled():
+            try:
+                note_state_db = _note_state.NoteStateDB()
+            except Exception:
+                note_state_db = None  # bookkeeping must never break a run
+
         # v0.08 — 404 QUARANTINE: load the CONFIRMED-dead set ONCE (fail_count
         # >= threshold in a PREVIOUS session). Every dead link in this batch
         # is skipped below BEFORE any GitHub API call — this is the fix for
@@ -2025,6 +2051,21 @@ class ProcessingWorker(QThread):
             self._vault_index = VaultIndex(vault_path)
             # Fix: rebuild() calls log_signal.emit(), so pass the signal directly
             self._vault_index.rebuild(log_signal=self.log_message)
+
+        # v0.10.0 — Phase 1 (note state): ONE-TIME silent baseline of the
+        # GitHub vault (SPEC §4.4: "the first run after this feature ships
+        # records a baseline silently"). Records every note's path,
+        # fingerprint and folder-derived category. Nothing ACTS on the
+        # record yet — Phase 3 turns on the start-of-run comparison
+        # (moves accepted, edits flagged, deletes dismissed).
+        if vault_path and note_state_db is not None:
+            try:
+                _note_state.record_baseline_if_empty(
+                    _note_state.VAULT_GITHUB, vault_path,
+                    db_path=note_state_db.db_path,
+                    log=self.log_message.emit)
+            except Exception:
+                pass  # best-effort by design
 
         # v22 Feature 6: Batch Undo — snapshot the vault BEFORE processing so
         # we can compute the list of NEW files written by this batch and let
@@ -2618,6 +2659,18 @@ class ProcessingWorker(QThread):
                         raise
 
                 cache.add_processed(repo_id, url, owner, repo_name, full_path, category_key)
+                # v0.10.0 — Phase 1 (note state): record the note the app
+                # just WROTE (identity = source URL) so the baseline stays
+                # fresh and Phase 3's comparison treats it as known-good.
+                # The fingerprint comes from the in-memory content — no
+                # re-read, and dry-runs never reach here (no connection).
+                if note_state_db is not None:
+                    try:
+                        note_state_db.record_note(
+                            _note_state.VAULT_GITHUB, url, full_path,
+                            content=note_content, category=category_key)
+                    except Exception:
+                        pass  # best-effort by design
                 # v22 Feature 4: Mark any previous failure for this URL as resolved
                 # so it no longer shows up in the "Retry Failed" queue.
                 cache.mark_failed_resolved(url)
@@ -2676,6 +2729,13 @@ class ProcessingWorker(QThread):
                 time.sleep(self.config.get('large_batch_extra_delay', 1.5))
 
         cache.close()
+        # v0.10.0 — Phase 1 (note state): close the batch's record connection
+        # alongside the cache (best-effort; None in a dry-run).
+        if note_state_db is not None:
+            try:
+                note_state_db.close()
+            except Exception:
+                pass
 
         # v22 Feature 6: Batch Undo — compute the list of NEW .md files
         # written by this batch (anything in the vault now that wasn't in
@@ -4784,6 +4844,97 @@ class MainWindow(QMainWindow):
         vault_layout.addWidget(QLabel("Select your Obsidian vault:"))
         vault_layout.addWidget(self.vault_combo)
         vault_layout.addLayout(vault_buttons)
+
+        # v0.10.0 — Phase 1 (vault settings, SPEC §6 Phase 1): the two NEW
+        # vault paths, the websites backup repo, and the pipeline switches.
+        # Every picker gets a LIVE status — "not set" / "will be created" /
+        # "found" — and blank paths degrade gracefully: nothing is written
+        # anywhere until the pipeline owning that vault is switched ON.
+
+        # --- Websites vault (the Phase 2 pipeline; folder may not exist yet) ---
+        web_group = QGroupBox("🌐 Websites vault (new — the Phase 2 pipeline)")
+        web_layout = QVBoxLayout(web_group)
+        web_layout.setSpacing(6)
+        web_row = QHBoxLayout()
+        self.website_vault_input = QLineEdit(
+            (self.config.get('website_vault_path') or '').strip())
+        self.website_vault_input.setPlaceholderText(
+            "path to the Websites vault — the folder does not need to exist yet")
+        web_row.addWidget(self.website_vault_input, 1)
+        web_browse = QPushButton("📂 Browse...")
+        self._style_btn(web_browse, 'secondary')
+        web_browse.clicked.connect(self.browse_website_vault)
+        web_row.addWidget(web_browse)
+        web_layout.addLayout(web_row)
+        self.website_vault_status = QLabel("● —")
+        self.website_vault_status.setStyleSheet(
+            "font-size: 12px; font-weight: bold;")
+        web_layout.addWidget(self.website_vault_status)
+        web_repo_row = QHBoxLayout()
+        web_repo_row.addWidget(QLabel("Backup repo:"))
+        self.website_repo_input = QLineEdit(
+            (self.config.get('website_repo_name') or '').strip())
+        self.website_repo_input.setPlaceholderText(
+            "private GitHub repo for the Websites vault backup")
+        web_repo_row.addWidget(self.website_repo_input, 1)
+        web_layout.addLayout(web_repo_row)
+        vault_layout.addWidget(web_group)
+
+        # --- Manual Notes vault (owner-owned; the app never writes there) ---
+        manual_group = QGroupBox("✍️ Manual Notes vault (yours — read-only for the app, Phase 5)")
+        manual_layout = QVBoxLayout(manual_group)
+        manual_layout.setSpacing(6)
+        manual_row = QHBoxLayout()
+        self.manual_vault_input = QLineEdit(
+            (self.config.get('manual_vault_path') or '').strip())
+        self.manual_vault_input.setPlaceholderText(
+            "path to your Manual Notes vault (optional until Phase 5)")
+        manual_row.addWidget(self.manual_vault_input, 1)
+        manual_browse = QPushButton("📂 Browse...")
+        self._style_btn(manual_browse, 'secondary')
+        manual_browse.clicked.connect(self.browse_manual_vault)
+        manual_row.addWidget(manual_browse)
+        manual_layout.addLayout(manual_row)
+        self.manual_vault_status = QLabel("● —")
+        self.manual_vault_status.setStyleSheet(
+            "font-size: 12px; font-weight: bold;")
+        manual_layout.addWidget(self.manual_vault_status)
+        vault_layout.addWidget(manual_group)
+
+        # --- Pipeline switches ---
+        pipes_group = QGroupBox("⚙️ Pipelines")
+        pipes_layout = QVBoxLayout(pipes_group)
+        pipes_layout.setSpacing(6)
+        _pipes_cfg = self.config.get('pipelines') or {}
+        self.pipeline_github_check = QCheckBox(
+            "GitHub projects — the existing pipeline")
+        self.pipeline_github_check.setChecked(_pipes_cfg.get('github', True))
+        self.pipeline_websites_check = QCheckBox(
+            "Websites — the new pipeline (leave OFF until Phase 2 is ready)")
+        self.pipeline_websites_check.setChecked(_pipes_cfg.get('websites', False))
+        pipes_layout.addWidget(self.pipeline_github_check)
+        pipes_layout.addWidget(self.pipeline_websites_check)
+        pipes_info = QLabel(
+            "💡 The GitHub switch is ON by default and keeps today's behavior "
+            "exactly. The Websites switch does nothing yet — the Phase 2 "
+            "pipeline it enables is not built. Both OFF = a SYNC processes "
+            "nothing.")
+        pipes_info.setWordWrap(True)
+        pipes_info.setObjectName("info_note")
+        pipes_layout.addWidget(pipes_info)
+        vault_layout.addWidget(pipes_group)
+
+        # Live status while typing; save once on commit (Enter / focus-out /
+        # Browse / toggle) — the established save-on-change pattern.
+        self.website_vault_input.textEdited.connect(self._refresh_vault_page_status)
+        self.website_vault_input.editingFinished.connect(self._save_vault_page)
+        self.website_repo_input.editingFinished.connect(self._save_vault_page)
+        self.manual_vault_input.textEdited.connect(self._refresh_vault_page_status)
+        self.manual_vault_input.editingFinished.connect(self._save_vault_page)
+        self.pipeline_github_check.toggled.connect(self._save_vault_page)
+        self.pipeline_websites_check.toggled.connect(self._save_vault_page)
+        self._refresh_vault_page_status()
+
         self._settings_pages.append((self._wrap_scroll(vault_tab), "📁 Vault"))
 
         # ---- Tab 4: Ollama / Cloud LLM ----
@@ -7139,6 +7290,60 @@ class MainWindow(QMainWindow):
             self.vault_combo.setCurrentText(folder)
             self.on_vault_changed(folder)
 
+    # v0.10.0 — Phase 1: browse / live-status / save handlers for the new
+    # vault pickers on the 📁 Vault settings page.
+    def browse_website_vault(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Websites Vault (a folder that does not exist yet is fine)")
+        if folder:
+            self.website_vault_input.setText(folder)
+            self._save_vault_page()
+
+    def browse_manual_vault(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Manual Notes Vault")
+        if folder:
+            self.manual_vault_input.setText(folder)
+            self._save_vault_page()
+
+    def _vault_path_status(self, path, kind):
+        """(text, color) for a vault path — the live status line under each
+        picker. Websites folders that don't exist yet are 'will be created'
+        (its pipeline creates them); the GitHub vault must exist; the Manual
+        vault is the owner's to create."""
+        colors = self._status_colors()
+        path = (path or '').strip()
+        if not path:
+            return "● not set", colors['warning']
+        if os.path.isdir(path):
+            return "● found", colors['success']
+        if kind == 'websites':
+            return "● will be created (folder does not exist yet)", colors['warning']
+        if kind == 'github':
+            return "● missing on disk", colors['error']
+        return "● not found — you create this vault yourself", colors['warning']
+
+    def _refresh_vault_page_status(self, *args):
+        """Update the two live status labels (no saving — cheap, per keystroke)."""
+        if not hasattr(self, 'website_vault_status'):
+            return
+        text, color = self._vault_path_status(
+            self.website_vault_input.text(), 'websites')
+        self.website_vault_status.setText(text)
+        self.website_vault_status.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {color};")
+        text, color = self._vault_path_status(
+            self.manual_vault_input.text(), 'manual')
+        self.manual_vault_status.setText(text)
+        self.manual_vault_status.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {color};")
+
+    def _save_vault_page(self, *args):
+        """Commit the Vault page (paths + repo + switches) via the ONE
+        merge-based save path — same as every other settings page."""
+        self._refresh_vault_page_status()
+        self.save_config()
+
     def remove_vault(self):
         current = self.vault_combo.currentText()
         if not current:
@@ -7282,6 +7487,27 @@ class MainWindow(QMainWindow):
                 "repo_name": (self.goodrepos_repo_input.text().strip()
                               if hasattr(self, 'goodrepos_repo_input')
                               else (self.config.get('goodrepos') or {}).get('repo_name', 'good-repos')),
+            },
+            # v0.10.0 — Phase 1: vault settings + pipeline switches. Same
+            # defensive hasattr pattern; a missing widget keeps the config
+            # value (merge_config never drops keys).
+            "website_vault_path": (self.website_vault_input.text().strip()
+                                   if hasattr(self, 'website_vault_input')
+                                   else self.config.get('website_vault_path', '')),
+            "manual_vault_path": (self.manual_vault_input.text().strip()
+                                  if hasattr(self, 'manual_vault_input')
+                                  else self.config.get('manual_vault_path', '')),
+            "website_repo_name": (self.website_repo_input.text().strip()
+                                  if hasattr(self, 'website_repo_input')
+                                  else self.config.get('website_repo_name', '')),
+            "taxonomy_path": self.config.get('taxonomy_path', ''),
+            "pipelines": {
+                "github": (self.pipeline_github_check.isChecked()
+                           if hasattr(self, 'pipeline_github_check')
+                           else (self.config.get('pipelines') or {}).get('github', True)),
+                "websites": (self.pipeline_websites_check.isChecked()
+                             if hasattr(self, 'pipeline_websites_check')
+                             else (self.config.get('pipelines') or {}).get('websites', False)),
             },
         }
 
@@ -10056,6 +10282,18 @@ class MainWindow(QMainWindow):
         except Exception as good_err:
             self.log_message(f"⚠️ Good Repos could not start: {good_err}", "warning")
 
+        # v0.10.0 — Phase 1: the WEBSITES vault gets its own private mirror
+        # (a second, independent VaultSeal). A silent no-op while the
+        # websites pipeline is OFF (the default) or no websites vault is
+        # configured — exactly the Phase 1 acceptance behavior.
+        try:
+            _pipes_cfg = self.config.get('pipelines') or {}
+            if (_pipes_cfg.get('websites', False)
+                    and (self.config.get('website_vault_path') or '').strip()):
+                self._start_websites_seal()
+        except Exception as ws_err:
+            self.log_message(f"⚠️ Websites vault seal could not start: {ws_err}", "warning")
+
         # Calculate total elapsed time
         elapsed_str = ""
         if hasattr(self, '_processing_start_time'):
@@ -10855,6 +11093,49 @@ class MainWindow(QMainWindow):
         self.log_message(f"{icon} VaultSeal: {message}", level)
         self._vaultseal_refresh_status()
 
+    def _start_websites_seal(self):
+        """Seal the WEBSITES vault in a background thread (Phase 1, v0.10.0).
+
+        Only ever called when the websites pipeline is ON and a websites
+        vault path is set — with the defaults (off / empty) this never
+        runs. Same QThread pattern as _start_vault_seal: the GUI never
+        blocks on git or the network.
+        """
+        run_summary = {}
+        try:
+            run_summary = {
+                "processed": int(getattr(self.worker, 'processed', 0) or 0),
+                "total": int(getattr(self.worker, 'total', 0) or 0),
+            }
+        except Exception:
+            run_summary = {}
+
+        class WebsitesSealWorker(QThread):
+            done = pyqtSignal(bool, str)
+
+            def __init__(self, config, summary):
+                super().__init__()
+                self.config = config
+                self.summary = summary
+
+            def run(self):
+                try:
+                    result = _vaultseal.websites_seal_from_config(
+                        self.config, run_summary=self.summary)
+                    self.done.emit(result.ok, result.describe())
+                except Exception as e:  # belt & suspenders — seal() never raises
+                    self.done.emit(False, str(e))
+
+        def _on_websites_seal_done(ok, message):
+            icon = "✅" if ok else "⚠️"
+            level = "success" if ok else "warning"
+            self.log_message(f"{icon} Websites vault seal: {message}", level)
+
+        self.log_message("🌐 Websites vault seal: sealing → its private GitHub mirror…", "info")
+        self._websites_seal_worker = WebsitesSealWorker(self.config, run_summary)
+        self._websites_seal_worker.done.connect(_on_websites_seal_done)
+        self._websites_seal_worker.start()
+
     def _vaultseal_now(self):
         """Manual seal — the exact code path the post-run hook uses."""
         self._backup_save_config()
@@ -11395,6 +11676,15 @@ def run_headless(args):
             print(f"[headless] VaultSeal: {vs_result.describe()}")
         except Exception as seal_err:
             print(f"[headless] VaultSeal error: {seal_err}")
+        # v0.10.0 — Phase 1: the WEBSITES vault's own mirror. Silent no-op
+        # while the websites pipeline is OFF (the default).
+        try:
+            ws_result = _vaultseal.websites_seal_from_config(
+                config, run_summary=vs_summary)
+            if ws_result.sealed or ws_result.error:
+                print(f"[headless] Websites vault seal: {ws_result.describe()}")
+        except Exception as ws_err:
+            print(f"[headless] Websites vault seal error: {ws_err}")
         # v32 — GoodRepos: publish the PUBLIC curated directory. Best-effort,
         # never raises — whatever notes exist deserve publication.
         try:

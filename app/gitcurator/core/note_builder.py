@@ -31,6 +31,11 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
+from gitcurator.constants import (
+    GITHUB_PROMPT_VERSION, MANAGED_BY_GITCURATOR, NOTE_SCHEMA_VERSION,
+    OWNERSHIP_BANNER,
+)
+
 # ---------------------------------------------------------------------------
 # Sanitizers
 # ---------------------------------------------------------------------------
@@ -290,9 +295,14 @@ date_processed: {datetime.now().strftime("%Y-%m-%d")}
 {last_release_line}
 {banner_cover_line}
 {quality_lines}
+managed_by: {MANAGED_BY_GITCURATOR}
+schema_version: {NOTE_SCHEMA_VERSION}
+prompt_version: {GITHUB_PROMPT_VERSION}
 ---
 
-{banner_section}# {repo_title}
+{banner_section}{OWNERSHIP_BANNER}
+
+# {repo_title}
 
 {short_summary_section}**`{owner_label}/{repo_title}`** · ⭐ {stars:,} · 🔧 {lang_scalar or 'N/A'}
 
@@ -321,17 +331,6 @@ date_processed: {datetime.now().strftime("%Y-%m-%d")}
 - **Languages:** {', '.join(languages) if languages else 'N/A'}
 - **Last Release:** {latest_release_date or 'No releases'}
 - **Quality:** {'⚠️ low (' + ', '.join(quality_issues) + ')' if is_low_quality else '✅ good'}
-
-## 💡 My Ideas & Notes
-[Add your personal thoughts here]
-
-## 📱 Social Signal (Manual)
-- **Source:** [Dropdown: Reddit/X/Instagram/GitHub Search/Other]
-- **Link:** [URL]
-- **Notes:** [Context]
-
-## 📔 Journal
-[Date] - [Your experiences]
 
 ---
 *Source: [GitHub]({url})*

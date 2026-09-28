@@ -71,8 +71,13 @@ def _build_note(url="https://github.com/owner/repo", repo_name="repo",
                 category_key="Agents"):
     """A REAL GitHub note from the REAL builder (ground truth for the
     scan tool's template detection — if note_builder's placeholder text
-    ever changes, these tests fail until the tool is updated)."""
-    return note_builder.build_note(
+    ever changes, these tests fail until the tool is updated).
+
+    v0.10.0 — Phase 1: new notes no longer contain the three human
+    placeholder sections, so the LEGACY sections are APPENDED here — the
+    scan tool's whole job is detecting human writing in notes created
+    BEFORE v0.10.0, and the fixture must look like one of those."""
+    note = note_builder.build_note(
         url=url, repo_name=repo_name, owner="owner", org_name="Some Org",
         stars=10, forks=2, commit_count=5, cred_score=80, org_rep=7,
         summary="A" * 80, tags=["cli"], category_key=category_key,
@@ -81,6 +86,17 @@ def _build_note(url="https://github.com/owner/repo", repo_name="repo",
         primary_language="Python", languages=["Python"],
         short_summary="Useful repo.", quality_issues=[], is_low_quality=False,
     )
+    legacy_tail = (
+        "\n## 💡 My Ideas & Notes\n[Add your personal thoughts here]\n\n"
+        "## 📱 Social Signal (Manual)\n"
+        "- **Source:** [Dropdown: Reddit/X/Instagram/GitHub Search/Other]\n"
+        "- **Link:** [URL]\n- **Notes:** [Context]\n\n"
+        "## 📔 Journal\n[Date] - [Your experiences]\n"
+    )
+    marker = "\n---\n*Source: [GitHub]("
+    if marker in note:
+        note = note.replace(marker, legacy_tail + marker, 1)
+    return note
 
 
 def _write(path, content):

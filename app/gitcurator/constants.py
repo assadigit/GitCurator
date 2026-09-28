@@ -29,6 +29,31 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CONFIG_FILE = os.path.join(APP_DIR, "config.json")
 
+# ---------------------------------------------------------------------------
+# v0.10.0 — Phase 1: note ownership stamps & vault settings
+# ---------------------------------------------------------------------------
+# Every NEW machine-written note carries these frontmatter keys (SPEC §4.1,
+# §4.5) so future phases can tell app-written content from anything else.
+MANAGED_BY_GITCURATOR = "gitcurator"
+NOTE_SCHEMA_VERSION = "1"        # bump when the note format changes shape
+GITHUB_PROMPT_VERSION = "gh-v1"  # bump when the GitHub prompts change
+
+# The ownership banner line at the top of every NEW note body (SPEC §4.1:
+# "managed_by: gitcurator in frontmatter and a short banner line").
+OWNERSHIP_BANNER = "> [!info] Managed by GitCurator — machine-written note."
+
+# The websites taxonomy ships with the app; ``taxonomy_path`` in config
+# overrides it (SPEC Phase 1 config key; the parser itself is Phase 2).
+DEFAULT_TAXONOMY_PATH = os.path.join(APP_DIR, "taxonomy",
+                                     "website-library-categories.md")
+
+
+def resolve_taxonomy_path(config=None) -> str:
+    """Effective taxonomy file path: the config override, else the bundled
+    default. Pure helper — Phase 2's parser consumes it."""
+    override = ((config or {}).get("taxonomy_path") or "").strip()
+    return override or DEFAULT_TAXONOMY_PATH
+
 # Design System — PASTEL (v32): mint / violet / rose / butter on cream & plum
 # ============================================================================
 # The whole UI speaks pastel while every text pair keeps WCAG AA (>=4.5:1).
@@ -158,6 +183,18 @@ CONFIG_EXAMPLE = {
         "enabled": True,       # publish after every run (unchanged = no-op)
         "repo_name": "good-repos",
         "auto_push": True      # push to GitHub (needs github_token)
+    },
+    # v0.10.0 — Phase 1: second vault + pipeline switches. All keys are
+    # OPTIONAL with safe defaults: an old config.json without them loads
+    # unchanged (every read site uses .get with the same defaults below).
+    # ``vault_path`` keeps meaning "the GitHub Projects vault".
+    "website_vault_path": "",          # Websites vault (Phase 2 pipeline)
+    "manual_vault_path": "",           # Manual Notes vault (owner-owned, Phase 5)
+    "website_repo_name": "my-awesome-websites-directory",  # its backup repo
+    "taxonomy_path": "",               # empty = bundled app/taxonomy file
+    "pipelines": {
+        "github": True,         # the existing pipeline, ON by default
+        "websites": False       # Phase 2 pipeline — OFF until it exists
     }
 }
 
