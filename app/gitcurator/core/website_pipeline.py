@@ -393,7 +393,8 @@ class WebsitePipeline:
                  log: Optional[Callable] = None,
                  taxonomy: Optional[Taxonomy] = None,
                  note_state_db=None,
-                 rate_limiter: Optional[_web_fetch.DomainRateLimiter] = None):
+                 rate_limiter: Optional[_web_fetch.DomainRateLimiter] = None,
+                 fetch_fn=None):
         from gitcurator.constants import resolve_taxonomy_path
         self.config = config or {}
         self.llm_call = llm_call
@@ -401,6 +402,9 @@ class WebsitePipeline:
         self.state = state
         self.log = log or (lambda *a, **k: None)
         self.note_state_db = note_state_db
+        # Optional fetch injection (tests + the offline golden run stub
+        # this so NO network is touched; production leaves it None).
+        self.fetch_fn = fetch_fn or _web_fetch.fetch_url
         self.taxonomy = taxonomy or load_taxonomy_from_config(self.config)
         self.vault_path = (self.config.get('website_vault_path') or '').strip()
         self.taxonomy_path = resolve_taxonomy_path(self.config)
@@ -551,6 +555,47 @@ class WebsitePipeline:
             except Exception:
                 pass  # bookkeeping must never break a run
 
+    def _app_owns_old_note(self, canonical: str, old_path: str) -> bool:
+        """True when the file at ``old_path`` is EXACTLY the app-written
+        note recorded in note_state (fingerprint unchanged — no human
+        edit). Only then may the pipeline replace or remove it."""
+        if self.note_state_db is None or not old_path:
+            return False
+        try:
+            from gitcurator.core import note_state as _note_state
+            row = self.note_state_db.row_for(
+                _note_state.VAULT_WEBSITES, canonical)
+            if not row or not row.get('fingerprint'):
+                return False
+            if os.path.normpath(row.get('path') or '') != \
+                    os.path.normpath(old_path):
+                return False
+            with open(old_path, 'r', encoding='utf-8',
+                      errors='replace') as f:
+                content = f.read()
+            return _note_state.compute_fingerprint(content) \
+                == row['fingerprint']
+        except Exception:
+            return False
+
+    def _cleanup_replaced_review_note(self, canonical: str,
+                                      old_path: str) -> None:
+        """After a successful upgrade, remove the old app-owned _review
+        placeholder — otherwise two files would carry the same source
+        (the exact duplicate situation SPEC §4.4 flags). A hand-edited
+        placeholder is NEVER removed; Phase 3's duplicate detector will
+        surface it instead."""
+        if not old_path or not os.path.exists(old_path):
+            return
+        if self._app_owns_old_note(canonical, old_path):
+            _dryrun.remove(old_path)
+            self.log(f"♻️ upgraded note replaced its _review placeholder "
+                     f"({os.path.basename(old_path)})", "info")
+        else:
+            self.log(f"⚠️ kept the old _review note {old_path!r} — it looks "
+                     "hand-edited; both files now carry the same source",
+                     "warning")
+
     # -- the per-link flow ---------------------------------------------------
 
     def process_link(self, url: str) -> Dict:
@@ -607,7 +652,7 @@ class WebsitePipeline:
                         and prior.get('fetch_status') == 'failed')
 
         # ---- 3. fetch ------------------------------------------------------
-        fetch = _web_fetch.fetch_url(
+        fetch = self.fetch_fn(
             url, timeout_s=self.fetch_timeout_s,
             max_bytes=self.fetch_max_bytes,
             rate_limiter=self.rate_limiter)
@@ -618,7 +663,11 @@ class WebsitePipeline:
             self.state.enqueue_retry(canonical, fetch.reason)
             note = build_review_note(canonical, 'failed',
                                      f"Fetch failed: {fetch.reason}")
-            path = self._review_path(canonical)
+            # Re-failure: overwrite the app-owned placeholder in place when
+            # possible (same path, atomic write) instead of stacking
+            # _v1/_v2 duplicates; a hand-edited placeholder is kept and a
+            # fresh path is used.
+            path = self._review_path(canonical, prior=prior)
             self._write_note(path, note)
             self._record(canonical, path, note, '', '', 'failed')
             result.update(outcome='review', note_path=path,
@@ -694,6 +743,12 @@ class WebsitePipeline:
                                   fetch_status)
         path = self._note_path(category, subcategory, name)
         self._write_note(path, note)
+        # Upgrade cleanup BEFORE _record: the ownership proof compares the
+        # note_state row's path with the OLD path — recording first would
+        # make the app look like it no longer owns the placeholder.
+        if upgraded and prior:
+            self._cleanup_replaced_review_note(canonical,
+                                               prior.get('note_path') or '')
         self._record(canonical, path, note, category, subcategory,
                      fetch_status)
         # Full success: any pending fetch-retry for this link is resolved.
@@ -710,7 +765,15 @@ class WebsitePipeline:
                  + f" ({fetch_status})", "success")
         return result
 
-    def _review_path(self, canonical: str) -> str:
+    def _review_path(self, canonical: str, prior: Optional[Dict] = None) -> str:
+        """Path for a _review note. When ``prior`` points at an existing
+        app-owned _review placeholder for the same URL, that SAME path is
+        returned so the atomic write replaces it (no _v1/_v2 stacking)."""
+        if prior and prior.get('note_path') \
+                and self._is_review_path(prior['note_path']) \
+                and os.path.exists(prior['note_path']) \
+                and self._app_owns_old_note(canonical, prior['note_path']):
+            return prior['note_path']
         from urllib.parse import urlparse
         host = urlparse(canonical).netloc or 'unknown'
         fname = safe_filename(host + urlparse(canonical).path)[:120] \
@@ -739,6 +802,12 @@ class WebsitePipeline:
                 break
             canonical = normalize_website_url(url)
             if canonical in seen:
+                # Within-batch duplicate: REPORT it (never silently drop —
+                # the run report's counts must add up).
+                results.append({
+                    'url': url, 'canonical': canonical, 'outcome': 'skipped',
+                    'note_path': '', 'category': '', 'subcategory': '',
+                    'fetch_status': '', 'error': 'duplicate within batch'})
                 continue
             seen.add(canonical)
             results.append(self.process_link(url))

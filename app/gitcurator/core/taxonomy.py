@@ -294,20 +294,29 @@ def parse_taxonomy(text: str, source_path: str = "") -> Taxonomy:
                         desc[1].strip()
             continue
 
-        # Prose paragraph: first one is the category's definition. A leading
-        # "*(no subcategories)*" marker is stripped off it.
+        # Prose paragraph: the first one is the category's definition.
+        # Two shapes appear in the real file:
+        #   "*(...)*" — an italic note (either the (no subcategories)
+        #               marker or a note like "(empty for now …)")
+        #   plain prose — possibly starting with a leftover marker and
+        #               containing **bold** runs; both are cleaned.
         prose = line.strip()
-        prose = _NO_SUBCATEGORIES_RE.sub('', prose).strip()
-        prose = re.sub(r'^[—–\-]\s*', '', prose).strip()
-        if prose and not prose.startswith('*(') and not saw_definition:
-            current.definition = prose
-            saw_definition = True
-        elif prose and prose.startswith('*('):
-            # "(empty for now …)" style note — use as definition when the
-            # category has none yet.
-            inner = re.sub(r'^\*\((.*)\)\*$', r'\1', prose).strip()
+        if prose.startswith('*(') and prose.endswith(')*'):
+            # Slicing off the emphasis also removes the parentheses, so
+            # compare the marker CONTENT directly (test-caught).
+            inner = prose[2:-2].strip()
+            if re.fullmatch(r'no subcategories', inner, re.IGNORECASE):
+                continue            # pure marker — nothing to keep
+            inner = re.sub(r'^[—–\-]\s*', '', inner).strip()
             if inner and not current.definition:
                 current.definition = inner
+            continue
+        body = _NO_SUBCATEGORIES_RE.sub('', prose).strip()
+        body = body.replace('**', '').strip('*').strip()
+        body = re.sub(r'^[—–\-]\s*', '', body).strip()
+        if body and not saw_definition:
+            current.definition = body
+            saw_definition = True
 
     if not categories:
         raise TaxonomyError(

@@ -232,11 +232,13 @@ def domain_of(url: str) -> str:
 
 
 # Tracking parameters that carry no identity for a website (SPEC §4.3.1:
-# "utm_*/fbclid/gclid/ref parameters … all ignored"). Everything else in a
-# query string is kept — a YouTube video id or a route path in ?p= is part
-# of the page's identity, unlike GitHub URLs where the repo is the identity.
+# "utm_*/fbclid/gclid/ref parameters … all ignored"). Everything else in
+# a query string is kept — a YouTube video id or a route path in ?p= is
+# part of the page's identity, unlike GitHub URLs where the repo is the
+# identity. Bare "utm" is included: it is only ever a tracker.
 _TRACKING_PARAM_RE = re.compile(
-    r'^(utm_[a-z0-9_]+|fbclid|gclid|ref|ref_src|ref_url|igshid|mc_cid|mc_eid)$',
+    r'^(utm(?:_[a-z0-9_]+)?|fbclid|gclid|ref|ref_src|ref_url|igshid'
+    r'|mc_cid|mc_eid)$',
     re.IGNORECASE)
 
 

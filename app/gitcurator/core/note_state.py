@@ -275,6 +275,24 @@ class NoteStateDB:
             for r in rows
         }
 
+    def row_for(self, vault: str, source_url: str) -> Optional[Dict]:
+        """The row for ONE note (identity = vault + source URL), or None.
+        v0.11.0 — Phase 2: the websites pipeline uses this to prove an old
+        _review placeholder is still app-owned (fingerprint unchanged)
+        before replacing or removing it."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT source_url, path, fingerprint, category, subcategory,"
+                " locked, first_seen, updated_at FROM note_state"
+                " WHERE vault=? AND source_url=?", (vault, source_url)
+            ).fetchone()
+        if not row:
+            return None
+        return {'source_url': row[0], 'path': row[1], 'fingerprint': row[2],
+                'category': row[3], 'subcategory': row[4],
+                'locked': bool(row[5]), 'first_seen': row[6],
+                'updated_at': row[7]}
+
     def close(self) -> None:
         with self._lock:
             try:
