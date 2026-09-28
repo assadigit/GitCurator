@@ -33,9 +33,20 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
 - [x] **`unique_links.csv`** (done — the owner committed it to the repo root on `main`; the picker ran for real: 784 rows → 30 candidates across 30 domains → `app/tests/golden/websites_candidates.json`, committed on `phase-0-groundwork`)
-- [ ] Websites vault folder location and a private GitHub repo for its backup (needed by Phase 1)
-- [ ] Manual Notes vault path (needed by Phase 5)
+- [x] **Phase 1 inputs** (received 2026-09-29, see "Vault map" below)
+- [ ] Manual Notes vault path (needed by Phase 5; optional until then)
 - [x] ~~Path of a **copy** of the GitHub vault, for the Phase 0 owner review~~ **waived by the owner 2026-09-29** ("this is unnecessary") — Phase 0 approved without the scan. The scan tool stays available any time via one command.
+
+## Vault map (owner-provided 2026-09-29 — the single source of truth for Phase 1+)
+
+| What | Windows path / repo | Config key it will land in |
+|---|---|---|
+| GitHub Projects vault (existing, 600+ notes) | `G:\Docs\Github Projects Obsidian Vault` | `vault_path` (unchanged meaning) |
+| Websites vault (new; folder may not exist yet — status "will be created" is fine) | `G:\Docs\Documents\Obsidian Website Directory` | `website_vault_path` |
+| GitHub vault backup repo (created by the agent, private, empty) | [`assadigit/my-awesome-github-directory`](https://github.com/assadigit/my-awesome-github-directory) | `vaultseal.repo_name` |
+| Websites vault backup repo (created by the agent, private, empty) | [`assadigit/my-awesome-websites-directory`](https://github.com/assadigit/my-awesome-websites-directory) | `website_repo_name` |
+
+Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`, `GitCurator-Vault` or `github-projects-automated` all exist on the account — the local `config.json` decides, and it lives on the owner's machine). When wiring Phase 1, point `vaultseal.repo_name` at `my-awesome-github-directory` per the owner's instruction; the old repo is left untouched.
 
 ## Differences found between SPEC.md and the real code
 
@@ -60,7 +71,8 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 
 ## Open questions for the owner
 
-- (none for Phase 0 — closed.) For Phase 1, whenever the owner is ready: **where the Websites vault will live** (create it in Obsidian, tell me the path) and **which private GitHub repo** will back it up. Neither blocks starting Phase 1 (safe defaults, websites pipeline OFF until the owner switches it on).
+- **The word "go" to start Phase 1** (all Phase 1 inputs are in; see the Vault map above).
+- Optional: the word "merge" to fold the approved `phase-0-groundwork` into `main` first (recommended, not required — Phase 1 branches on top of it either way).
 
 ## Notes for Phase 2 (from the real golden-set run)
 
@@ -75,3 +87,4 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - 2026-09-29, Phase 0 — groundwork on branch `phase-0-groundwork` (NOT merged): dry-run mechanism + `--dry-run` CLI flag, scan/snapshot/golden tools, 24 new tests, CI updated to 20 modules + 130 tests, VERSION 0.09.5, CHANGELOG + README, `docs/reports/PHASE-0-report.md`. Baseline 106 tests green before changes; final 130/130 green; end-to-end dry-run rehearsal on a synthetic vault left it byte-identical (one deadlock found and fixed on the way). Waiting for owner review.
 - 2026-09-29, Phase 0 (same day, follow-up) — the owner committed `unique_links.csv` to `main`; ran `pick_golden_links.py` on the real file: 784 rows, 2 duplicates removed, 5 GitHub links excluded, 777 non-GitHub links, **30 candidates across 30 domains** selected deterministically (two runs identical). Real candidates JSON committed to the branch; full gate re-run green (20 compiles + 130/130 tests). One unresolved t.co short link noted for Phase 2.
 - 2026-09-29, Phase 0 (same day, close-out) — owner waived the vault-copy scan review; Phase 0 marked **approved**. Branch left unmerged; awaiting the owner's word on merging before Phase 1 starts on top of it.
+- 2026-09-29, pre-Phase-1 — owner provided all Phase 1 inputs (vault paths + backup repo names). Agent created both private repos via API and verified them (`assadigit/my-awesome-github-directory`, `assadigit/my-awesome-websites-directory` — both private, empty). Recorded in the Vault map. No code changes; bookkeeping only.
