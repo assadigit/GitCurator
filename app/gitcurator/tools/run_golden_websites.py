@@ -123,7 +123,11 @@ def offline_llm(entries):
 
 def live_llm(api_url, api_key, model, timeout_s):
     """One real call per prompt: POST <api_url>/chat/completions with the
-    same shape the app's cloud path uses (urllib, Bearer, JSON body)."""
+    same shape the app's cloud path uses (urllib, Bearer, JSON body).
+    Retries twice on server errors (a live run hammers the endpoint;
+    429/500 windows pass)."""
+    import time as _time
+    import urllib.error
     import urllib.request
 
     def llm(messages):
@@ -132,13 +136,23 @@ def live_llm(api_url, api_key, model, timeout_s):
         headers = {'Content-Type': 'application/json'}
         if api_key:
             headers['Authorization'] = f'Bearer {api_key}'
-        req = urllib.request.Request(
-            api_url.rstrip('/') + '/chat/completions', data=data,
-            headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-        return result.get('choices', [{}])[0].get('message', {}).get(
-            'content', '')
+        last_err = None
+        for attempt in range(3):
+            req = urllib.request.Request(
+                api_url.rstrip('/') + '/chat/completions', data=data,
+                headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                return result.get('choices', [{}])[0].get(
+                    'message', {}).get('content', '')
+            except urllib.error.HTTPError as e:
+                last_err = e
+                if e.code in (429, 500, 502, 503, 504) and attempt < 2:
+                    _time.sleep(45)
+                    continue
+                raise
+        raise last_err
     return llm
 
 

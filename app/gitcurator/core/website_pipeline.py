@@ -610,6 +610,25 @@ class WebsitePipeline:
             result['error'] = f"{type(e).__name__}: {e}"
             self.log(f"❌ Website pipeline error for {url}: {result['error']}",
                      "error")
+            # SPEC §4.3: nothing is silently dropped — an unexpected error
+            # (e.g. an LLM outage mid-classification) still leaves a
+            # _review note behind, UNLESS this link already got one (the
+            # error may have happened after a successful write).
+            if not result.get('note_path'):
+                try:
+                    canonical = result.get('canonical') \
+                        or normalize_website_url(url)
+                    note = build_review_note(
+                        canonical, 'failed',
+                        f"Pipeline error: {result['error']}")
+                    path = self._review_path(canonical)
+                    self._write_note(path, note)
+                    self._record(canonical, path, note, '', '', 'failed')
+                    result.update(outcome='review', note_path=path,
+                                  canonical=canonical)
+                    self.counters['review'] += 1
+                except Exception:
+                    pass  # the result dict still carries the error
             self.counters['failed'] += 1
             self.last_results.append(result)
             return result

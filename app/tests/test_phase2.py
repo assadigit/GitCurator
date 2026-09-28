@@ -833,9 +833,6 @@ class TestPipeline(_PipeCase):
         self.assertEqual(rel, os.path.join('Design', 'Test_Site.md'))
 
     def test_analysis_failure_writes_review(self):
-        llm = _FakeLLM()
-        llm.analysis = None     # JSON of None -> extract_json fails
-
         def bad_analysis(messages):
             text = messages[0]['content']
             if 'filing a website' in text:
@@ -849,6 +846,22 @@ class TestPipeline(_PipeCase):
         r = pipe.process_link('https://example.com/noanalysis')
         self.assertEqual(r['outcome'], 'review')
         self.assertIn('analysis failed', r['error'].lower())
+
+    def test_llm_outage_still_writes_review_note(self):
+        """A hard LLM outage (exception, not a bad answer) mid-classification
+        must not silently drop the link (SPEC 4.3) — a _review note is
+        written by the catch-all."""
+        def exploding_llm(messages):
+            raise RuntimeError("LLM connection refused")
+        pipe = self.make_pipeline(exploding_llm)
+        r = pipe.process_link('https://example.com/outage')
+        self.assertEqual(r['outcome'], 'review')
+        self.assertIn('LLM connection refused', r['error'])
+        self.assertTrue(os.path.exists(r['note_path']))
+        note = open(r['note_path'], encoding='utf-8').read()
+        self.assertIn('fetch_status: "failed"', note)
+        self.assertIn('Pipeline error: RuntimeError', note)
+        self.assertIn('LLM connection refused', note)
 
     def test_gist_gets_snippet_tag(self):
         pipe = self.make_pipeline(_FakeLLM())
