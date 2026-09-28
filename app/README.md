@@ -12,6 +12,7 @@ python main.py
 ```cmd
 Start-GitCurator-CLI.bat     (double-click it — same engine as GitCurator-CLI.bat)
 python main.py --cli --auto --yes    (fully automatic run)
+python main.py --cli --auto --yes --dry-run   (SAME run, but writes NOTHING — rehearsal)
 python main.py --cli --init          (first-run credential wizard)
 python main.py --cli --status        (config + cache + 404-quarantine summary)
 python main.py --cli --list-dead     (show the 404 quarantine)
@@ -33,6 +34,20 @@ python main.py --headless --from-id 123 --to-id 456 --vault "C:\path\to\vault"
 ```cmd
 python -m unittest tests.test_core -v
 ```
+
+### Phase 0 safety tools (v0.09.5 — run from the app/ folder)
+```cmd
+python gitcurator/tools/scan_vault_edits.py "C:\path\to\vault"   (read-only vault scan → report)
+python gitcurator/tools/snapshot_vault.py "C:\path\to\vault"      (zip backup, timestamped)
+python gitcurator/tools/pick_golden_links.py "C:\path\to\unique_links.csv"  (golden-set candidates)
+```
+All three refuse to write anything inside the vault they are pointed at.
+Reports and snapshots land in `app/reports/` (scan/, snapshots/, dry-runs/).
+The scan tells you: notes per category, notes missing `source:`, duplicate
+`source:` URLs, and which notes contain your own writing in *My Ideas &
+Notes* / *Social Signal (Manual)* / *Journal* (the app must never overwrite
+those). Snapshot before any risky operation on a real vault; restore by
+unzipping over the vault folder.
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd

@@ -245,7 +245,7 @@ def banner() -> None:
   ███    ███ ███    ███ ████    ████ ▄███████████  ▀█████▀  ███    █████
 """
     print(paint(art, C.CYAN, C.BOLD), end="")
-    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.4", C.MAGENTA)
+    print(paint("  GitHub Project Curator — CLI ", C.BOLD) + paint("v0.09.5", C.MAGENTA)
           + paint("  ·  colored · animated · fully automatic", C.DIM))
     print()
 

@@ -1,11 +1,13 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 16 audited
-# Python modules and runs the full 106-case suite (34 core + 11 e2e +
-# 28 goodrepos + 19 reliability + 14 quarantine — v0.09 merged lineage).
-# test_quarantine imports gitcurator/gui/app.py (CacheDB lives there),
-# so the app requirements are installed first; the suite runs headless
-# on the offscreen Qt platform and never launches the GUI.
+# Every push to main, every tag, and every PR compiles the 20 audited
+# Python modules and runs the full 130-case suite (34 core + 11 e2e +
+# 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 — v0.09.5
+# groundwork: dry-run, vault scan, snapshot, golden-set picker).
+# test_quarantine and test_phase0 import gitcurator/gui/app.py (CacheDB
+# and ProcessingWorker live there), so the app requirements are installed
+# first; the suite runs headless on the offscreen Qt platform and never
+# launches the GUI.
 
 name: CI
 
@@ -19,7 +21,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 106 tests + reliability + quarantine)
+    name: Python gate (compile + 130 tests + reliability + quarantine)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,7 +41,7 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 16 audited modules
+      - name: Compile the 20 audited modules
         run: >
           python -m py_compile
           main.py
@@ -50,6 +52,7 @@ jobs:
           gitcurator/core/storage.py
           gitcurator/core/note_builder.py
           gitcurator/core/llm_client.py
+          gitcurator/core/dryrun.py
           gitcurator/integrations/vaultseal.py
           gitcurator/integrations/goodrepos.py
           gitcurator/integrations/telegram_fetch_worker.py
@@ -58,10 +61,13 @@ jobs:
           gitcurator/integrations/subprocess_runner.py
           gitcurator/cloud/cloudflare_sync.py
           gitcurator/cli.py
+          gitcurator/tools/scan_vault_edits.py
+          gitcurator/tools/snapshot_vault.py
+          gitcurator/tools/pick_golden_links.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 -v
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 16 compiles + 106 tests (core/e2e/goodrepos/reliability/quarantine; v0.09 merged lineage)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 20 compiles + 130 tests (core/e2e/goodrepos/reliability/quarantine/phase0; v0.09.5)."

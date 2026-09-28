@@ -10,6 +10,88 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.09.5] — Phase 0 groundwork: rehearse before you touch the vault — 2026-09-29
+
+The phased build (SPEC.md) starts here. Phase 0 adds **tools and safety
+nets only — no behavior change to the app**. Everything below runs
+against a vault you point it at; nothing was run against a real vault.
+
+### What you get
+
+1. **`--dry-run` on the CLI** — add it to any batch command
+   (`python main.py --cli --auto --dry-run`, `--import-file`, ranges,
+   `--retry-failed`) and the batch runs for real — fetches, analyzes,
+   builds every note in memory — but **writes nothing**: no notes, no
+   banners, no inbox tables, no master index/MOCs, no reports, no
+   manifest. It also skips the three post-batch side effects: the
+   VaultSeal backup push, the Good Repos publish, and marking the bot
+   queue read / advancing `last_processed_msg_id`. At the end it prints
+   how many vault operations were withheld and saves a readable report
+   of every one (with a content preview) to `app/reports/dry-runs/`.
+   Even the anti-repeat state is safe: the batch reads the real
+   `cache.db` through a throwaway copy, so a dry-run can never mark
+   links "processed" and make the next real run skip them.
+2. **`gitcurator/tools/scan_vault_edits.py`** — a strictly read-only
+   scan of any vault folder: how many notes per category (and in
+   `_review`, and in folders that don't match any known category), which
+   notes are missing their `source:` line (invisible to the anti-duplicate
+   index), which notes share the same `source:` (duplicates), and which
+   notes contain anything you wrote yourself in *My Ideas & Notes*,
+   *Social Signal (Manual)* or *Journal* beyond the template placeholders
+   — the content the app must never overwrite. Writes a Markdown report
+   **outside** the vault (`app/reports/scan/`); refuses to write inside
+   the vault it scanned.
+3. **`gitcurator/tools/snapshot_vault.py`** — zips the entire vault
+   (notes, `_moc`, `_inbox`, `attachments`, even `.obsidian`) into one
+   timestamped `.zip` outside the vault (`app/reports/snapshots/`).
+   Restore is a plain "extract here". Run this before any risky
+   operation on a real vault.
+4. **`gitcurator/tools/pick_golden_links.py`** — reads your
+   `unique_links.csv` (columns detected automatically; tolerates
+   semicolons, tabs, BOM, headerless files), excludes GitHub repo links
+   (they belong to the GitHub pipeline), and picks **30 diverse
+   candidates** — spread across as many domains as possible, always the
+   same pick for the same file — into `app/tests/golden/websites_candidates.json`
+   as the candidate golden set for the future Websites pipeline. You
+   approve the final list in Phase 2.
+
+### Diagnosis / notes
+- The dry-run switch lives in the new `core/dryrun.py` (pure stdlib, no
+  PyQt). `core/storage.py`'s atomic writers consult it, which
+  automatically covers every canonical vault write today and in future
+  phases; the handful of legacy raw writes inside the batch (master
+  index, MOCs, per-run reports, the 404 log, banner failure markers,
+  inbox tables, the link manifest, folder creation, banner moves) were
+  each routed through behavior-identical helpers — same bytes on disk
+  when dry-run is off.
+- The per-platform inbox tables are now written through the shared
+  atomic writer (`storage.atomic_write_text`) instead of a duplicated
+  inline copy — identical content, plus fsync durability.
+- An end-to-end rehearsal of the dry-run (fake LLM, stubbed GitHub API,
+  synthetic vault) caught a real deadlock in the fresh-install case (no
+  `cache.db` yet): the shadow-cache copy ran while holding the log lock.
+  Fixed, with a regression test that fails instead of hanging.
+- Cosmetic, known: during a dry-run, a few log lines still say e.g.
+  "Final report saved: …". Read them as "would save" — the authoritative
+  truth is the closing "DRY-RUN COMPLETE" line and the dry-run report.
+
+### Verification
+- 24 new tests (`tests/test_phase0.py`) over synthetic vaults in temp
+  folders: the dry-run module and storage gate; the real worker write
+  slice (note + inbox + manifest) performing normally when off and
+  touching nothing when on; the scan tool's findings and its
+  read-only guarantee (hash of every file before/after); the snapshot
+  zip's completeness (CRC check, unicode names, empty folders) and its
+  refusals; the golden picker's diversity, determinism and column
+  variants; the CLI flag plumbing.
+- Full suite: **130 tests, all passing** (106 existing + 24 new). CI
+  now compiles 20 modules and runs the six test modules.
+- End-to-end dry-run rehearsal on a synthetic vault: 24 vault
+  operations logged, vault byte-for-byte identical afterwards
+  (verified by hashing every file before and after), no `cache.db`
+  created, seal/publish/mark-read skipped, report written outside the
+  vault.
+
 ## [0.09.4] — the bot queue can no longer look fully-unprocessed — 2026-09-22
 
 Owner report: "it finds all 618 links in the bot to be processed, but in
