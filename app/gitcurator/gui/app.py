@@ -82,6 +82,11 @@ from gitcurator.core import dryrun as _dryrun
 # v0.10.0 — Phase 1 (note state): the per-note record in cache.db that
 # makes "moves are corrections" possible (SPEC §4.4). Pure stdlib, no PyQt.
 from gitcurator.core import note_state as _note_state
+# v0.11.0 — Phase 2 (websites): the whole per-link flow lives in this pure
+# module (taxonomy validate, fetch, extract, classify, analyze, write,
+# retries, _review). The worker only wires its LLM router + dedupe probe
+# into it — new logic stays OUT of this 11k-line file (non-negotiable #8).
+from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
 # v0.06 — Fix (stuck Telegram lock, part 1): the single-operation lock now
@@ -462,10 +467,16 @@ class VaultIndex:
 
     This is the GROUND TRUTH for dedup — if a URL is in the vault, it's been
     processed (regardless of what the SQLite cache says).
+
+    v0.11.0 — Phase 2: an optional ``normalizer`` overrides the URL keying;
+    the Websites vault passes ``links.normalize_website_url`` (query params
+    are part of a website's identity, unlike a GitHub repo's). The default
+    keeps ``normalize_url`` — the GitHub vault's behavior is unchanged.
     """
 
-    def __init__(self, vault_path: str):
+    def __init__(self, vault_path: str, normalizer=None):
         self.vault_path = vault_path
+        self._normalize = normalizer or normalize_url
         self._url_to_path = {}  # normalized_url -> note_path
         self._built = False
 
@@ -495,7 +506,7 @@ class VaultIndex:
                         source_url = match.group(1).strip()
                         # Strip quotes if present
                         source_url = source_url.strip('"\'')
-                        normalized = normalize_url(source_url)
+                        normalized = self._normalize(source_url)
                         if normalized:
                             self._url_to_path[normalized] = fpath
                             count += 1
@@ -508,15 +519,15 @@ class VaultIndex:
 
     def has_url(self, url: str) -> bool:
         """Check if a URL (normalized) is already in the vault."""
-        return normalize_url(url) in self._url_to_path
+        return self._normalize(url) in self._url_to_path
 
     def get_path(self, url: str) -> Optional[str]:
         """Get the note path for a URL, or None if not found."""
-        return self._url_to_path.get(normalize_url(url))
+        return self._url_to_path.get(self._normalize(url))
 
     def add_url(self, url: str, path: str):
         """Add a new URL→path mapping (called after writing a new note)."""
-        self._url_to_path[normalize_url(url)] = path
+        self._url_to_path[self._normalize(url)] = path
 
     @property
     def count(self) -> int:
@@ -1779,13 +1790,19 @@ class ProcessingWorker(QThread):
         # BEFORE anything is fetched so an OFF switch consumes nothing (no
         # queue reads, no marks, no cache writes). Default ON — existing
         # users see no change (SPEC non-negotiable #4).
+        # v0.11.0 — Phase 2: the Websites pipeline has the same contract. The
+        # early return now fires only when BOTH are off; with websites ON the
+        # fetch still happens (the websites pipeline needs those links) and
+        # GitHub links are simply skipped below.
         _pipelines_cfg = (self.config or {}).get('pipelines') or {}
-        if not _pipelines_cfg.get('github', True):
+        _github_pipeline_on = bool(_pipelines_cfg.get('github', True))
+        _websites_pipeline_on = bool(_pipelines_cfg.get('websites', False))
+        if not _github_pipeline_on and not _websites_pipeline_on:
             self.log_message.emit(
-                "⛔ GitHub pipeline is switched OFF (Settings → 📁 Vault). "
+                "⛔ Both pipelines are switched OFF (Settings → 📁 Vault). "
                 "Nothing was fetched or processed.", "warning")
             self.finished_signal.emit(
-                True, "GitHub pipeline is off — nothing to do.")
+                True, "Both pipelines are off — nothing to do.")
             return
 
         if self.mode == 'direct':
@@ -1795,7 +1812,17 @@ class ProcessingWorker(QThread):
         else:
             urls = self._fetch_from_telegram()
 
-        if not urls:
+        # v0.11.0 — Phase 2: with the GitHub pipeline off, GitHub links are
+        # logged and skipped — never processed (the websites phase below
+        # still runs on the non-Github links).
+        if not _github_pipeline_on and urls:
+            self.log_message.emit(
+                f"⛔ GitHub pipeline is OFF — {len(urls)} GitHub link(s) "
+                "skipped this run.", "warning")
+            urls = []
+
+        _website_links = list(getattr(self, '_non_github_urls', []) or [])
+        if not urls and not (_websites_pipeline_on and _website_links):
             self.log_message.emit("No URLs found to process.", "warning")
             self.finished_signal.emit(True, "No URLs found.")
             return
@@ -1824,17 +1851,23 @@ class ProcessingWorker(QThread):
                 non_github = getattr(self, '_non_github_urls', []) or []
                 self.link_tracker.intake(urls, non_github)
 
-                # Non-GitHub links were already recorded in the inbox table
-                # by _fetch_from_telegram/_fetch_from_import (or by the bot
-                # queue check). Mark them as "recorded" up front — Phase 3
-                # verification will confirm they are actually present in the
-                # table.
-                for ng_url in non_github:
-                    self.link_tracker.mark_recorded(ng_url)
+                # Non-GitHub links: with the Websites pipeline ON (v0.11.0
+                # — Phase 2) they are NOT recorded in the _inbox dead end;
+                # the website phase at the end of this run processes them
+                # and marks the manifest itself (SPEC §6 Phase 2 routing).
+                # The old behavior (inbox table + mark_recorded) stays when
+                # the websites pipeline is OFF.
+                if non_github and not _websites_pipeline_on:
+                    for ng_url in non_github:
+                        self.link_tracker.mark_recorded(ng_url)
 
-                # Write non-GitHub links to the inbox table
-                if non_github:
+                    # Write non-GitHub links to the inbox table
                     self._create_inbox_notes(non_github, source="Bot" if getattr(self, '_bot_source', False) else "Import")
+                elif non_github:
+                    self.log_message.emit(
+                        f"🌐 {len(non_github)} non-GitHub link(s) queued for "
+                        "the Websites pipeline", "info"
+                    )
 
                 self.log_message.emit(
                     f"📋 Manifest created: {len(urls)} GitHub + {len(non_github)} non-GitHub links recorded",
@@ -2728,6 +2761,14 @@ class ProcessingWorker(QThread):
             if self.total > 50:
                 time.sleep(self.config.get('large_batch_extra_delay', 1.5))
 
+        # v0.11.0 — Phase 2: the Websites pipeline runs AFTER the GitHub
+        # loop, on this batch's non-GitHub links plus any fetch-retries
+        # whose backoff elapsed. All logic lives in core/website_pipeline;
+        # this is the thin wiring hook (non-negotiable #8). Runs even when
+        # the GitHub loop above was skipped (pipelines.github off).
+        _website_summary = self._run_website_phase(
+            cache, note_state_db, ollama_client, ollama_model)
+
         cache.close()
         # v0.10.0 — Phase 1 (note state): close the batch's record connection
         # alongside the cache (best-effort; None in a dry-run).
@@ -2813,6 +2854,13 @@ class ProcessingWorker(QThread):
                 pass
 
         msg = f"Processed {self.processed} out of {self.total} repos."
+        # v0.11.0 — Phase 2: append the websites tally when the phase ran.
+        _ws = getattr(self, '_website_summary', None)
+        if _ws:
+            _c = _ws.get('counters', {})
+            msg += (f" Websites: {_c.get('processed', 0)} processed, "
+                    f"{_c.get('review', 0)} to review, "
+                    f"{_c.get('skipped', 0)} skipped.")
         if summary_path:
             msg += f" Summary log: {summary_path}"
         self.finished_signal.emit(True, msg)
@@ -2982,6 +3030,130 @@ class ProcessingWorker(QThread):
         except Exception as e:
             self.log_message.emit(f"Failed to generate master index: {e}", "warning")
 
+    def _run_website_phase(self, cache, note_state_db, ollama_client=None,
+                           ollama_model=""):
+        """v0.11.0 — Phase 2 thin hook: run the Websites pipeline
+        (core/website_pipeline.py) for this batch's non-GitHub links plus
+        due fetch-retries. All per-link logic lives in the core module —
+        this wires the worker's LLM router, dedupe probe, state DB and
+        logging into it. Returns a summary dict (or None when the pipeline
+        is off / not configured / nothing to do)."""
+        try:
+            _pipes = (self.config or {}).get('pipelines') or {}
+            if not _pipes.get('websites', False):
+                return None
+            website_vault = (self.config.get('website_vault_path') or '').strip()
+            links = list(getattr(self, '_non_github_urls', []) or [])
+            if not website_vault:
+                if links:
+                    self.log_message.emit(
+                        "⚠️ Websites pipeline is ON but no Websites vault is "
+                        "set (Settings → 📁 Vault) — the non-GitHub links of "
+                        "this batch are kept in the manifest only.", "warning")
+                return None
+
+            # State DB: the shadow cache during a dry-run (same rule as
+            # CacheDB / note_state) so a rehearsal records nothing.
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+
+            # The websites vault gets its OWN VaultIndex keyed with the
+            # website normalizer (query params are part of the identity).
+            index = VaultIndex(
+                website_vault,
+                normalizer=_links.normalize_website_url)
+            index.rebuild(log_signal=self.log_message)
+
+            # LLM router — mirrors _llm_analyze's _call_llm exactly:
+            # cloud -> _call_cloud_llm; ollama -> json format + the shared
+            # wall-clock timeout wrapper. (Phase 4 hardens both together.)
+            llm_provider = self.config.get('llm_provider', 'ollama')
+
+            def _llm_call(messages):
+                if llm_provider == 'cloud':
+                    return self._call_cloud_llm(
+                        self.config.get('cloud_api_url', ''),
+                        self.config.get('cloud_api_key', ''),
+                        self.config.get('cloud_model', ''),
+                        messages)
+                kwargs = {'model': ollama_model, 'messages': messages,
+                          'format': 'json'}
+                timeout_s = float(self.config.get('llm_timeout_s', 300) or 300)
+                response = _llm_client.call_with_timeout(
+                    ollama_client.chat, timeout_s, **kwargs)
+                if hasattr(response, 'message'):
+                    return response.message.content or ""
+                if isinstance(response, dict):
+                    return response.get('message', {}).get('content', '')
+                return str(response)
+
+            try:
+                pipeline = _website_pipeline.WebsitePipeline(
+                    config=self.config,
+                    llm_call=_llm_call,
+                    vault_index_has=index.has_url,
+                    state=state,
+                    log=self.log_message.emit,
+                    note_state_db=note_state_db)
+
+                due = state.due_retries()
+                self.log_message.emit(
+                    f"🌐 Websites pipeline: {len(links)} link(s)"
+                    + (f" + {len(due)} due retry(ies)" if due else ""),
+                    "info")
+
+                if due:
+                    pipeline.run_due_retries(
+                        should_continue=lambda: self.is_running)
+                results = pipeline.run(
+                    links, should_continue=lambda: self.is_running)
+
+                # Manifest marking (the intake left website links pending):
+                # processed/review -> processed (a _review note IS a note),
+                # skipped -> skipped, hard failures -> failed.
+                if self.link_tracker:
+                    for r in results:
+                        try:
+                            if r.get('outcome') in ('processed', 'review'):
+                                self.link_tracker.mark_processed(
+                                    r['url'], r.get('note_path') or '')
+                            elif r.get('outcome') == 'skipped':
+                                self.link_tracker.mark_skipped(
+                                    r['url'], r.get('error') or 'skipped')
+                            elif r.get('outcome') == 'failed':
+                                self.link_tracker.mark_failed(
+                                    r['url'], r.get('error') or 'failed')
+                        except Exception:
+                            pass  # manifest is best-effort bookkeeping
+
+                summary = {'counters': dict(pipeline.counters),
+                           'results': list(pipeline.last_results),
+                           'vault': website_vault}
+                self._website_summary = summary
+                c = pipeline.counters
+                self.log_message.emit(
+                    f"🌐 Websites done: {c['processed']} processed, "
+                    f"{c['review']} to review, {c['skipped']} skipped, "
+                    f"{c['retried']} retried, {c['upgraded']} upgraded, "
+                    f"{c['failed']} failed.", "success")
+                return summary
+            finally:
+                state.close()
+        except Exception as e:
+            # One failing vault/pipeline never stops the rest of the batch
+            # (non-negotiable #7) — but it IS reported loudly.
+            try:
+                self.log_message.emit(
+                    f"⚠️ Websites pipeline failed (GitHub results above are "
+                    f"unaffected): {e}", "error")
+            except Exception:
+                pass
+            return None
+
     def _create_inbox_notes(self, non_github_urls, source="Saved"):
         """Classify non-GitHub links by platform and write to per-platform files.
 
@@ -2992,7 +3164,18 @@ class ProcessingWorker(QThread):
 
         The actual work is delegated to the module-level
         ``write_inbox_links_by_platform`` helper so MainWindow.check_bot_queue
-        and ProcessingWorker.run() share the exact same code path."""
+        and ProcessingWorker.run() share the exact same code path.
+
+        v0.11.0 — Phase 2: when the Websites pipeline is ON this dead end is
+        BYPASSED — the links are processed by core/website_pipeline at the
+        end of the batch instead (SPEC §6 Phase 2 routing)."""
+        _pipes = (self.config or {}).get('pipelines') or {}
+        if _pipes.get('websites', False):
+            self.log_message.emit(
+                f"🌐 Websites pipeline ON — {len(non_github_urls)} link(s) "
+                "will be processed as websites (not written to _inbox).",
+                "info")
+            return
         write_inbox_links_by_platform(
             self.config.get('vault_path', ''),
             non_github_urls,
@@ -3125,21 +3308,66 @@ class ProcessingWorker(QThread):
             # Non-GitHub links recorded (brief summary)
             non_github = getattr(self, '_non_github_urls', []) or []
             if non_github:
-                # Group by platform for the report
-                platform_counts = {}
-                for u in non_github:
-                    p = classify_platform(u)
-                    if p == 'github':
-                        p = 'other'
-                    platform_counts[p] = platform_counts.get(p, 0) + 1
-                lines.append("## 📥 Non-GitHub Links (recorded in _inbox/)")
+                # v0.11.0 — Phase 2: the heading reflects reality — with the
+                # websites pipeline ON the links went there, not to _inbox.
+                _pipes = (self.config or {}).get('pipelines') or {}
+                _wp_on = bool(_pipes.get('websites', False))
+                if _wp_on:
+                    lines.append("## 🌐 Non-GitHub Links (Websites pipeline)")
+                    lines.append("")
+                    lines.append(f"{len(non_github)} link(s) were processed "
+                                 "by the Websites pipeline (see its section "
+                                 "below).")
+                    lines.append("")
+                else:
+                    # Group by platform for the report
+                    platform_counts = {}
+                    for u in non_github:
+                        p = classify_platform(u)
+                        if p == 'github':
+                            p = 'other'
+                        platform_counts[p] = platform_counts.get(p, 0) + 1
+                    lines.append("## 📥 Non-GitHub Links (recorded in _inbox/)")
+                    lines.append("")
+                    lines.append("| Platform | Count |")
+                    lines.append("|----------|-------|")
+                    for p, c in sorted(platform_counts.items(), key=lambda x: -x[1]):
+                        display_name = PLATFORM_INFO.get(p, ('🔗 Other', 'other_links.md'))[0]
+                        lines.append(f"| {display_name} | {c} |")
+                    lines.append("")
+
+            # v0.11.0 — Phase 2: the websites pipeline's own section.
+            _ws = getattr(self, '_website_summary', None)
+            if _ws:
+                _c = _ws.get('counters', {})
+                lines.append("## 🌐 Websites Pipeline")
                 lines.append("")
-                lines.append("| Platform | Count |")
-                lines.append("|----------|-------|")
-                for p, c in sorted(platform_counts.items(), key=lambda x: -x[1]):
-                    display_name = PLATFORM_INFO.get(p, ('🔗 Other', 'other_links.md'))[0]
-                    lines.append(f"| {display_name} | {c} |")
+                lines.append(f"Vault: `{_ws.get('vault', '')}`")
                 lines.append("")
+                lines.append("| Outcome | Count |")
+                lines.append("|---------|-------|")
+                for key, label in (('processed', 'processed'),
+                                   ('review', 'needs review (_review)'),
+                                   ('upgraded', 'upgraded from _review'),
+                                   ('retried', 'fetch retries attempted'),
+                                   ('skipped', 'skipped (already known)'),
+                                   ('failed', 'failed')):
+                    if _c.get(key):
+                        lines.append(f"| {label} | {_c[key]} |")
+                lines.append("")
+                per_link = _ws.get('results') or []
+                if per_link:
+                    lines.append("| Link | Outcome | Filed under |")
+                    lines.append("|------|---------|-------------|")
+                    for r in per_link:
+                        filed = r.get('category') or ''
+                        if r.get('subcategory'):
+                            filed += f" / {r['subcategory']}"
+                        if not filed:
+                            filed = r.get('error') or ''
+                        link_md = f"[{r.get('url', '?')}]({r.get('url', '')})"
+                        lines.append(f"| {link_md} | {r.get('outcome', '?')} | {filed} |")
+                    lines.append("")
 
             lines.append("---")
             lines.append(f"*Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
@@ -3207,10 +3435,17 @@ class ProcessingWorker(QThread):
             non_github = getattr(self, '_non_github_urls', [])
             if non_github:
                 lines.append("=" * 60)
-                lines.append("NON-GITHUB LINKS (not processed — review manually)")
-                lines.append("=" * 60)
-                lines.append(f"Count: {len(non_github)}")
-                lines.append("Stub notes created in: _inbox/ folder")
+                _pipes = (self.config or {}).get('pipelines') or {}
+                if _pipes.get('websites', False):
+                    lines.append("NON-GITHUB LINKS (processed by the Websites pipeline)")
+                    lines.append("=" * 60)
+                    lines.append(f"Count: {len(non_github)}")
+                    lines.append("Outcome: see the run report / the log above")
+                else:
+                    lines.append("NON-GITHUB LINKS (not processed — review manually)")
+                    lines.append("=" * 60)
+                    lines.append(f"Count: {len(non_github)}")
+                    lines.append("Stub notes created in: _inbox/ folder")
                 lines.append("-" * 60)
                 for i, url in enumerate(non_github, 1):
                     lines.append(f"{i}. {url}")
@@ -3321,6 +3556,9 @@ class ProcessingWorker(QThread):
         # and non-GitHub lists. Non-GitHub URLs are recorded in the inbox
         # table so they are never silently dropped. The processing loop
         # only sees GitHub URLs.
+        # v0.11.0 — Phase 2: github.io pages route to the GitHub pipeline
+        # too (mapped to their repo, SPEC §4.2) — same rule split_links()
+        # already applies on the Telegram paths.
         github_urls = []
         non_github_urls = []
         for u in urls:
@@ -3328,8 +3566,11 @@ class ProcessingWorker(QThread):
                 cleaned = clean_url(u)
             except Exception:
                 cleaned = u
+            mapped = _links.map_github_io_url(cleaned)
             if cleaned.startswith("https://github.com/"):
                 github_urls.append(u)
+            elif mapped:
+                github_urls.append(mapped)
             else:
                 non_github_urls.append(u)
 

@@ -1,0 +1,29 @@
+You are cataloguing a website for a personal knowledge library. The reader is a designer-developer who will search this library later, when an idea comes up, to remember which tool or resource could help.
+
+Rules:
+1. Use only what the provided text supports. If something is not stated or clearly implied, leave it out. Never guess features, prices, or names.
+2. Write plain, concrete English. No marketing words such as "revolutionary" or "powerful".
+3. "best_used_for" is the most important field. Write one sentence starting "Use when you need to" that names the problem it solves, in the words someone would use when thinking about their own task.
+4. "similar_tools": list only tools you are confident exist and are genuinely similar. Otherwise return an empty list.
+5. "tags": up to 6, lowercase. Prefer these for the category: {{TAG_HINTS}}.
+6. Return only valid JSON in exactly this shape:
+
+{
+  "name": "",
+  "one_line": "",
+  "core_offerings": [],
+  "standout_feature": "",
+  "best_used_for": "",
+  "pricing": "free|freemium|paid|unknown",
+  "login_required": "yes|no|unknown",
+  "similar_tools": [],
+  "tags": [],
+  "confidence": "high|medium|low"
+}
+
+("one_line" is at most 25 words. "core_offerings" has 3 to 6 short bullets. "standout_feature" is empty if there is none.)
+
+URL: {{URL}}
+Title: {{TITLE}}
+Description: {{META_DESCRIPTION}}
+Page text (may be partial): {{TEXT_EXCERPT}}

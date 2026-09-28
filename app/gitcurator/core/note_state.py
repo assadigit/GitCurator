@@ -225,16 +225,23 @@ class NoteStateDB:
     def record_note(self, vault: str, source_url: str, path: str,
                     content: Optional[str] = None,
                     category: Optional[str] = None,
-                    subcategory: Optional[str] = None) -> None:
+                    subcategory: Optional[str] = None,
+                    normalizer=None) -> None:
         """Record one note the app just wrote (identity = vault + source).
-        ``content`` is hashed when given; otherwise the file is read."""
+        ``content`` is hashed when given; otherwise the file is read.
+
+        v0.11.0 — Phase 2: ``normalizer`` overrides the URL keying (the
+        websites pipeline passes ``links.normalize_website_url`` so a URL
+        with meaningful query parameters keeps its identity; GitHub keeps
+        the default ``normalize_url``)."""
         if content is None:
             try:
                 with open(path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
             except OSError:
                 content = ''
-        self.upsert(vault, normalize_url(source_url) or source_url, path,
+        key_fn = normalizer or normalize_url
+        self.upsert(vault, key_fn(source_url) or source_url, path,
                     compute_fingerprint(content), category, subcategory)
 
     def set_locked(self, vault: str, source_url: str, locked: bool = True) -> None:

@@ -837,6 +837,8 @@ def cmd_status(args) -> int:
     # owner's folder moves as corrections instead of damage. Pure-stdlib
     # module; the db file is only opened when it already exists (a status
     # command must never create state).
+    # v0.11.0 — Phase 2: the same block now shows the websites pipeline's
+    # own tables (processed / retry queue / dismissed) the same way.
     try:
         from gitcurator.core import note_state as _note_state
         from gitcurator.constants import APP_DIR as _APP_DIR
@@ -844,6 +846,7 @@ def cmd_status(args) -> int:
         if os.path.exists(_db_file):
             _ns = _note_state.NoteStateDB(_db_file)
             _gh_count = _ns.count(_note_state.VAULT_GITHUB)
+            _web_count = _ns.count(_note_state.VAULT_WEBSITES)
             _ns.close()
             print(paint("Note state (moves-as-corrections record)", C.BOLD))
             print(rule())
@@ -851,9 +854,40 @@ def cmd_status(args) -> int:
                       + "  (the first real run records it)" + C.RESET)
             print(f"  {paint('GitHub vault baseline'.ljust(22), C.BOLD)} "
                   f"{_gh_count} note(s) recorded{_extra}")
+            print(f"  {paint('Websites vault record'.ljust(22), C.BOLD)} "
+                  f"{_web_count} note(s) recorded")
             print()
     except Exception as exc:
         cli_print(f"Note state unavailable ({exc})", "warning")
+    try:
+        from gitcurator.core import website_pipeline as _wp
+        from gitcurator.constants import APP_DIR as _APP_DIR
+        _db_file = os.path.join(_APP_DIR, "cache.db")
+        if os.path.exists(_db_file):
+            _ws = _wp.WebsiteStateDB(_db_file)
+            try:
+                _proc = _ws.conn.execute(
+                    "SELECT COUNT(*) FROM websites_processed").fetchone()[0]
+                _retry = _ws.conn.execute(
+                    "SELECT COUNT(*), "
+                    "SUM(CASE WHEN attempts >= ? THEN 1 ELSE 0 END) "
+                    "FROM website_retry_queue",
+                    (_wp.MAX_FETCH_RETRIES,)).fetchone()
+                _dismissed = _ws.conn.execute(
+                    "SELECT COUNT(*) FROM dismissed_urls").fetchone()[0]
+            finally:
+                _ws.close()
+            print(paint("Websites pipeline (cache.db)", C.BOLD))
+            print(rule())
+            print(f"  {paint('Processed websites'.ljust(22), C.BOLD)} {_proc}")
+            print(f"  {paint('Fetch retry queue'.ljust(22), C.BOLD)} "
+                  f"{_retry[0]} pending"
+                  + (f" ({_retry[1]} exhausted, kept in _review)"
+                     if _retry[1] else ""))
+            print(f"  {paint('Dismissed URLs'.ljust(22), C.BOLD)} {_dismissed}")
+            print()
+    except Exception as exc:
+        cli_print(f"Websites state unavailable ({exc})", "warning")
     return 0
 
 

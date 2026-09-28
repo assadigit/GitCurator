@@ -43,6 +43,19 @@ GITHUB_URL_PATTERN = re.compile(
 # Generic link pattern for non-GitHub link capture (inbox feature).
 ALL_LINKS_PATTERN = re.compile(r'https?://[^\s<>"\)\]]+')
 
+# GitHub Pages sites: https://<owner>.github.io/<repo>/… (v0.11.0 Phase 2 —
+# SPEC §4.2: mapped to github.com/<owner>/<repo> and sent to the GitHub
+# pipeline; a bare <owner>.github.io with no repo path is a real website
+# and stays on the Website pipeline).
+GITHUB_IO_PATTERN = re.compile(
+    r'https?://([a-zA-Z0-9\-_.]+)\.github\.io/([a-zA-Z0-9\-_.]+)'
+)
+
+# Gists (SPEC §4.2): gist.github.com links go to the Website pipeline and
+# get the #snippet tag — they are snippets, not full projects.
+GIST_URL_PATTERN = re.compile(
+    r'https?://(?:www\.)?gist\.github\.com/', re.IGNORECASE)
+
 # Trailing punctuation that commonly clings to URLs pasted in chat messages.
 _TRAILING_PUNCT = '.,);:!\'\"'
 
@@ -90,12 +103,39 @@ def extract_all_links(text: str) -> List[str]:
     return [lnk.rstrip(_TRAILING_PUNCT) for lnk in ALL_LINKS_PATTERN.findall(text)]
 
 
+def map_github_io_url(url: str):
+    """Map a GitHub Pages URL to its canonical GitHub repo URL.
+
+    https://owner.github.io/repo/anything -> https://github.com/owner/repo
+    Returns '' when ``url`` is not a <owner>.github.io/<repo> page (a bare
+    ``owner.github.io`` site has no repo path and is treated as a website).
+    """
+    if not url:
+        return ''
+    m = GITHUB_IO_PATTERN.match(url.strip())
+    if not m:
+        return ''
+    owner, repo = m.group(1), m.group(2)
+    if not (_VALID_REPO_CHARS.match(owner) and _VALID_REPO_CHARS.match(repo)):
+        return ''
+    return f"https://github.com/{owner}/{repo}"
+
+
+def is_gist_url(url: str) -> bool:
+    """True for gist.github.com links (Website pipeline + #snippet tag)."""
+    return bool(url and GIST_URL_PATTERN.match(url.strip()))
+
+
 def split_links(text: str) -> Tuple[List[str], List[str], int]:
     """Split all links in ``text`` into (github_urls, non_github_urls, raw_count).
 
     Convenience used by the Telegram fetch paths: returns deduped GitHub
     URLs, deduped non-GitHub links (order-preserved), and the raw link count
     before dedup (for duplicate statistics).
+
+    v0.11.0 — Phase 2 (SPEC §4.2): ``owner.github.io/repo`` links are mapped
+    to ``github.com/owner/repo`` and routed to the GitHub pipeline. Gists
+    and every other link stay in non_github (the Website pipeline's intake).
     """
     raw = extract_all_links(text)
     github_urls = []
@@ -110,8 +150,16 @@ def split_links(text: str) -> Tuple[List[str], List[str], int]:
             canonical = f"https://github.com/{m.group(1)}/{m.group(2)}"
             if canonical not in github_urls:
                 github_urls.append(canonical)
-        else:
-            non_github.append(link)
+            continue
+        # v0.11.0 — Phase 2: GitHub Pages sites belong to the repo they
+        # publish (SPEC §4.2). A mapping that collides with an already
+        # captured github.com URL is silently deduped like any other.
+        gh_io = map_github_io_url(link)
+        if gh_io:
+            if gh_io not in github_urls:
+                github_urls.append(gh_io)
+            continue
+        non_github.append(link)
     return github_urls, non_github, len(raw)
 
 
@@ -181,6 +229,58 @@ def domain_of(url: str) -> str:
         return (urlparse(url or '').netloc or '').lower()
     except Exception:
         return ''
+
+
+# Tracking parameters that carry no identity for a website (SPEC §4.3.1:
+# "utm_*/fbclid/gclid/ref parameters … all ignored"). Everything else in a
+# query string is kept — a YouTube video id or a route path in ?p= is part
+# of the page's identity, unlike GitHub URLs where the repo is the identity.
+_TRACKING_PARAM_RE = re.compile(
+    r'^(utm_[a-z0-9_]+|fbclid|gclid|ref|ref_src|ref_url|igshid|mc_cid|mc_eid)$',
+    re.IGNORECASE)
+
+
+def normalize_website_url(url: str) -> str:
+    """Canonicalize a WEBSITE URL for dedupe + note identity (SPEC §4.3.1).
+
+    - scheme -> https (http redirects are near-universal today; one form)
+    - domain lowercased, leading ``www.`` dropped
+    - tracking parameters (utm_*, fbclid, gclid, ref, …) dropped;
+      every other query parameter KEPT (unlike GitHub's normalize_url)
+    - #fragment dropped, trailing ``/`` dropped
+
+    Deliberately does NOT touch ``normalize_url`` (the GitHub/VaultIndex
+    normalizer) — its behavior for GitHub links is frozen by SPEC §4.3.1.
+    """
+    if not url:
+        return ""
+    url = url.strip()
+    if '#' in url:
+        url = url.split('#')[0]
+    try:
+        p = urlparse(url)
+    except Exception:
+        return url
+    scheme = 'https'
+    host = (p.netloc or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    # Keep only non-tracking query parameters, order-preserved.
+    kept = []
+    if p.query:
+        for pair in p.query.split('&'):
+            if not pair:
+                continue
+            key = pair.split('=', 1)[0]
+            if key and not _TRACKING_PARAM_RE.match(key):
+                kept.append(pair)
+    path = p.path or ''
+    if path.endswith('/') and len(path) > 1:
+        path = path.rstrip('/')
+    out = f"{scheme}://{host}{path}"
+    if kept:
+        out += '?' + '&'.join(kept)
+    return out
 
 
 def dedupe_urls(urls: List[str]) -> Tuple[List[str], int]:
