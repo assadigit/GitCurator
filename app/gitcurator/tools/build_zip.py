@@ -9,7 +9,7 @@ Usage (from the app/ folder of a GitCurator checkout):
 What lands in the zip (one root folder, ``GitCurator/``):
 
     GitCurator/main.py, gitcurator/…, prompts/, taxonomy/, assets/,
-    the six .bat launchers, README.md, WINDOWS-QUICKSTART.md,
+    the seven .bat launchers, README.md, WINDOWS-QUICKSTART.md,
     config.example.json, requirements.txt, VERSION, about_me.md,
     system_prompt.txt, gitcurator-cli.sh, the two headless-mode notes.
 

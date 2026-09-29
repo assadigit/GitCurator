@@ -43,6 +43,19 @@ created, nothing touches your vaults, no backups are pushed. Read what
 it says it *would* do. When you're happy: the real run is
 `GitCurator-CLI.bat` (or the Start button in the app).
 
+## Is everything up and ready? — Test Connection
+
+In the app, click **Test Connection** (next to SYNC). It checks and
+shows IN THE LOG, one line each: **vaults** (found + writable), **LLM**
+(Ollama / llama.cpp / API — whichever is active), **GitHub** (token +
+backup repos) and **Telegram** (bot + account login, with a LIVE
+connection test). Ends with `🏁 ALL SYSTEMS READY` or a list of what
+needs attention. Same thing in a terminal — double-click
+
+**`GitCurator-TEST-CONNECTION.bat`**
+
+(or `python main.py --cli --test-connection`)
+
 ## Your vault paths (from the build notes)
 
 | Vault | Path | Where to set |
@@ -64,6 +77,7 @@ the mirror tool yourself.
 | `GitCurator.bat` | **the desktop app** |
 | `GitCurator-DRY-RUN.bat` | full automatic run, writes nothing |
 | `GitCurator-CLI.bat` | full automatic run (real) |
+| `GitCurator-TEST-CONNECTION.bat` | is everything up and ready? (vaults · LLM · GitHub · Telegram live) |
 | `GitCurator-CLI-Setup.bat` | first-run credential wizard |
 | `Start-GitCurator-CLI.bat` | same as GitCurator-CLI.bat (kept for muscle memory) |
 | `config.json` | created when you save settings — your credentials, keep it private |

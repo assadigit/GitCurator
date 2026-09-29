@@ -87,6 +87,10 @@ from gitcurator.core import note_state as _note_state
 # retries, _review). The worker only wires its LLM router + dedupe probe
 # into it — new logic stays OUT of this 11k-line file (non-negotiable #8).
 from gitcurator.core import website_pipeline as _website_pipeline
+# v0.17.0 — Test Connection: the unified four-subsystem prober (vaults /
+# Telegram / LLM / GitHub). Pure stdlib + llm_client, no PyQt — the GUI
+# battery job below streams its results into the main log.
+from gitcurator.core import connection_check as _connection_check
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
 # v0.06 — Fix (stuck Telegram lock, part 1): the single-operation lock now
@@ -4708,6 +4712,31 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     return result
 
 
+def _connection_battery_job(config, log_signal):
+    """v0.17.0 — Test Connection background battery: vaults + LLM + GitHub
+    + the Telegram LOCAL checks, in that order, one log line per result.
+
+    Everything here never raises (each group is individually guarded in
+    connection_check.run_local_checks) and touches NO session file — the
+    LIVE Telegram leg runs only after this worker finishes, because
+    session.session is single-user (two Telethon children at once =
+    'database is locked', the rule every other Telegram button follows).
+
+    Returns ``{'success': True, 'sections': [[title, [result, …]], …]}``
+    for the final verdict line."""
+    def _sec(title, idx, total):
+        log_signal.emit(f"📋 [{idx}/{total}] {title}", "info")
+
+    def _res(r):
+        log_signal.emit(
+            "   " + _connection_check.render_line(r),
+            _connection_check.GUI_LEVELS.get(r.get("level"), "info"))
+
+    sections = _connection_check.run_local_checks(
+        config, on_section=_sec, on_result=_res)
+    return {"success": True, "sections": sections}
+
+
 # ============================================================================
 # Main GUI (PyQt6) with Tabbed Layout and Per-tab Test Buttons
 # ============================================================================
@@ -4806,8 +4835,9 @@ class MainWindow(QMainWindow):
         self._active_test_workers: List[TestWorker] = []
         # Reference to the Ollama server subprocess (if we started it).
         self._ollama_server_proc = None
-        # State for sequential test_all (avoids 'database is locked')
-        self._test_all_chain_step = None
+        # v0.17.0 — Test Connection: the sections collected by the battery
+        # worker; the live-Telegram leg appends to them before the verdict.
+        self._cc_sections = None
         # Guard: only one Telegram operation at a time (prevents 'database is
         # locked'). v0.06 — now a TelegramLockManager with owner tracking:
         # every acquire names itself, releases are owner-scoped (a finishing
@@ -6230,11 +6260,14 @@ class MainWindow(QMainWindow):
         cta_row.setSpacing(10)
         cta_row.addLayout(run_slot, 1)   # hero button grows
 
-        self.test_btn = QPushButton("Test Connectivity")
+        self.test_btn = QPushButton("Test Connection")
         self.test_btn.setMinimumHeight(40)
         self.test_btn.setToolTip(
-            "Run every connection test: Telegram, GitHub token, proxy and\n"
-            "the selected LLM provider (Ollama or cloud API)."
+            "Check that everything is up and ready, and show it in the log:\n"
+            "① Vaults — found + writable (ready to receive notes)\n"
+            "② LLM — the active provider: API, Ollama or llama.cpp\n"
+            "③ GitHub — token valid + the backup repos ready\n"
+            "④ Telegram — bot + account login (live connection test)"
         )
         self._style_btn(self.test_btn, 'hero_secondary')
         self.test_btn.clicked.connect(self.test_all)
@@ -6308,7 +6341,7 @@ class MainWindow(QMainWindow):
         self.more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.more_btn.setToolTip("Tests, verification, export, retry and settings")
         more_menu = QMenu(self.more_btn)
-        more_menu.addAction("🔗 Test All Connections", self.test_all)
+        more_menu.addAction("🔌 Test Connection (all systems)", self.test_all)
         more_menu.addSeparator()
         more_menu.addAction("🔑 Test Telegram & GitHub", self.test_telegram_github)
         more_menu.addAction("🌐 Test Proxy Connection", self.test_proxy)
@@ -8006,64 +8039,155 @@ class MainWindow(QMainWindow):
                 success=False)
 
     def test_all(self):
-        """Run all tests SEQUENTIALLY. Telegram and proxy tests both use the
-        same session.session SQLite file, so running them in parallel causes
-        'database is locked' errors. We chain them via finished_signal so
-        each starts only after the previous completes."""
-        self.log_message("🔍 Running full test suite (sequential)...", "info")
-        self.test_ollama()
-        self.test_vault()
+        """🔌 Test Connection — the owner's four-subsystem readiness check,
+        logged line by line so the user is SURE everything is up:
 
-        # Chain telegram test -> proxy test sequentially
-        # We need to wait for the telegram test to finish before starting
-        # the proxy test, because both use the same session file.
-        self._test_all_chain_step = "telegram"
-        self._run_sequential_test()
+          [1/4] Vaults    — found + writable (ready to receive notes)
+          [2/4] LLM       — the ACTIVE provider: cloud API / Ollama / llama.cpp
+          [3/4] GitHub    — token valid + the backup repos ready
+          [4/4] Telegram  — credentials/session/bot/proxy + a LIVE connection
+                            test through the same subprocess a batch uses
 
-    def _run_sequential_test(self):
-        """Run telegram and proxy tests one after another to avoid
-        'database is locked' errors from concurrent session access."""
-        if self._test_all_chain_step == "telegram":
-            self.log_message("📋 [1/2] Testing Telegram...", "info")
-            self.test_telegram_github_sequential(self._on_telegram_test_done_for_chain)
-        elif self._test_all_chain_step == "proxy":
-            self.log_message("📋 [2/2] Testing Proxy...", "info")
-            self.test_proxy_sequential(self._on_proxy_test_done_for_chain)
+        The battery (1-4 local) runs in one background TestWorker so the
+        GUI stays usable; the LIVE Telegram leg starts only after it
+        (session.session is single-user — serialized like every other
+        Telegram button). Ends with a one-line verdict. The interactive
+        login dialog still works: the live leg wires code_requested, so a
+        first-run user can complete the account login during the test.
+        """
+        if self.worker is not None and not self.worker.isFinished():
+            self.log_message(
+                "⏳ A batch is running — Test Connection is available when "
+                "it finishes.", "warning")
+            return
+        if not self._acquire_telegram_lock("connection_check"):
+            self.log_message(
+                "⏳ Another Telegram operation is already running — try Test "
+                "Connection again in a moment.", "warning")
+            return
+        self.log_message(
+            "🔍 Test Connection — checking vaults, LLM, GitHub and "
+            "Telegram…", "info")
 
-    def _on_telegram_test_done_for_chain(self, success, result):
-        """Called when the telegram test finishes during test_all."""
-        if self._test_all_chain_step == "telegram":
-            self._test_all_chain_step = "proxy"
-            # Small delay to ensure session file is released
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(1000, self._run_sequential_test)
+        # Snapshot: saved config + the live credential widgets (the same
+        # values the per-test buttons read — unsaved edits get tested too).
+        snapshot = dict(self.config)
+        try:
+            tok = self.github_token.text().strip()
+            if tok:
+                snapshot['github_token'] = tok
+            aid = self.api_id.text().strip()
+            if aid:
+                snapshot['telegram_api_id'] = aid
+            ahash = self.api_hash.text().strip()
+            if ahash:
+                snapshot['telegram_api_hash'] = ahash
+            ph = self.phone.text().strip()
+            if ph:
+                snapshot['telegram_phone'] = ph
+            bot = self.bot_username.text().strip().lstrip('@')
+            if bot:
+                snapshot['bot_username'] = bot
+            snapshot['proxy'] = self._get_proxy_dict()
+        except Exception:
+            pass  # widget access must never break the check
+        self._cc_sections = None
 
-    def _on_proxy_test_done_for_chain(self, success, result):
-        """Called when the proxy test finishes during test_all."""
-        self.log_message("🏁 Test suite completed.", "info")
-        self._test_all_chain_step = None
+        worker = TestWorker(_connection_battery_job, "connection_battery",
+                            snapshot)
 
-    def test_telegram_github_sequential(self, callback=None):
-        """Like test_telegram_github but with a callback when done."""
-        self._sequential_callback = callback
-        self.test_telegram_github()
-        # We need to hook into the worker's finished_signal - find the last worker
-        if self._active_test_workers:
-            last_worker = self._active_test_workers[-1]
-            if callback:
-                def _cb(name, result):
-                    callback(True, result)
-                last_worker.finished_signal.connect(_cb)
+        def _job(cfg):
+            return _connection_battery_job(cfg, worker.log_message)
+        worker._fn = _job
+        worker.log_message.connect(self.log_message)
 
-    def test_proxy_sequential(self, callback=None):
-        """Like test_proxy but with a callback when done."""
-        self.test_proxy()
-        if self._active_test_workers:
-            last_worker = self._active_test_workers[-1]
-            if callback:
-                def _cb(name, result):
-                    callback(True, result)
-                last_worker.finished_signal.connect(_cb)
+        def _on_battery_done(_name, result):
+            if getattr(self, '_closing', False):
+                self._release_telegram_lock("connection_check")
+                return
+            sections = (result or {}).get("sections")
+            if not sections:
+                # The battery itself crashed — NEVER report 'ALL SYSTEMS
+                # READY' from an empty result; surface the crash instead.
+                err = (result or {}).get("error") or "the check crashed"
+                sections = [["Check", [{"name": "Test battery",
+                                        "level": "error",
+                                        "detail": str(err)[:300]}]]]
+            self._cc_sections = sections
+            self._cc_telegram_leg(snapshot)
+
+        worker.finished_signal.connect(_on_battery_done)
+        self._active_test_workers.append(worker)
+        worker.start()
+
+    def _cc_telegram_leg(self, snapshot):
+        """The LIVE Telegram test — runs after the battery (never two
+        Telethon children at once). Bot queue when a bot is configured
+        (proves account login AND the bot chat through the same session),
+        else the Saved-Messages preview (account login only)."""
+        api_id = str(snapshot.get('telegram_api_id', '') or '').strip()
+        api_hash = str(snapshot.get('telegram_api_hash', '') or '').strip()
+        phone = str(snapshot.get('telegram_phone', '') or '').strip()
+        bot = str(snapshot.get('bot_username', '') or '').strip().lstrip('@')
+        if not (api_id and api_hash and phone):
+            self.log_message(
+                "⏭️ Live Telegram test skipped — credentials incomplete "
+                "(see the Telegram lines above).", "info")
+            self._release_telegram_lock("connection_check")
+            self._cc_finish()
+            return
+        proxy = snapshot.get('proxy') or {}
+        if bot:
+            self.log_message(
+                f"📡 Live Telegram test — reading the @{bot} queue through "
+                f"your session…", "info")
+            worker = TestWorker(_bot_queue_job, "connection_telegram",
+                                api_id, api_hash, phone, proxy, bot,
+                                None, None)
+
+            def _job(aid, ahash, ph, px, _b, _ignored_log, _ignored_code):
+                return _bot_queue_job(aid, ahash, ph, px, bot,
+                                      worker.log_message, worker.request_code,
+                                      mark_read=False, min_id=0,
+                                      vault_path=None)
+            mode = "bot"
+        else:
+            self.log_message(
+                "📡 Live Telegram test — no bot configured; testing the "
+                "account login (Saved Messages)…", "info")
+            worker = TestWorker(_telegram_test_job, "connection_telegram",
+                                api_id, api_hash, phone, proxy, None, None)
+
+            def _job(aid, ahash, ph, px, _ignored_log, _ignored_code):
+                return _telegram_test_job(aid, ahash, ph, px,
+                                          worker.log_message,
+                                          worker.request_code)
+            mode = "account"
+        worker._fn = _job
+        worker.log_message.connect(self.log_message)
+        worker.code_requested.connect(
+            lambda pt, w=worker: self._on_telegram_code_requested(pt, w))
+
+        def _on_done(_name, result):
+            line = _connection_check.telegram_live_result(result, mode)
+            self.log_message("   " + _connection_check.render_line(line),
+                             _connection_check.GUI_LEVELS.get(line["level"],
+                                                              "info"))
+            if isinstance(self._cc_sections, list) and self._cc_sections:
+                self._cc_sections[-1][1].append(line)
+            self._cc_finish()
+
+        worker.finished_signal.connect(_on_done)
+        # _keep_worker releases the connection_check lock when this finishes
+        self._keep_worker(worker, owner="connection_check")
+        worker.start()
+
+    def _cc_finish(self):
+        """The one-line verdict — the 'user is ensured everything is up'."""
+        s = _connection_check.summarize(self._cc_sections or [])
+        level = _connection_check.GUI_LEVELS.get(s["level"], "info")
+        self.log_message(f"🏁 Test Connection — {s['headline']}", level)
+        self._cc_sections = None
 
     # ------------------------------------------------------------------
     # Preview & single-message fetch (also moved off the GUI thread)

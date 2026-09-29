@@ -977,6 +977,134 @@ def cmd_status(args) -> int:
     return 0
 
 
+# ----------------------------------------------------------------------------
+# v0.17.0 — --test-connection : the same four-subsystem check as the GUI's
+# Test Connection button (vaults · LLM · GitHub · Telegram live)
+# ----------------------------------------------------------------------------
+
+def _connection_live_telegram(cfg: dict) -> dict:
+    """One live Telegram probe for --test-connection: the BOT QUEUE when a
+    bot is configured (one subprocess proves both the account login AND
+    the bot chat — the queue is read through the user's own session), else
+    the Saved-Messages preview (account login only).
+
+    Runs the job in a worker thread while the main thread animates the
+    spinner — the fetch_bot_queue pattern, minus the vault filtering.
+    Interactive login works: a missing session triggers the code prompt."""
+    try:
+        if str(cfg.get("bot_username", "") or "").strip():
+            _job = _gui_symbol("_bot_queue_job")
+
+            def _run(shim):
+                return _job(str(cfg.get("telegram_api_id", 0) or 0),
+                            cfg.get("telegram_api_hash", ""),
+                            cfg.get("telegram_phone", ""),
+                            cfg.get("proxy", {}) or {},
+                            str(cfg.get("bot_username", "") or ""),
+                            shim, code_callback=_code_prompt,
+                            mark_read=False, min_id=0, vault_path=None)
+        else:
+            _job = _gui_symbol("_telegram_test_job")
+
+            def _run(shim):
+                return _job(str(cfg.get("telegram_api_id", 0) or 0),
+                            cfg.get("telegram_api_hash", ""),
+                            cfg.get("telegram_phone", ""),
+                            cfg.get("proxy", {}) or {},
+                            shim, code_callback=_code_prompt)
+    except ImportError as exc:
+        return {"success": False, "error": str(exc)}
+
+    status = StatusLine()
+    status.start("testing Telegram (live)")
+    shim = _LogShim(status)
+    result_box: dict = {}
+    done = threading.Event()
+
+    def _thread():
+        try:
+            result_box["r"] = _run(shim)
+        except Exception as exc:                       # pragma: no cover
+            result_box["r"] = {"success": False,
+                               "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            done.set()
+
+    threading.Thread(target=_thread, name="cli-connection-tg",
+                     daemon=True).start()
+    while not done.is_set():
+        while shim.queue:
+            msg, lvl = shim.queue.popleft()
+            status.log(msg, lvl)
+        status.tick()
+        time.sleep(0.09)
+    while shim.queue:
+        msg, lvl = shim.queue.popleft()
+        status.log(msg, lvl)
+    status.stop()
+    return result_box.get("r", {"success": False,
+                                "error": "probe thread died"})
+
+
+def cmd_test_connection(args) -> int:
+    """v0.17.0 — 🔌 Test Connection: is everything up and ready?
+
+    The CLI twin of the GUI's Test Connection button — checks and prints:
+      [1/4] Vaults    — found + writable (ready to receive notes)
+      [2/4] LLM       — the ACTIVE provider: cloud API / Ollama / llama.cpp
+      [3/4] GitHub    — token valid + the backup repos ready
+      [4/4] Telegram  — credentials/session/bot/proxy + a LIVE connection
+    and ends with a one-line verdict. Exit code 0 when no error-level
+    issue was found (warnings don't fail), 1 otherwise."""
+    banner()
+    path = _config_path(args.config)
+    cfg = load_config(path)
+    if cfg is None:
+        cli_print(f"No config at {path} — run `--cli --init` first.", "warning")
+        return 1
+    from gitcurator.core import connection_check as cc
+
+    print(paint("Test Connection — is everything up and ready?", C.BOLD))
+    print(paint("vaults · LLM · GitHub · Telegram (live)", C.DIM))
+    print()
+
+    def _sec(title, idx, total):
+        _section(f"[{idx}/{total}] {title}")
+
+    def _res(r):
+        _check_line(cc.CLI_LEVELS.get(r.get("level"), "info"),
+                    r.get("name", "?"), r.get("detail", ""))
+
+    sections = cc.run_local_checks(cfg, on_section=_sec, on_result=_res)
+
+    # The live Telegram leg — right under section 4's local lines.
+    creds_ok = all(str(cfg.get(k, "") or "").strip() for k in
+                   ("telegram_api_id", "telegram_api_hash", "telegram_phone"))
+    if creds_ok:
+        mode = "bot" if str(cfg.get("bot_username", "") or "").strip() else "account"
+        result = _connection_live_telegram(cfg)
+        line = cc.telegram_live_result(result, mode)
+        _check_line(cc.CLI_LEVELS.get(line["level"], "info"),
+                    line["name"], line["detail"])
+        if sections:
+            sections[-1][1].append(line)
+    else:
+        skip = {
+            "name": "Live connection",
+            "level": cc.LEVEL_INFO,
+            "detail": "skipped — credentials incomplete (run --init)",
+        }
+        _check_line("info", skip["name"], skip["detail"])
+        if sections:
+            sections[-1][1].append(skip)
+
+    s = cc.summarize(sections)
+    print()
+    _check_line(cc.CLI_LEVELS.get(s["level"], "info"), "VERDICT",
+                s["headline"])
+    return 0 if s["level"] != cc.LEVEL_ERROR else 1
+
+
 def cmd_list_dead(args) -> int:
     """v0.09 (merge) — ported from the v0.08 companion CLI: list every
     CONFIRMED-dead link (attempts >= threshold) and every in-progress
@@ -2048,6 +2176,10 @@ def build_parser():
                    help="clear the 404 quarantine (every link gets fresh attempts)")
     p.add_argument("--status", action="store_true",
                    help="show config summary + cache/retry/404-quarantine stats")
+    p.add_argument("--test-connection", action="store_true",
+                   help="v0.17.0 — check that everything is up and ready: vaults "
+                        "(found+writable) · Telegram (bot + account login, live) · "
+                        "LLM (API/ollama/llama.cpp) · GitHub (token + backup repos)")
     p.add_argument("--retry-failed", action="store_true",
                    help="reprocess every URL in the retry queue")
     p.add_argument("--mark-read", action="store_true",
@@ -2089,6 +2221,8 @@ def cli_main(argv=None) -> int:
         return cmd_login(args)
     if args.status:
         return cmd_status(args)
+    if args.test_connection:
+        return cmd_test_connection(args)
     if args.list_dead:
         return cmd_list_dead(args)
     if args.reset_dead:
@@ -2113,6 +2247,7 @@ def cli_main(argv=None) -> int:
     print(f"  {paint('--login', C.CYAN):24} Telegram login: enter the verification code")
     print(f"  {paint('--auto', C.CYAN):24} fully automatic run (SYNC → PROCESS → SEAL)")
     print(f"  {paint('--status', C.CYAN):24} vault map + config + cache + note-state summary")
+    print(f"  {paint('--test-connection', C.CYAN):24} vaults · LLM · GitHub · Telegram — is everything up and ready?")
     print(f"  {paint('--list-dead', C.CYAN):24} list the 404 quarantine (dead links)")
     print(f"  {paint('--reset-dead', C.CYAN):24} clear the 404 quarantine")
     print(f"  {paint('--retry-failed', C.CYAN):24} reprocess the retry queue")
