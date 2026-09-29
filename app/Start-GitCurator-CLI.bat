@@ -9,6 +9,7 @@ REM       pre-flight checks -> bot queue -> process -> Obsidian
 REM       notes -> seal -> publish.
 REM  (Kept from v0.08 for muscle memory - it now drives the SAME
 REM   zero-dependency engine as GitCurator-CLI.bat: main.py --cli.)
+REM  v0.14.1: prefers the private .venv created by 1-INSTALL.bat.
 REM ============================================================
 setlocal
 title GitCurator CLI
@@ -25,7 +26,8 @@ REM itself at startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std
 REM streams), so the chcp was redundant anyway. Launchers stay
 REM ASCII-only and codepage-free.
 
-REM ---- find a Python (python.exe, then the py launcher) ----
+REM ---- find a Python: the app's private .venv first, then system ----
+if exist ".venv\Scripts\python.exe" goto :run
 set "PY=python"
 where python >nul 2>nul
 if errorlevel 1 (
@@ -35,14 +37,15 @@ if errorlevel 1 (
 if errorlevel 1 (
     echo.
     echo [ERROR] Python was not found on PATH.
-    echo Install Python 3.10+ from https://www.python.org/downloads/
-    echo ^(tick "Add python.exe to PATH" during install^)
+    echo Double-click 1-INSTALL.bat first - it sets up everything
+    echo ^(and tells you what to do if Python is missing^).
     echo.
     pause
     exit /b 1
 )
 
 REM ---- run (v0.09: no extra packages needed - plain ANSI) ----
+:run
 %PY% main.py --cli --auto --yes %*
 
 echo.

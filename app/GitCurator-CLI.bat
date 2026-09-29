@@ -5,6 +5,7 @@ REM  (bot SYNC -> PROCESS -> VaultSeal -> Good Repos)
 REM
 REM  First time? Run GitCurator-CLI-Setup.bat once to save your
 REM  credentials locally, then use this file for every run.
+REM  v0.14.1: prefers the private .venv created by 1-INSTALL.bat.
 REM ============================================================
 setlocal
 title GitCurator CLI - automatic run
@@ -12,28 +13,34 @@ cd /d "%~dp0"
 
 REM v0.09.2: this file is PURE ASCII and never changes the codepage.
 REM v0.09.1 ran "chcp 65001" here; a codepage switch INSIDE a batch
-REM file makes cmd.exe re-parse the file at a shifted byte offset (the
-REM dash characters in the header comments are 3 bytes in UTF-8 but 1
-REM in ANSI), so fragments of those REM lines ran as commands - the
-REM "'tlocal' / 'Double-click' / 'pre-flight' is not recognized" error
-REM wall before the app started. Python handles all console encoding
-REM itself at startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std
-REM streams), so the chcp was redundant anyway. Launchers stay
-REM ASCII-only and codepage-free.
+REM file makes cmd.exe re-parse the file at a shifted byte offset, so
+REM fragments of the REM header ran as commands ("'GitCurator' is not
+REM recognized" error wall). Python handles console encoding itself at
+REM startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std streams),
+REM so the chcp was redundant anyway. ASCII-only, codepage-free.
 
+REM ---- find a Python: the app's private .venv first, then system ----
+if exist ".venv\Scripts\python.exe" goto :run
+set "PY=python"
 where python >nul 2>nul
+if errorlevel 1 (
+    set "PY=py -3"
+)
+%PY% --version >nul 2>nul
 if errorlevel 1 (
     echo.
     echo  [GitCurator] Python was not found on PATH.
-    echo                Install Python 3.10+ from https://www.python.org/downloads/
-    echo                (check "Add python.exe to PATH" during install), then re-run.
+    echo                Double-click 1-INSTALL.bat first - it sets up
+    echo                everything ^(and tells you what to do if Python
+    echo                is missing^).
     echo.
     pause
     exit /b 1
 )
 
+:run
 echo.
-python main.py --cli --auto --yes
+%PY% main.py --cli --auto --yes
 set EXITCODE=%ERRORLEVEL%
 
 echo.
