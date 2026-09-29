@@ -871,11 +871,11 @@ class TestCorrectionExamples(unittest.TestCase):
         from gitcurator.core import note_state as _ns
         ns = _ns.NoteStateDB(os.path.join(self.tmp, 'ns.db'))
         self.addCleanup(ns.close)
-        ns.log_correction(_ns.VAULT_WEBSITES, 'https://x.com/a',
+        ns.log_correction(_ns.VAULT_WEBSITES, 'https://slot.test/a',
                           'Design', 'AI Tools')
         fake = _FakeLLM()
         pipe = self.make_pipeline(fake, note_state_db=ns)
-        r = pipe.process_link('https://x.com/a')
+        r = pipe.process_link('https://slot.test/a')
         self.assertEqual(r['outcome'], 'processed')
         # the w01 prompt the model saw: template FILLED — the examples are
         # in, the raw slot marker is gone

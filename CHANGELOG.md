@@ -1,3 +1,103 @@
+## [0.20.0] — The intake truth: blocked domains, missing-repo notes, vault separation — 2026-09-29
+
+Owner requests (three, after the first v0.19-era batch log):
+
+1. "the X domains are already addressed, So i dont want to bring them
+   again for websites vault, we need to find a robust method to prevent
+   this."
+2. "There are 8-9 github addresses that are 404. but system always count
+   them as remaining to be processed, we need to find a solution for
+   missing githubs as well. for example create a note in vault for
+   missing github, and model reads them before again trying to process
+   them or something faster."
+3. "every website (which be pasted in the same robot) must be processed
+   and stored in websites vault, the github vault only manages its
+   domains."
+
+### 1 — Blocked domains (the X fix, robust by construction)
+
+- **`web_blocked_domains`** (default `x.com, twitter.com, t.co`) —
+  Settings → 📁 Vault → "Blocked domains" (comma-separated; empty =
+  allow all). MISSING key = the default list, so the owner's existing
+  config.json gets the fix with no Settings visit.
+- **Never fetched, never noted, never retried**: a guard at the top of
+  `WebsitePipeline.process_link` (whatever path brought the link in)
+  plus an intake filter in the websites phase (the "N link(s)" count is
+  honest) plus the bot-queue classification (blocked links get their own
+  🚫 bucket in the queue display — never "pending").
+- **The queued tail is PURGED**: at pipeline construction, blocked-domain
+  rows leave the retry queue, failed `_review` placeholder notes are
+  DELETED (dry-run-aware; real notes are never touched), and every purged
+  URL is marked dismissed — it can never re-enter. One log line reports
+  the purge; idempotent.
+- The X links keep their existing record: rows in the `_inbox` platform
+  table ("already addressed") — which now lives in the WEBSITES vault
+  (see 3).
+
+### 2 — Missing-repo notes (the 404 fix)
+
+- On a GitHub 404 the pipeline now writes
+  `<github vault>/_missing/<owner>_<repo>.md` immediately — its
+  `source:` frontmatter line IS the VaultIndex dedupe key, so the repo
+  stops counting as pending in every queue view ("the model reads them
+  before again trying" — one dict lookup, no API call, no LLM) — and
+  confirms the 404 quarantine on the spot (a 404 from
+  `/repos/{owner}/{repo}` is definitive: deleted or private).
+- **Backfill for the legacy tail**: at batch start, repos that struck out
+  in earlier versions (1-2 strikes, never confirmed, no note) get their
+  note NOW (`🕳️ N missing-repo note(s) written (past 404s)`) — the
+  owner's 8-9 links stop counting as remaining on the next run.
+- **Re-check path** (documented inside every note): delete the note +
+  reset the URL in More ▸ View 404 Quarantine → the repo is processed
+  like new. `note_state` and the Library mirror both skip the `_missing`
+  folder (deleting a placeholder must never be read as "dismiss the
+  repo"; placeholders are not library notes).
+- New `CacheDB.confirm_dead` (immediate confirmation, never lowers a
+  higher count) and `CacheDB.get_unconfirmed_404s` (the backfill set).
+
+### 3 — Vault separation ("the github vault only manages its domains")
+
+- The per-platform `_inbox` tables (x_twitter_links.md, youtube_links.md,
+  …) now land in the **WEBSITES vault** when one is configured
+  (`_inbox_table_vault`); the GitHub vault keeps them only as the
+  fallback when no Websites vault is set, so links are never lost.
+- Every non-GitHub website (except blocked domains) is processed + stored
+  in the Websites vault exactly as before — now with a clean record
+  trail: table row (the record) + note (the artifact).
+
+### Files
+
+- `core/links.py`: `DEFAULT_BLOCKED_DOMAINS`, `blocked_domains_from_config`
+  (list or comma-string, never raises, missing key = default),
+  `domain_is_blocked` (exact + subdomain, port-stripped, anchored on a
+  literal dot — `x.com.evil.tld` never matches).
+- `core/website_pipeline.py`: `purge_blocked_domains` (one lock cycle;
+  only `_review` placeholders), `_enforce_blocked_domains` (production
+  path only — an injected fetch_fn stays hermetic), the `process_link`
+  guard.
+- `core/note_builder.py`: `build_missing_repo_note` (source: = the dedupe
+  key; deliberately NOT a managed content note).
+- `core/note_state.py` + `core/mirror.py`: `_missing` added to the skip
+  lists (with the divergence from VaultIndex documented — VaultIndex
+  DOES index `_missing`: that is the whole point).
+- GUI: `CacheDB.confirm_dead` / `get_unconfirmed_404s`;
+  `ProcessingWorker._record_missing_repo` + `_backfill_missing_notes` +
+  the rewritten 404 branches + the intake filter; `_bot_queue_job`
+  blocked bucket (+ the queue display line and the legacy GUI-side
+  filter); the Settings row; `_inbox_table_vault` routing at all three
+  `write_inbox_links_by_platform` call sites; `CONFIG_EXAMPLE` defaults.
+- Tests: `tests/test_intakefix.py` (49) — the config contract and
+  matcher matrix, the purge (real notes never touched, dry-run keeps
+  files, idempotent), the pipeline guard (never-fetched proof), the
+  missing note (dedupe via VaultIndex, delete = re-check, note_state /
+  mirror skip), CacheDB methods, the worker halves (idempotent, .git
+  suffix, non-github rows), the bot-queue bucket (blocked checked before
+  in-vault), the table routing, GUI wiring + a full offscreen round
+  trip. v0.19/v0.13 fixtures that used x.com URLs moved to neutral
+  domains (rearm + correction-slot tests). Suite **704**; offline golden
+  30/30 (the runner opts out of the block policy — its t.co fixture
+  measures classification, not policy).
+
 ## [0.19.0] — Web fetches through your proxy — 2026-09-29
 
 Owner's first v0.18.0 batch log: every `x.com` / `t.co` / `youtu.be`

@@ -57,8 +57,12 @@ from gitcurator.core.links import normalize_url
 RECALL_START = "<!-- gitcurator:recall:start -->"
 RECALL_END = "<!-- gitcurator:recall:end -->"
 
-# The same special folders VaultIndex skips (SPEC §4.4: _review is NOT skipped).
-SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', 'attachments', '.obsidian')
+# The same special folders VaultIndex skips (SPEC §4.4: _review is NOT
+# skipped) — plus _missing (v0.20.0): a missing-repo placeholder must be
+# invisible to note-state so DELETING it (the owner's re-check trigger)
+# is never read as "dismiss the repo".
+SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', '_missing', 'attachments',
+                        '.obsidian')
 
 # Reverse lookup: vault folder -> category key (SPEC §4.4 "rules of the road").
 FOLDER_TO_CATEGORY = {folder: key for key, folder in CATEGORY_FOLDERS.items()}

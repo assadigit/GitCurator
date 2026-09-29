@@ -429,7 +429,13 @@ def main(argv=None):
                        ' tests/golden/websites.json.')
 
     config = {'website_vault_path': vault,
-              'web_fetch_timeout_s': 20, 'web_domain_delay_s': 1.0}
+              'web_fetch_timeout_s': 20, 'web_domain_delay_s': 1.0,
+              # v0.20.0 — the golden set measures CLASSIFICATION quality on
+              # its fixed 30 links (one is a t.co shortener); the blocked-
+              # domain policy is deliberately opted out here so every
+              # fixture flows through. The policy itself is covered by
+              # tests/test_intakefix.py.
+              'web_blocked_domains': []}
     processed = set()
     pipeline = wp.WebsitePipeline(
         config=config, llm_call=llm,

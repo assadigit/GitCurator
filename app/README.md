@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.19.0 (Phased Build + Test Connection + Detect & Set + Web Proxy)
+# GitHub-to-Obsidian v0.20.0 (Phased Build + Web Proxy + Intake Truth: blocked domains · missing-repo notes · vault separation)
 
 ## Quick Start
 
@@ -266,6 +266,27 @@ warning) — llama-server speaks the protocol natively.
 ```cmd
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
 ```
+
+### The intake truth (v0.20.0 — blocked domains, missing repos, vault separation)
+
+Three owner-directed fixes after the first proxied batch:
+
+- **🚫 Blocked domains** — Settings → 📁 Vault → "Blocked domains"
+  (default `x.com, twitter.com, t.co`). Links on these domains are
+  recorded as rows in the `_inbox` platform tables ONLY — never fetched,
+  never turned into notes, never retried; previously-queued ones are
+  purged and dismissed automatically; the bot-queue view counts them in
+  their own 🚫 bucket instead of "pending". Empty field = allow all.
+- **🕳️ Missing-repo notes** — a 404 GitHub repo now gets a placeholder
+  note in `<github vault>/_missing/` immediately (plus a batch-start
+  backfill for repos that struck out in earlier versions), so those
+  links STOP counting as "remaining to be processed" and never burn
+  another API call. To re-check a repo: delete its note + reset the URL
+  in More ▸ View 404 Quarantine.
+- **Vault separation** — "the github vault only manages its domains":
+  the per-platform `_inbox` tables (x/twitter, youtube, reddit, …) now
+  land in the **Websites vault** when one is set; every other non-GitHub
+  website is processed into the Websites vault as before.
 
 ### Web fetches through your proxy (v0.19.0)
 

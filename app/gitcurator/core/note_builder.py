@@ -336,3 +336,58 @@ prompt_version: {GITHUB_PROMPT_VERSION}
 *Source: [GitHub]({url})*
 """
     return frontmatter
+
+
+# ===========================================================================
+# v0.20.0 — Missing-repo placeholder notes (the 404 fix)
+# ===========================================================================
+
+def build_missing_repo_note(url: str, owner: str, repo: str,
+                            strikes: int = 1) -> str:
+    """The ``_missing/`` placeholder note for a 404 GitHub repo.
+
+    The owner's ask: "create a note in vault for missing github, and
+    model reads them before again trying to process them" — the
+    ``source:`` frontmatter key below IS the VaultIndex dedupe key, so
+    with this note in the vault the repo stops counting as pending in
+    every queue view (the vault is the ground truth) and never reaches
+    the GitHub API again ("or something faster" — no LLM, no API call,
+    one dict lookup).
+
+    Deliberately NOT a managed content note: no OWNERSHIP_BANNER and no
+    ``category:`` — note_state skips the ``_missing`` folder entirely
+    (deleting this note must NEVER be read as "dismiss the repo"; it is
+    the re-check trigger), and the Library mirror never copies it.
+    """
+    today = datetime.now().strftime('%Y-%m-%d')
+    clean_repo = str(repo or '').strip()
+    if clean_repo.endswith('.git'):
+        clean_repo = clean_repo[:-len('.git')]
+    return f"""---
+source: {url}
+repo: {owner}/{clean_repo}
+status: missing
+reason: 404 Not Found (deleted or private)
+strikes: {strikes}
+date_recorded: {today}
+placeholder: missing-repo
+---
+
+# {owner}/{clean_repo} — missing (404)
+
+The repository **{url}** returned **404 Not Found** — it was deleted or
+made private. GitCurator recorded this placeholder so the link:
+
+- no longer counts as *remaining to be processed* in any queue view,
+- is never fetched from the GitHub API again (404 quarantine confirmed).
+
+**To re-check this repo later** (restored / renamed / made public):
+
+1. Delete this note (the file you are reading).
+2. More ▸ View 404 Quarantine → reset this URL
+   (or the CLI: `python main.py --cli --reset-dead "{url}"`).
+3. Run the next batch — the repo is processed like new.
+
+*Recorded {today} after {strikes} confirmed 404(s). The x/y links of this
+repo, if any, live on in the bot chat; nothing was lost.*
+"""
