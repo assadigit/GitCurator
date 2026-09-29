@@ -26,22 +26,52 @@ Politeness:
     - connect+read timeout on every request
     - a hard byte cap (reads stream in chunks and stop at the cap)
 
-Pure stdlib, no PyQt.
+v0.19.0 — Web fetches through the owner's proxy. Behind x.com / t.co /
+youtu.be the local DNS is poisoned (connection REFUSED on a fake IP) while
+the rest of the web fetches fine — the Websites pipeline must ride the
+same local proxy Telegram already uses (Settings -> Proxy, e.g. a v2rayN
+SOCKS5 listener). Rules:
+
+    - ``proxy_from_config`` reads the app config (``proxy`` block); the
+      toggle ``use_for_web`` DEFAULTS TO ON when the proxy itself is
+      enabled — the fix works on the owner's machine without touching
+      Settings, and the checkbox can turn it off.
+    - SOCKS proxies resolve DNS AT THE PROXY (rdns=True) — that is the
+      whole point: the poisoned local resolver must never be consulted
+      for the target host. PySocks (a hard Telethon dependency, so it is
+      always present on a working install) provides the socket.
+    - loopback targets are NEVER proxied (the v0.15.1 rule — a proxy can
+      only break them).
+    - an HTTP-type proxy rides urllib's native ``ProxyHandler``.
+
+Pure stdlib + optional PySocks, no PyQt.
 """
 
+import http.client
 import socket
 import ssl
 import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 # ===========================================================================
 # CONFIGURATION (safe to edit)
 # ===========================================================================
-USER_AGENT = ("GitCurator/0.11 (+personal website library builder; "
+USER_AGENT = ("GitCurator/0.19 (+personal website library builder; "
               "polite fetcher; https://github.com/assadigit/GitCurator)")
+
+DEFAULT_PROXY_TYPE = 'socks5'    # v2rayN's default listener
+DEFAULT_PROXY_HOST = '127.0.0.1'
+DEFAULT_PROXY_PORT = 10808
+PROXY_PREFLIGHT_TIMEOUT_S = 2.5  # proxy TCP reachability probe
+
+
+class WebProxyError(RuntimeError):
+    """A proxy-specific failure with a user-facing remedy (missing
+    PySocks, unreachable proxy). Never raised out of ``fetch_url`` — it
+    becomes a FetchResult reason so one bad proxy never kills a batch."""
 
 DEFAULT_TIMEOUT_S = 20          # connect + per-read timeout
 DEFAULT_MAX_BYTES = 2_000_000   # 2 MB body cap
@@ -115,6 +145,236 @@ class DomainRateLimiter:
 
 
 # ---------------------------------------------------------------------------
+# v0.19.0 — The web proxy (Settings → Proxy rides the Websites pipeline)
+# ---------------------------------------------------------------------------
+
+_PROXY_TYPES = ('socks5', 'socks4', 'http')
+
+
+def proxy_from_config(config: Optional[dict]) -> Optional[Dict]:
+    """Extract the web-fetch proxy from the app config.
+
+    Rules (never raises — an unusable config means NO proxy, exactly like
+    today's direct behavior):
+
+    - ``config['proxy']`` missing/not a dict, or ``enabled`` falsy → None
+    - ``use_for_web`` explicitly False → None. **Missing → ON** (v0.19.0:
+      the owner's blocked-web fix must work on the existing config.json
+      without touching Settings; the checkbox opts out).
+    - type must be socks5/socks4/http; host non-empty; port an int in
+      1..65535 (defaults 127.0.0.1:10808 — the v2rayN listener).
+
+    Returns ``{'type','host','port','username','password'}`` or None.
+    """
+    try:
+        block = (config or {}).get('proxy')
+        if not isinstance(block, dict) or not block.get('enabled'):
+            return None
+        if block.get('use_for_web') is False:
+            return None
+        ptype = str(block.get('type') or DEFAULT_PROXY_TYPE).strip().lower()
+        if ptype not in _PROXY_TYPES:
+            return None
+        host = str(block.get('host') or DEFAULT_PROXY_HOST).strip()
+        if not host:
+            return None
+        raw_port = block.get('port')
+        if raw_port is None or raw_port == '':
+            port = DEFAULT_PROXY_PORT
+        else:
+            try:
+                port = int(raw_port)
+            except (TypeError, ValueError):
+                return None
+        if not (1 <= port <= 65535):
+            return None
+        return {'type': ptype, 'host': host, 'port': port,
+                'username': str(block.get('username') or ''),
+                'password': str(block.get('password') or '')}
+    except Exception:
+        return None
+
+
+def proxy_label(proxy: Optional[Dict]) -> str:
+    """"SOCKS5 127.0.0.1:10808" — for log lines."""
+    if not proxy:
+        return 'none'
+    t = str(proxy.get('type') or '').upper()
+    return f"{t} {proxy.get('host')}:{proxy.get('port')}"
+
+
+def _socks_module():
+    """Import PySocks lazily with a clear remedy (it ships with Telethon,
+    so a working install always has it — but the zip must not crash on a
+    stripped-down Python)."""
+    try:
+        import socks  # PySocks
+    except ImportError as e:
+        raise WebProxyError(
+            "PySocks is not installed (pip install PySocks) — the SOCKS "
+            "proxy cannot be used for web fetches") from e
+    return socks
+
+
+def _socks_type(pysocks, ptype: str) -> int:
+    return {'socks5': pysocks.SOCKS5,
+            'socks4': pysocks.SOCKS4,
+            'http': pysocks.HTTP}[ptype]
+
+
+def _socks_connect(proxy_args: tuple, address, timeout=None):
+    """Open a socket to ``address`` THROUGH the SOCKS proxy, resolving
+    the target hostname AT THE PROXY (rdns=True — the local resolver is
+    the thing being routed around). Mirrors ``socket.create_connection``
+    for ``http.client``'s ``_create_connection`` hook."""
+    ptype, phost, pport, username, password = proxy_args
+    socks = _socks_module()
+    sock = socks.socksocket()
+    try:
+        # rdns=True: send the HOSTNAME to the proxy, never resolve here.
+        sock.set_proxy(ptype, phost, pport, rdns=True,
+                       username=username or None, password=password or None)
+        if timeout is not None:
+            sock.settimeout(timeout)
+        sock.connect(address)
+        return sock
+    except WebProxyError:
+        sock.close()
+        raise
+    except Exception as e:
+        sock.close()
+        raise WebProxyError(
+            f"proxy {phost}:{pport} connection failed: "
+            f"{getattr(e, 'reason', None) or e}") from e
+
+
+class _SocksConnectionMixin:
+    """Routes ``http.client``'s socket factory through the SOCKS proxy.
+    HTTP(S)Connection.__init__ binds ``socket.create_connection`` as an
+    INSTANCE attribute, so the override must be re-bound after super().__init__
+    (a plain mixin method would be shadowed). HTTPS keeps its full
+    context/cert/SNI handling — only the raw socket changes."""
+
+    def _socks_create_connection(self, address, timeout=None,
+                                 source_address=None):
+        return _socks_connect(self._socks_proxy_args, address, timeout)
+
+
+class _SocksHTTPConnection(_SocksConnectionMixin, http.client.HTTPConnection):
+    def __init__(self, proxy_args, *args, **kwargs):
+        self._socks_proxy_args = proxy_args
+        super().__init__(*args, **kwargs)
+        self._create_connection = self._socks_create_connection
+
+
+class _SocksHTTPSConnection(_SocksConnectionMixin, http.client.HTTPSConnection):
+    def __init__(self, proxy_args, *args, **kwargs):
+        self._socks_proxy_args = proxy_args
+        super().__init__(*args, **kwargs)
+        self._create_connection = self._socks_create_connection
+
+
+class _SocksHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
+    """A urllib handler whose HTTP(S) connections all ride the proxy."""
+
+    def __init__(self, proxy_args):
+        self._socks_proxy_args = proxy_args
+        urllib.request.HTTPHandler.__init__(self)
+
+    def http_open(self, req):
+        return self.do_open(
+            lambda *a, **kw: _SocksHTTPConnection(self._socks_proxy_args, *a, **kw),
+            req)
+
+    def https_open(self, req):
+        return self.do_open(
+            lambda *a, **kw: _SocksHTTPSConnection(self._socks_proxy_args, *a, **kw),
+            req)
+
+
+def _proxy_handler_for(proxy: Dict):
+    """The urllib handler that forces traffic through ``proxy`` — SOCKS
+    via the connection classes above, HTTP via the native ProxyHandler
+    (absolute-URI requests: the proxy resolves the hostname, same effect
+    as rdns=True). Raises WebProxyError when PySocks is missing."""
+    if proxy['type'] == 'http':
+        auth = ''
+        if proxy.get('username'):
+            auth = (f"{proxy['username']}:{proxy.get('password') or ''}@")
+        url = f"http://{auth}{proxy['host']}:{proxy['port']}"
+        return urllib.request.ProxyHandler({'http': url, 'https': url})
+    socks = _socks_module()
+    return _SocksHandler((_socks_type(socks, proxy['type']),
+                          proxy['host'], proxy['port'],
+                          proxy.get('username') or '',
+                          proxy.get('password') or ''))
+
+
+def web_proxy_preflight(proxy: Optional[Dict],
+                        timeout_s: float = PROXY_PREFLIGHT_TIMEOUT_S
+                        ) -> Tuple[bool, str]:
+    """Is the proxy usable RIGHT NOW? (TCP reachable; PySocks importable
+    for SOCKS types.) Pure stdlib, never raises, fast — called once per
+    Websites batch so the whole run knows before link #1."""
+    if not proxy:
+        return (False, 'no proxy configured')
+    if proxy['type'] != 'http':
+        try:
+            _socks_module()
+        except WebProxyError as e:
+            return (False, str(e))
+    try:
+        with socket.create_connection(
+                (proxy['host'], proxy['port']), timeout=timeout_s):
+            pass
+        return (True, '')
+    except OSError as e:
+        return (False, f"{proxy['host']}:{proxy['port']} unreachable "
+                       f"({getattr(e, 'strerror', None) or e}) — is the "
+                       f"proxy client (v2rayN) running?")
+
+
+def _is_loopback_url(url: str) -> bool:
+    """True when the URL points at THIS machine (127.x / ::1 / localhost).
+    Same rule as llm_client's — loopback traffic must never ride a proxy."""
+    from urllib.parse import urlparse
+    raw = str(url or '').strip()
+    if not raw:
+        return False
+    if '://' not in raw:
+        raw = 'http://' + raw
+    try:
+        host = (urlparse(raw).hostname or '').lower()
+    except ValueError:
+        return False
+    if host == 'localhost':
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _build_opener(proxy: Optional[Dict], context: ssl.SSLContext,
+                  force_direct: bool = False):
+    """The fetch opener.
+
+    - ``proxy`` set → ALL traffic is forced through it (DNS at the proxy).
+    - ``force_direct`` (loopback target, the v0.15.1 rule) →
+      ``ProxyHandler({})``: no proxy of ANY kind, not even the system one.
+    - neither → today's behavior (system proxy settings, if any, still
+      apply — urllib's default opener handlers).
+    """
+    handlers = [_RedirectCap, urllib.request.HTTPSHandler(context=context)]
+    if force_direct:
+        handlers.insert(0, urllib.request.ProxyHandler({}))
+    elif proxy:
+        handlers.insert(0, _proxy_handler_for(proxy))
+    return urllib.request.build_opener(*handlers)
+
+
+# ---------------------------------------------------------------------------
 # The fetcher
 # ---------------------------------------------------------------------------
 
@@ -139,9 +399,17 @@ def fetch_url(url: str,
               timeout_s: float = DEFAULT_TIMEOUT_S,
               max_bytes: int = DEFAULT_MAX_BYTES,
               rate_limiter: Optional[DomainRateLimiter] = None,
-              user_agent: str = USER_AGENT) -> FetchResult:
+              user_agent: str = USER_AGENT,
+              proxy: Optional[Dict] = None) -> FetchResult:
     """Fetch one URL politely. Never raises — every failure is a
-    FetchResult(status='failed', reason=...)."""
+    FetchResult(status='failed', reason=...).
+
+    v0.19.0 ``proxy``: force the fetch through the configured proxy
+    (``proxy_from_config`` shape). Loopback URLs NEVER ride a proxy (the
+    v0.15.1 rule — enforced here, ahead of the opener). A proxy-specific
+    failure (PySocks missing, proxy down) is a normal failed FetchResult
+    whose reason names the proxy, so the batch keeps going and the
+    _review note tells the owner exactly what to fix."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -166,8 +434,14 @@ def fetch_url(url: str,
     # Public websites: certificates are verified. A bad cert is a failed
     # fetch (recorded, retried, reported) — not silently accepted.
     ctx = ssl.create_default_context()
-    opener = urllib.request.build_opener(
-        _RedirectCap, urllib.request.HTTPSHandler(context=ctx))
+    try:
+        # Loopback → never ANY proxy (v0.15.1 rule); else the configured
+        # proxy when one is set. PySocks missing → a clear failed reason.
+        opener = _build_opener(
+            proxy, ctx, force_direct=_is_loopback_url(url))
+    except WebProxyError as e:
+        return FetchResult(url, status='failed', reason=str(e),
+                           elapsed_s=time.monotonic() - started)
 
     req = urllib.request.Request(url, headers=headers)
     try:
@@ -202,7 +476,13 @@ def fetch_url(url: str,
                            elapsed_s=time.monotonic() - started)
     except urllib.error.URLError as e:
         reason = getattr(e, 'reason', None) or str(e)
+        if isinstance(reason, WebProxyError):
+            reason = str(reason)
         return FetchResult(url, status='failed', reason=f'connection: {reason}',
+                           elapsed_s=time.monotonic() - started)
+    except WebProxyError as e:
+        return FetchResult(url, status='failed',
+                           reason=f'proxy: {e}',
                            elapsed_s=time.monotonic() - started)
     except socket.timeout:
         return FetchResult(url, status='failed', reason='timeout',

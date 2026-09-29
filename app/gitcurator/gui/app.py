@@ -5474,10 +5474,27 @@ class MainWindow(QMainWindow):
         self.proxy_host = QLineEdit(self.config.get('proxy', {}).get('host', '127.0.0.1'))
         self.proxy_port = QLineEdit(str(self.config.get('proxy', {}).get('port', 10808)))
 
+        # v0.19.0 — the blocked-web fix rides the SAME proxy: x.com / t.co /
+        # youtu.be connections are refused on the owner's direct line
+        # (poisoned DNS), so the Websites pipeline fetches through the
+        # proxy too. Default ON (a configured proxy is there to be used);
+        # untick to fetch direct.
+        self.proxy_use_for_web = QCheckBox(
+            "Use this proxy for web fetches too (Websites pipeline — "
+            "x.com / YouTube need it)")
+        self.proxy_use_for_web.setChecked(
+            bool(self.config.get('proxy', {}).get('use_for_web', True)))
+        self.proxy_use_for_web.setToolTip(
+            "When ON, every website fetch goes through this proxy and DNS "
+            "is resolved at the proxy exit. Fixes the connection-refused "
+            "failures on blocked sites (x.com, t.co, youtu.be). Loopback "
+            "(Ollama / llama.cpp) is NEVER proxied.")
+
         proxy_layout.addRow(self.proxy_enabled)
         proxy_layout.addRow("Type:", self.proxy_type)
         proxy_layout.addRow("Host:", self.proxy_host)
         proxy_layout.addRow("Port:", self.proxy_port)
+        proxy_layout.addRow(self.proxy_use_for_web)
 
         # v31.1: '🌐 Test Proxy Connection' moved to the global 'More' menu.
 
@@ -9024,7 +9041,9 @@ class MainWindow(QMainWindow):
                 "enabled": self.proxy_enabled.isChecked(),
                 "type": self.proxy_type.currentText(),
                 "host": self.proxy_host.text().strip(),
-                "port": int(self.proxy_port.text()) if self.proxy_port.text().isdigit() else 10808
+                "port": int(self.proxy_port.text()) if self.proxy_port.text().isdigit() else 10808,
+                # v0.19.0 — the Websites pipeline rides the same proxy.
+                "use_for_web": self.proxy_use_for_web.isChecked()
             },
             "ollama": {
                 "base_url": self.ollama_url.text(),
@@ -9211,7 +9230,10 @@ class MainWindow(QMainWindow):
             "enabled": self.proxy_enabled.isChecked(),
             "type": self.proxy_type.currentText(),
             "host": self.proxy_host.text(),
-            "port": int(self.proxy_port.text()) if self.proxy_port.text().isdigit() else 10808
+            "port": int(self.proxy_port.text()) if self.proxy_port.text().isdigit() else 10808,
+            # v0.19.0 — carried along so live snapshots (Test Connection,
+            # batch runs) see the same setting the Websites pipeline uses.
+            "use_for_web": self.proxy_use_for_web.isChecked()
         }
 
     def _check_proxy_health(self):

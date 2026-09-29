@@ -119,6 +119,12 @@ class WebsiteStateDB:
                     dismissed_at TEXT
                 )
             """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS website_state_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
             self.conn.commit()
 
     # -- writes -----------------------------------------------------------
@@ -176,6 +182,38 @@ class WebsiteStateDB:
                 " dismissed_at) VALUES (?,?,?)",
                 (url, reason[:200], datetime.now().isoformat(timespec='seconds')))
             self.conn.commit()
+
+    # -- v0.19.0 proxy-epoch meta + retry re-arm --------------------------
+
+    def get_meta(self, key: str) -> Optional[str]:
+        """One row from website_state_meta (None when absent)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM website_state_meta WHERE key=?",
+                (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO website_state_meta (key, value)"
+                " VALUES (?,?)", (key, str(value)))
+            self.conn.commit()
+
+    def rearm_retries(self) -> int:
+        """v0.19.0 — reset the ENTIRE retry queue (attempts=0, due NOW).
+        Called when the web proxy turns ACTIVE: the queued failures were
+        almost certainly the blocked-web pattern (x.com/t.co/youtu.be
+        connection-refused on a poisoned resolver), and with DNS now
+        resolving at the proxy they deserve an immediate fresh set.
+        Returns how many rows were re-armed."""
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE website_retry_queue"
+                " SET attempts=0, next_attempt_at=?", (now_iso,))
+            self.conn.commit()
+            return cur.rowcount or 0
 
     # -- reads ------------------------------------------------------------
 
@@ -409,6 +447,39 @@ class WebsitePipeline:
         # Optional fetch injection (tests + the offline golden run stub
         # this so NO network is touched; production leaves it None).
         self.fetch_fn = fetch_fn or _web_fetch.fetch_url
+        # v0.19.0 — Web fetches through the proxy (Settings → Proxy): the
+        # blocked-web fix. x.com / t.co / youtu.be connections are REFUSED
+        # on the owner's direct line (poisoned DNS) while the rest of the
+        # web fetches fine — so when a proxy is configured AND reachable,
+        # every fetch of this batch rides it (DNS at the proxy). NEVER
+        # applied to an injected fetch_fn: the golden run must stay
+        # offline and tests must stay hermetic.
+        self.web_proxy = None
+        if fetch_fn is None:
+            self.web_proxy = _web_fetch.proxy_from_config(self.config)
+            if self.web_proxy is not None:
+                _ok, _why = _web_fetch.web_proxy_preflight(self.web_proxy)
+                if _ok:
+                    self.log(
+                        f"🌐 Web fetches via "
+                        f"{_web_fetch.proxy_label(self.web_proxy)} proxy "
+                        f"(Settings → 🌐 Proxy)", "info")
+                    _proxy = self.web_proxy
+
+                    def _proxied_fetch(url, **kwargs):
+                        kwargs.setdefault('proxy', _proxy)
+                        return _web_fetch.fetch_url(url, **kwargs)
+
+                    self.fetch_fn = _proxied_fetch
+                    self._maybe_rearm_retries()
+                else:
+                    self.log(
+                        f"⚠️ Web proxy "
+                        f"{_web_fetch.proxy_label(self.web_proxy)} NOT "
+                        f"reachable — fetching DIRECT. {_why} x.com / "
+                        f"YouTube links will keep failing until the proxy "
+                        f"client is up.", "warning")
+                    self.web_proxy = None
         self.taxonomy = taxonomy or load_taxonomy_from_config(self.config)
         self.vault_path = (self.config.get('website_vault_path') or '').strip()
         self.taxonomy_path = resolve_taxonomy_path(self.config)
@@ -429,6 +500,30 @@ class WebsitePipeline:
         self.last_results: List[Dict] = []
 
     # -- helpers -----------------------------------------------------------
+
+    PROXY_EPOCH_KEY = 'web_proxy_epoch'
+
+    def _maybe_rearm_retries(self) -> None:
+        """v0.19.0 — when the ACTIVE web proxy differs from the last one
+        this state DB saw (first proxy ever, or a changed host/port/type),
+        reset the whole retry queue: those failures queued while fetching
+        direct deserve an immediate retry through the tunnel instead of
+        waiting out their backoff. Once per proxy epoch — a later batch
+        with the SAME proxy never re-arms again (the retry cap keeps its
+        meaning)."""
+        try:
+            epoch = _web_fetch.proxy_label(self.web_proxy)
+            if self.state.get_meta(self.PROXY_EPOCH_KEY) == epoch:
+                return
+            count = self.state.rearm_retries()
+            self.state.set_meta(self.PROXY_EPOCH_KEY, epoch)
+            if count:
+                self.log(
+                    f"🔁 Web proxy active — re-armed {count} queued "
+                    f"retry(ies) for an immediate retry through the proxy",
+                    "info")
+        except Exception as e:  # bookkeeping must never kill the batch
+            self.log(f"⚠️ Retry re-arm skipped: {e}", "warning")
 
     def _llm_json(self, messages: List[Dict], task: str = None) -> Dict:
         """One LLM call + robust JSON extraction. ``task`` tags the pass
