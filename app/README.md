@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.18.0 (Phased Build + Test Connection + Detect & Set)
+# GitHub-to-Obsidian v0.19.0 (Phased Build + Test Connection + Detect & Set + Web Proxy)
 
 ## Quick Start
 
@@ -266,6 +266,35 @@ warning) — llama-server speaks the protocol natively.
 ```cmd
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
 ```
+
+### Web fetches through your proxy (v0.19.0)
+
+The owner's first v0.18.0 batch exposed the blocked-web pattern: every
+`x.com` / `t.co` / `youtu.be` link failed with `[WinError 10061]`
+(connection actively refused — poisoned local DNS) while ordinary sites
+fetched fine, because the Websites pipeline fetched DIRECT and never
+rode the app's proxy. v0.19.0 routes it:
+
+- **Settings → 🌐 Proxy** grows "Use this proxy for web fetches too
+  (Websites pipeline — x.com / YouTube need it)" — **on by default**, so
+  an existing config gets the fix with no Settings visit.
+- Every website fetch of a batch rides the proxy with **DNS resolved at
+  the proxy exit** (SOCKS `rdns=True`; HTTP-type proxies via absolute-URI
+  requests — same effect). The poisoned local resolver is never
+  consulted for the target host.
+- A **pre-flight** TCP probe runs once per batch: proxy up →
+  `🌐 Web fetches via SOCKS5 127.0.0.1:10808 (Settings → 🌐 Proxy)`;
+  proxy down → one loud warning and the batch continues DIRECT (never
+  blocked, never crashed).
+- **Loopback is never proxied** (v0.15.1 rule): Ollama / llama.cpp
+  traffic stays direct.
+- **Stuck links un-stick**: when the proxy turns active for the first
+  time (or changes), the whole fetch-retry queue is re-armed — attempts
+  reset, due NOW — so links that failed while fetching direct get an
+  immediate fresh retry through the tunnel (`🔁 Web proxy active —
+  re-armed N queued retry(ies)` in the log).
+- Politeness unchanged: same User-Agent, per-domain rate limit, size
+  cap, redirect cap, certificate verification.
 
 ### Detect & Set — the LLM quick-switch (v0.18.0)
 

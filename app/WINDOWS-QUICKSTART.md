@@ -88,6 +88,14 @@ the mirror tool yourself.
 
 ## Good to know
 
+- **Blocked sites (x.com / YouTube)?** The Websites pipeline fetches
+  through the SAME proxy as Telegram: Settings → 🌐 Proxy → "Use this
+  proxy for web fetches too" (on by default). With v2rayN running,
+  the log shows `🌐 Web fetches via SOCKS5 127.0.0.1:10808` at the
+  start of a batch and those links come through; links that failed
+  before are re-armed and retried automatically (`🔁 Web proxy active
+  — re-armed N queued retry(ies)`). Ollama / llama.cpp traffic on
+  127.0.0.1 is NEVER proxied.
 - **LLM:** the default is local Ollama (`http://localhost:11434`).
   Don't have it? Install from <https://ollama.com>, then run
   `ollama pull llama3.1` — or use a local **llama.cpp** server
@@ -107,7 +115,8 @@ the mirror tool yourself.
 - The optional Cloudflare bot + web dashboard are **not** in this zip;
   they live in the repository.
 
-Version 0.14.1 — the phased build: vault settings & ownership stamps,
+Version 0.19.0 — the phased build: vault settings & ownership stamps,
 the websites pipeline, moves-as-corrections + the backfill, LLM
-backends, and the Manual Notes Library mirror. Full manual:
-`README.md` in this folder.
+backends, the Manual Notes Library mirror, Test Connection, the
+Detect & Set LLM quick-switch, and web fetches through your proxy.
+Full manual: `README.md` in this folder.

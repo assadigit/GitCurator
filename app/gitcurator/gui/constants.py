@@ -99,7 +99,10 @@ CONFIG_EXAMPLE = {
         "enabled": False,
         "type": "socks5",
         "host": "127.0.0.1",
-        "port": 10808
+        "port": 10808,
+        # v0.19.0 — the Websites pipeline rides the same proxy (blocked-web
+        # fix: x.com / t.co / youtu.be are connection-refused direct).
+        "use_for_web": True
     },
     "ollama": {
         "base_url": "http://localhost:11434",

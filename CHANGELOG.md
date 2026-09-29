@@ -1,3 +1,70 @@
+## [0.19.0] — Web fetches through your proxy — 2026-09-29
+
+Owner's first v0.18.0 batch log: every `x.com` / `t.co` / `youtu.be`
+link failed with `[WinError 10061] No connection could be made because
+the target machine actively refused it` — while `gooseworks.ai` fetched
+full. The blocked-web signature: on the owner's line those domains
+resolve to a poisoned local DNS record that REFUSES the connection, and
+the Websites pipeline fetched DIRECT — the app's SOCKS5 proxy (v2rayN
+`127.0.0.1:10808`, used for Telegram since v0.07.1) never carried web
+traffic.
+
+### The Websites pipeline rides the proxy
+
+- **One setting, already on**: the proxy block grows `use_for_web`
+  (Settings → 🌐 Proxy → "Use this proxy for web fetches too (Websites
+  pipeline — x.com / YouTube need it)"). Default ON — the owner's
+  existing `config.json` gets the fix without touching Settings; untick
+  to fetch direct again.
+- **DNS at the proxy (the actual fix)**: SOCKS fetches resolve the
+  target hostname AT THE PROXY EXIT (`rdns=True`) — the poisoned local
+  resolver is never consulted. PySocks (a hard Telethon dependency, so
+  always present; now listed in requirements.txt explicitly) provides
+  the socket; `http://`-type proxies ride urllib's native
+  `ProxyHandler` (absolute-URI requests — same proxy-side DNS).
+- **Pre-flight, once per batch**: the pipeline TCP-probes the proxy
+  before link #1. Up → `🌐 Web fetches via SOCKS5 127.0.0.1:10808
+  (Settings → 🌐 Proxy)`. Down → one loud warning ("fetching DIRECT —
+  x.com / YouTube links will keep failing until the proxy client is
+  up") and the batch continues direct, exactly like today.
+- **Loopback is never proxied** (the v0.15.1 rule): Ollama / llama.cpp
+  traffic on 127.0.0.1 goes direct even with the proxy on.
+- **🔁 The stuck links un-stick**: the owner's 263 failed links were at
+  retry attempt 1/3 — two more failed batches and the retry cap would
+  freeze them forever. When the proxy turns ACTIVE for the first time
+  (or changes host/port/type), the whole retry queue is re-armed
+  (attempts → 0, due NOW) once per proxy epoch — the next batch retries
+  everything through the tunnel immediately.
+- **Politeness unchanged**: same User-Agent, per-domain rate limit,
+  20 s timeout, 2 MB cap, redirect cap, cert verification (a SOCKS
+  fetch only swaps the raw socket — SNI and certificates intact).
+
+### Files
+
+- `core/web_fetch.py`: `proxy_from_config` + `web_proxy_preflight` +
+  `proxy_label`, the PySocks connection classes
+  (`_SocksHTTP(S)Connection` — rebound after `super().__init__`, the
+  http-client instance-attribute trap), `_SocksHandler`,
+  `_build_opener(force_direct=)`, `fetch_url(proxy=)`; every proxy
+  failure is a normal failed `FetchResult` whose reason names the
+  proxy.
+- `core/website_pipeline.py`: constructor wiring (pre-flight + proxied
+  fetcher + the log lines; NEVER applied to an injected `fetch_fn` —
+  the golden run stays offline), `WebsiteStateDB.get_meta/set_meta` +
+  the `website_state_meta` table + `rearm_retries`, and
+  `_maybe_rearm_retries` (once per proxy epoch, failure-tolerant).
+- GUI: the `proxy_use_for_web` checkbox (Settings → 🌐 Proxy), carried
+  by `save_config` and `_get_proxy_dict`; `CONFIG_EXAMPLE` defaults in
+  both constants modules; `PySocks>=1.7.1` in requirements.txt.
+- Tests: `tests/test_webproxy.py` (44) — the config contract (missing
+  key = ON), a REAL fake SOCKS5 server proving the hostname reaches the
+  proxy (rdns) and the plain-HTTP loopback bypass, a fake HTTP proxy
+  proving absolute-URI requests, pre-flight alive/dead/PySocks-missing,
+  opener wiring, pipeline integration (proxied fetcher / direct
+  fallback / opt-out / injected-fn verbatim), the re-arm epoch rules,
+  GUI source assertions, defaults + packaging. Suite 655 (44 new);
+  offline golden 30/30, 0 invalid.
+
 ## [0.18.0] — Detect & Set: the LLM quick-switch — 2026-09-29
 
 Owner request: "I want these two buttons: Detect and Set ollama, Detect

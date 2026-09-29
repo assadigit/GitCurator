@@ -19,4 +19,8 @@ python-dotenv>=1.0.0
 # HTTP requests (for fallback APIs)
 requests>=2.31.0
 
+# SOCKS proxy support for web fetches (v0.19.0; also a hard Telethon
+# dependency — listed explicitly because web_fetch imports it directly)
+PySocks>=1.7.1
+
 # SQLite is built-in (no package needed)
