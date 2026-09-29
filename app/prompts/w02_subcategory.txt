@@ -1,0 +1,11 @@
+The website was filed under "{{CATEGORY}}". Choose the best subcategory from this list, or "none" if none fits well.
+
+Subcategories:
+{{SUBCATEGORIES_WITH_DEFINITIONS}}
+
+Website: {{URL}}
+Title: {{TITLE}}
+Description: {{META_DESCRIPTION}}
+Page text (may be partial): {{TEXT_EXCERPT}}
+
+Return only JSON: {"subcategory": "<exact name or none>", "confidence": "high|medium|low"}

@@ -55,6 +55,9 @@
     "github": true,
     "websites": false
   },
+  "web_fetch_timeout_s": 20,
+  "web_fetch_max_bytes": 2000000,
+  "web_domain_delay_s": 2.0,
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
   "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",

@@ -225,16 +225,23 @@ class NoteStateDB:
     def record_note(self, vault: str, source_url: str, path: str,
                     content: Optional[str] = None,
                     category: Optional[str] = None,
-                    subcategory: Optional[str] = None) -> None:
+                    subcategory: Optional[str] = None,
+                    normalizer=None) -> None:
         """Record one note the app just wrote (identity = vault + source).
-        ``content`` is hashed when given; otherwise the file is read."""
+        ``content`` is hashed when given; otherwise the file is read.
+
+        v0.11.0 — Phase 2: ``normalizer`` overrides the URL keying (the
+        websites pipeline passes ``links.normalize_website_url`` so a URL
+        with meaningful query parameters keeps its identity; GitHub keeps
+        the default ``normalize_url``)."""
         if content is None:
             try:
                 with open(path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
             except OSError:
                 content = ''
-        self.upsert(vault, normalize_url(source_url) or source_url, path,
+        key_fn = normalizer or normalize_url
+        self.upsert(vault, key_fn(source_url) or source_url, path,
                     compute_fingerprint(content), category, subcategory)
 
     def set_locked(self, vault: str, source_url: str, locked: bool = True) -> None:
@@ -267,6 +274,24 @@ class NoteStateDB:
                    'first_seen': r[6], 'updated_at': r[7]}
             for r in rows
         }
+
+    def row_for(self, vault: str, source_url: str) -> Optional[Dict]:
+        """The row for ONE note (identity = vault + source URL), or None.
+        v0.11.0 — Phase 2: the websites pipeline uses this to prove an old
+        _review placeholder is still app-owned (fingerprint unchanged)
+        before replacing or removing it."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT source_url, path, fingerprint, category, subcategory,"
+                " locked, first_seen, updated_at FROM note_state"
+                " WHERE vault=? AND source_url=?", (vault, source_url)
+            ).fetchone()
+        if not row:
+            return None
+        return {'source_url': row[0], 'path': row[1], 'fingerprint': row[2],
+                'category': row[3], 'subcategory': row[4],
+                'locked': bool(row[5]), 'first_seen': row[6],
+                'updated_at': row[7]}
 
     def close(self) -> None:
         with self._lock:

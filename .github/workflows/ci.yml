@@ -1,14 +1,16 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 21 audited
-# Python modules and runs the full 168-case suite (34 core + 11 e2e +
-# 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 —
-# v0.10.0 vault settings & ownership: note-state record, ownership
-# stamps, vault map, pipeline switches, second VaultSeal).
-# test_quarantine, test_phase0 and test_phase1 import gitcurator/gui/app.py
-# (CacheDB and ProcessingWorker live there), so the app requirements are
-# installed first; the suite runs headless on the offscreen Qt platform
-# and never launches the GUI.
+# Every push to main, every tag, and every PR compiles the 27 audited
+# Python modules and runs the full 239-case suite (34 core + 11 e2e +
+# 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
+# 71 phase2 — v0.11.0 website pipeline: taxonomy parse/validate, polite
+# fetch + extraction, two-pass classification, retries/_review, golden
+# set). The phase2 suite runs a LOCAL http.server for fetch tests and a
+# fake LLM — no external network, no model server.
+# test_quarantine, test_phase0, test_phase1 and test_phase2 import
+# gitcurator/gui/app.py (CacheDB and ProcessingWorker live there), so the
+# app requirements are installed first; the suite runs headless on the
+# offscreen Qt platform and never launches the GUI.
 
 name: CI
 
@@ -22,7 +24,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 130 tests + reliability + quarantine)
+    name: Python gate (compile + 238 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,10 +41,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Qt system libraries (runner images no longer bundle libEGL, needed by offscreen PyQt6)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0
+
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 21 audited modules
+      - name: Compile the 27 audited modules
         run: >
           python -m py_compile
           main.py
@@ -55,6 +60,11 @@ jobs:
           gitcurator/core/llm_client.py
           gitcurator/core/dryrun.py
           gitcurator/core/note_state.py
+          gitcurator/core/taxonomy.py
+          gitcurator/core/prompts.py
+          gitcurator/core/web_fetch.py
+          gitcurator/core/web_extract.py
+          gitcurator/core/website_pipeline.py
           gitcurator/integrations/vaultseal.py
           gitcurator/integrations/goodrepos.py
           gitcurator/integrations/telegram_fetch_worker.py
@@ -66,10 +76,14 @@ jobs:
           gitcurator/tools/scan_vault_edits.py
           gitcurator/tools/snapshot_vault.py
           gitcurator/tools/pick_golden_links.py
+          gitcurator/tools/run_golden_websites.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 -v
+
+      - name: Offline golden-set run (websites pipeline, no network)
+        run: python gitcurator/tools/run_golden_websites.py --offline
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 21 compiles + 168 tests (core/e2e/goodrepos/reliability/quarantine/phase0/phase1; v0.10.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 27 compiles + 239 tests + offline golden run (v0.11.0)."

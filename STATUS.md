@@ -3,17 +3,17 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.09.5 (now 0.10.0 on the branch below)
+- **Version at start of this build:** 0.10.0 (now 0.11.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 1 — in review (agent finished, waiting for the owner). Phase 0 approved & merged.
+- **Current phase:** 2 — in review (agent finished, waiting for the owner). Phases 0–1 approved & merged.
 
 ## Phases
 
 | Phase | Name | Status | Branch | Version | Owner approval |
 |---|---|---|---|---|---|
-| 0 | Groundwork | approved | `phase-0-groundwork` (**merged into main 2026-09-29** by owner instruction) | 0.09.5 | yes — review waived by owner 2026-09-29 |
-| 1 | Vault settings and ownership | in review | `phase-1-vault-settings` (pushed, NOT merged) | 0.10.0 | pending |
-| 2 | Website pipeline | not started | | | |
+| 0 | Groundwork | approved | `phase-0-groundwork` (**merged into main 2026-09-29**) | 0.09.5 | yes — review waived by owner 2026-09-29 |
+| 1 | Vault settings and ownership | approved | `phase-1-vault-settings` (**merged into main 2026-09-29**, tag v0.10.0) | 0.10.0 | yes — owner said "Merge. proceed" 2026-09-29 |
+| 2 | Website pipeline | in review | `phase-2-website-pipeline` (pushed, NOT merged) | 0.11.0 | pending |
 | 3 | Moves as corrections, and the backfill | not started | | | |
 | 4 | LLM backends | not started | | | |
 | 5 | Mirror into Manual Notes | not started | | | |
@@ -38,6 +38,19 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Tests: `tests/test_phase1.py` (38). CI: 21 compiled modules, 168 tests.
 - Report for the owner: `docs/reports/PHASE-1-report.md`.
 
+## Phase 2 summary (what exists on `phase-2-website-pipeline`)
+
+- `core/taxonomy.py` — parses the owner's real `app/taxonomy/website-library-categories.md` (14 categories, 16 subcategories, judgment rules verbatim, tag hints, one-line definitions); exact-match validation; folder paths via `safe_filename`; `TaxonomyError` on anything unparseable.
+- `core/web_fetch.py` + `core/web_extract.py` — polite urllib fetcher (timeout, 2 MB streaming cap, per-domain rate limit, clear User-Agent, redirect cap, verified TLS, PDF detection) and stdlib HTML extraction (title, meta/og description, paragraph-preserving text, JS-shell + paywall heuristics, windows-1252/charset handling).
+- `core/prompts.py` + `app/prompts/w01_category.txt`, `w02_subcategory.txt`, `w03_analyze.txt` (SPEC Appendix A verbatim) — the loader REFUSES any unfilled `{{SLOT}}` and rejects values containing slot markers.
+- `core/website_pipeline.py` — the per-link flow: canonicalize (`normalize_website_url` — tracking params dropped, meaningful query params KEPT), 4-layer dedupe (vault index / websites_processed / dismissed / _review+failed upgrade), two-pass classification with validation + 2 corrective retries then `_review`, w03 analysis, atomic note write into `<Category>/<Subcategory>/`, minimal `_review` notes for unfetchable links, retry queue with multi-day backoff (max 3), app-owned placeholder cleanup on upgrade (hand-edited placeholders are NEVER removed), Stop-responsive, dry-run writes nothing.
+- `links.py` — `owner.github.io/repo` → `github.com/owner/repo` (GitHub pipeline), gist detection (`#snippet`), `normalize_website_url` (GitHub's `normalize_url` untouched).
+- GUI/CLI wiring (thin hooks in `gui/app.py` + `cli.py`): websites phase runs after the GitHub loop in every batch; `_inbox` dead end bypassed when websites ON (unchanged when OFF); github-off + websites-on works; both-off early return; report/summary/`--status` websites sections; Stop works mid-phase.
+- `tools/run_golden_websites.py` — golden runner: `--offline` (fake LLM + canned fetch — ZERO network, runs in CI) and `--live` (real fetches + the configured OpenAI-compatible LLM); side-by-side report; exit 0 only with 0 invalid category names.
+- `tests/golden/websites.json` — 30 entries with proposed expected categories (t.co → phosphoricons.com resolved and verified; uncertain domains probed before assigning).
+- Tests: `tests/test_phase2.py` (71). CI: 27 compiled modules, 239 tests + the offline golden run.
+- Report for the owner: `docs/reports/PHASE-2-report.md`; live golden report: `docs/reports/golden-websites-report.md`.
+
 ## Inputs still needed from the owner
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
@@ -45,6 +58,9 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - [x] **Phase 1 inputs** (received 2026-09-29, see "Vault map" below)
 - [ ] Manual Notes vault path (needed by Phase 5; optional until then)
 - [x] ~~Path of a **copy** of the GitHub vault, for the Phase 0 owner review~~ **waived by the owner 2026-09-29** ("this is unnecessary") — Phase 0 approved without the scan. The scan tool stays available any time via one command.
+- [ ] **Phase 2 review**: read `docs/reports/PHASE-2-report.md` and `docs/reports/golden-websites-report.md`; then either "merge" or tell me what to change. The golden set's expected categories are MY proposal — edit `app/tests/golden/websites.json` freely and re-run the live report.
+- [ ] **GitHub Actions billing**: runners fail to start since 2026-09-24 ("recent account payments have failed or your spending limit needs to be increased") — fix in GitHub Settings → Billing & plans. Local gate is green and mirrors CI exactly.
+- [ ] **Cloudflare tokens**: both provided tokens are valid but carry no Workers AI permission (the /ai endpoints return "Authentication error") — if you want Workers AI as the cloud LLM, the token needs that permission added.
 
 ## Vault map (owner-provided 2026-09-29 — the single source of truth for Phase 1+)
 

@@ -1,0 +1,14 @@
+You are filing a website into a personal library. Choose exactly one category from the list. Follow the judgment rules.
+
+Categories:
+{{CATEGORY_NAMES_WITH_ONE_LINE_DEFINITIONS}}
+
+Judgment rules:
+{{JUDGMENT_RULES}}
+
+Website: {{URL}}
+Title: {{TITLE}}
+Description: {{META_DESCRIPTION}}
+Page text (may be partial): {{TEXT_EXCERPT}}
+
+Return only JSON: {"category": "<exact name from the list>", "confidence": "high|medium|low", "reason": "<one short sentence>"}

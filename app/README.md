@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.10.0 (Phased Build — Vault Settings & Ownership)
+# GitHub-to-Obsidian v0.11.0 (Phased Build — Websites Pipeline)
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ Notes* / *Social Signal (Manual)* / *Journal* (the app must never overwrite
 those). Snapshot before any risky operation on a real vault; restore by
 unzipping over the vault folder.
 
-### Vault settings & pipelines (v0.10.0)
+### Vault settings & pipelines (v0.10.0 / v0.11.0)
 
 The app now knows **three vaults** (Settings → 📁 Vault in the GUI, or
 `--cli --status`):
@@ -57,12 +57,13 @@ The app now knows **three vaults** (Settings → 📁 Vault in the GUI, or
 | Vault | Who writes it | Backup | Status today |
 |---|---|---|---|
 | GitHub Projects (`vault_path`) | the app only | its private repo (VaultSeal) | working — unchanged |
-| Websites (`website_vault_path`) | the app only (Phase 2) | `my-awesome-websites-directory` | path can be set; pipeline OFF |
+| Websites (`website_vault_path`) | the app only | `my-awesome-websites-directory` | **pipeline works** — switch ON when ready |
 | Manual Notes (`manual_vault_path`) | **you only** | your own repo | optional until Phase 5 |
 
 - Every picker shows a live status: *not set / will be created / found*.
 - Pipeline switches: **GitHub ON** (today's behavior exactly),
-  **Websites OFF** (Phase 2 will turn it on after your approval).
+  **Websites OFF by default** (v0.11.0 — flip it ON after setting the
+  Websites vault path; OFF keeps the old `_inbox/` behavior byte-for-byte).
 - **New notes** carry ownership stamps — frontmatter `managed_by`,
   `schema_version`, `prompt_version` + a one-line *Managed by GitCurator*
   banner — and no longer include the three empty human placeholder
@@ -72,6 +73,47 @@ The app now knows **three vaults** (Settings → 📁 Vault in the GUI, or
   GitHub vault (a per-note record in `cache.db`). Phase 3 will use it to
   treat your folder moves as corrections instead of damage; a dry-run
   records nothing.
+
+### The Websites pipeline (v0.11.0)
+
+With the Websites switch ON, every non-GitHub link (bot queue, imports,
+Telegram) is processed instead of being tabled in `_inbox/`:
+
+1. the URL is canonicalized (tracking params ignored, meaningful ones
+   kept) and checked against the vault + `cache.db` + the dismissed list;
+2. the page is fetched politely (timeout, size cap, per-domain pause,
+   identifiable User-Agent);
+3. title / description / main text are extracted — JavaScript-only
+   shells, paywalls, PDFs and truncated pages are marked `fetch_status:
+   partial` and classified from title + description;
+4. the model files the site into your taxonomy
+   (`app/taxonomy/website-library-categories.md` — 14 categories, 16
+   subcategories, your judgment rules) in two passes (category, then
+   subcategory); every answer must exactly match a name from the file or
+   it is retried, then routed to `_review/` — nothing is ever filed under
+   a name you didn't write; low-confidence answers also go to `_review/`;
+5. the note is written atomically into
+   `<Websites vault>/<Category>/<Subcategory>/<Name>.md` with the full
+   §4.5 body (TL;DR, core offerings, standout feature, **Best used
+   for**, pricing, login, similar tools) and ownership stamps;
+6. unfetchable links still get a minimal `_review/` note and are retried
+   automatically up to 3 times over several days; a successful retry
+   upgrades the placeholder to a real note (hand-edited placeholders are
+   never touched).
+
+GitHub Pages links (`owner.github.io/repo`) now go to the GitHub
+pipeline as their repo; gists are websites with a `#snippet` tag.
+The run report, summary log and `--cli --status` all gained a Websites
+section. Optional config knobs (safe defaults): `web_fetch_timeout_s`,
+`web_fetch_max_bytes`, `web_domain_delay_s`.
+
+```cmd
+python gitcurator/tools/run_golden_websites.py --offline   (CI mode — no network)
+python gitcurator/tools/run_golden_websites.py --live       (your configured LLM)
+```
+The golden set lives in `tests/golden/websites.json` (30 links from your
+bookmarks, with proposed expected categories — edit them as you see fit
+and re-run).
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd
