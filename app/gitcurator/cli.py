@@ -1105,6 +1105,176 @@ def cmd_test_connection(args) -> int:
     return 0 if s["level"] != cc.LEVEL_ERROR else 1
 
 
+# ----------------------------------------------------------------------------
+# v0.18.0 — --detect-llm {ollama,llamacpp} : the CLI twin of the GUI's
+# "Detect & Set" quick-switch buttons (probe → model menu → set + SAVE)
+# ----------------------------------------------------------------------------
+
+def cmd_detect_llm(args) -> int:
+    """⚡ Detect & Set LLM — the one-click fast lane between the two local
+    engines the owner runs side by side ("sometimes I use llama.cpp model,
+    sometimes ollama"):
+
+      --detect-llm ollama     probe the Ollama server (config URL →
+                              /api/tags), list its models, pick one (a
+                              numbered menu when several are installed),
+                              set provider + model + URL and SAVE.
+      --detect-llm llamacpp   find the running llama-server (configured
+                              URL first, then its PROCESS's listening
+                              ports — any --port — then the common ports),
+                              same pick + set + save.
+
+    Exit 0 = provider set + saved; 1 = engine not found / no model /
+    choice aborted. ``--yes`` auto-picks the current (or first) model
+    without the menu — the non-interactive path."""
+    banner()
+    path = _config_path(args.config)
+    cfg = load_config(path)
+    if cfg is None:
+        cli_print(f"No config at {path} — run `--cli --init` first.",
+                  "warning")
+        return 1
+    provider = str(getattr(args, "detect_llm", "") or "").lower()
+    label = "Ollama" if provider == "ollama" else "llama.cpp"
+    icon = "🧠" if provider == "ollama" else "🦙"
+
+    try:
+        _job = _gui_symbol("_quick_detect_job")
+    except ImportError as exc:
+        cli_print(f"GUI modules unavailable: {exc}", "error")
+        return 1
+
+    print(paint(f"{icon} Detect & Set {label} — probing the local engine…",
+                C.BOLD))
+    print()
+    status = StatusLine()
+    status.start(f"detecting {label}")
+    shim = _LogShim(status)
+    result_box: dict = {}
+    done = threading.Event()
+
+    def _thread():
+        try:
+            result_box["r"] = _job(provider, cfg, shim)
+        except Exception as exc:                       # pragma: no cover
+            result_box["r"] = {"success": False,
+                               "detail": f"{type(exc).__name__}: {exc}"}
+        finally:
+            done.set()
+
+    threading.Thread(target=_thread, name="cli-detect-llm",
+                     daemon=True).start()
+    while not done.is_set():
+        while shim.queue:
+            msg, lvl = shim.queue.popleft()
+            status.log(msg, lvl)
+        status.tick()
+        time.sleep(0.09)
+    while shim.queue:
+        msg, lvl = shim.queue.popleft()
+        status.log(msg, lvl)
+    status.stop()
+    result = result_box.get("r") or {}
+
+    if not result.get("success"):
+        cli_print(f"Detect & Set {label}: the probe crashed — "
+                  f"{result.get('detail', '?')}", "error")
+        return 1
+    if not result.get("found"):
+        if provider == "ollama":
+            cli_print(f"Ollama is not running at "
+                      f"{result.get('base_url', '')} "
+                      f"({result.get('detail', '')}).", "error")
+            cli_print("Start the Ollama app (or `ollama serve`), then run "
+                      "this again.", "info")
+        else:
+            cli_print(f"No llama.cpp server found "
+                      f"({result.get('detail', '')}).", "error")
+            cli_print("Start it with:  llama-server -m <model>.gguf "
+                      "--port 8080", "info")
+            cli_print("then run this again.", "info")
+        return 1
+
+    base = str(result.get("base_url", "") or "")
+    models = [m for m in (result.get("models") or []) if m]
+    where = f"at {base}"
+    if provider == "llamacpp" and result.get("via") == "process":
+        where += " (found via the running llama-server process)"
+    print(paint(f"✅ {label} detected {where}", C.GREEN))
+    if not models:
+        if provider == "ollama":
+            cli_print("Ollama is up but NO models are installed — pull one "
+                      "with:  ollama pull <model>", "error")
+        else:
+            cli_print("llama.cpp is up but no model could be read — start "
+                      "llama-server with -m <model>.gguf", "error")
+        return 1
+
+    # Pick the model: the only one directly; a numbered menu when several
+    # (the CLI twin of the GUI's model-selection dialog).
+    current = ""
+    if provider == "ollama":
+        oll = cfg.get("ollama") or {}
+        current = str(oll.get("model", "") or "").strip() \
+            if isinstance(oll, dict) else ""
+    else:
+        current = str(cfg.get("llamacpp_model", "") or "").strip()
+    if len(models) == 1:
+        choice = models[0]
+        print(f"   model: {paint(choice, C.CYAN)} "
+              "(the only one installed)")
+    else:
+        print(f"   {len(models)} models detected — pick one:")
+        for i, name in enumerate(models, 1):
+            mark = "  ← current" if name == current else ""
+            print(f"   {paint(str(i), C.CYAN)}. {name}"
+                  + (paint(mark, C.DIM) if mark else ""))
+        if getattr(args, "yes", False):
+            choice = current if current in models else models[0]
+            print(paint(f"   --yes → using '{choice}'", C.DIM))
+        else:
+            default = current if current in models else models[0]
+            try:
+                raw = input(
+                    paint("? ", C.CYAN)
+                    + f"Model number [1-{len(models)}] "
+                    + f"(Enter = {default}): ").strip()
+            except EOFError:
+                raw = ""
+            if not raw:
+                choice = default
+            elif raw.isdigit() and 1 <= int(raw) <= len(models):
+                choice = models[int(raw) - 1]
+            else:
+                cli_print(f"'{raw}' is not a valid choice — aborted, "
+                          "nothing changed.", "warning")
+                return 1
+
+    # SET + SAVE (the same keys the GUI buttons write — one source of
+    # truth, read by the next batch on either side).
+    if provider == "ollama":
+        cfg["llm_provider"] = "ollama"
+        oll = cfg.get("ollama")
+        if not isinstance(oll, dict):
+            oll = {}
+            cfg["ollama"] = oll
+        oll["base_url"] = base
+        oll["model"] = choice
+    else:
+        cfg["llm_provider"] = "llamacpp"
+        cfg["llamacpp_api_url"] = base.rstrip("/") + "/v1"
+        cfg["llamacpp_model"] = choice
+    if not save_config(path, _clean_config_for_save(cfg)):
+        return 1
+    shown = base if provider == "ollama" else cfg["llamacpp_api_url"]
+    print()
+    print(paint(f"✅ LLM provider SET to {label} — {shown} · "
+                f"model '{choice}'", C.GREEN))
+    print(paint(f"   saved to {path} — the next batch uses it immediately.",
+                C.DIM))
+    return 0
+
+
 def cmd_list_dead(args) -> int:
     """v0.09 (merge) — ported from the v0.08 companion CLI: list every
     CONFIRMED-dead link (attempts >= threshold) and every in-progress
@@ -2180,6 +2350,12 @@ def build_parser():
                    help="v0.17.0 — check that everything is up and ready: vaults "
                         "(found+writable) · Telegram (bot + account login, live) · "
                         "LLM (API/ollama/llama.cpp) · GitHub (token + backup repos)")
+    p.add_argument("--detect-llm", choices=("ollama", "llamacpp"),
+                   metavar="{ollama,llamacpp}",
+                   help="v0.18.0 — Detect & Set a local LLM engine: probe it, "
+                        "pick the model (menu when several), set provider + "
+                        "model + URL and save. The fast lane the GUI's two "
+                        "Detect & Set buttons use")
     p.add_argument("--retry-failed", action="store_true",
                    help="reprocess every URL in the retry queue")
     p.add_argument("--mark-read", action="store_true",
@@ -2223,6 +2399,8 @@ def cli_main(argv=None) -> int:
         return cmd_status(args)
     if args.test_connection:
         return cmd_test_connection(args)
+    if getattr(args, "detect_llm", None):
+        return cmd_detect_llm(args)
     if args.list_dead:
         return cmd_list_dead(args)
     if args.reset_dead:
@@ -2248,6 +2426,7 @@ def cli_main(argv=None) -> int:
     print(f"  {paint('--auto', C.CYAN):24} fully automatic run (SYNC → PROCESS → SEAL)")
     print(f"  {paint('--status', C.CYAN):24} vault map + config + cache + note-state summary")
     print(f"  {paint('--test-connection', C.CYAN):24} vaults · LLM · GitHub · Telegram — is everything up and ready?")
+    print(f"  {paint('--detect-llm X', C.CYAN):24} Detect & Set a local engine (ollama | llamacpp) — probe, pick, save")
     print(f"  {paint('--list-dead', C.CYAN):24} list the 404 quarantine (dead links)")
     print(f"  {paint('--reset-dead', C.CYAN):24} clear the 404 quarantine")
     print(f"  {paint('--retry-failed', C.CYAN):24} reprocess the retry queue")
