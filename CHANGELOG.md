@@ -1,3 +1,104 @@
+## [0.21.0] — The seal truth: mirror reconciliation, self domains, full-accounting report, direct fallback — 2026-09-30
+
+The owner's v0.20.0 batch log (2026-09-30 02:17) ended with
+`⚠️ Websites vault seal: failed — push failed … ! [rejected] HEAD -> main
+(fetch first)` and a verification report that said "GitHub processed: 0 /
+Non-GitHub recorded: 0 / ✅ ALL LINKS VERIFIED" for a batch that touched
+271 links. The audit found four root causes — all four fixed.
+
+### 1 — VaultSeal push reconciliation (the rejected-seal fix)
+
+**Root cause:** the private `my-awesome-websites-directory` repo had been
+doubling as the public cloud-gate mirror (the Actions-billing workaround
+from 2026-09-29) — 18 gate commits on its `main`, zero vault commits, no
+shared history with the vault's local repo, and `_seal` did a plain push
+with no reconciliation: rejected forever, every run.
+
+- **`VaultSeal._push`** now reconciles instead of giving up: plain push →
+  on a non-fast-forward rejection, `fetch` the remote `main` → if the
+  remote is already inside HEAD, retry; if the histories share a base,
+  **rebase** our seal commit(s) onto the remote tip and push; if the
+  histories are unrelated (fresh `git init` after a vault move, or a
+  mirror that was repurposed), **merge --allow-unrelated-histories** and
+  push. Nothing is discarded in either path.
+- **Irreconcilable = rescue, never force:** when a rebase/merge conflicts,
+  the seal lands on a `seal-rescue/<timestamp>` branch (local commit
+  kept, remote `main` untouched) and the error says exactly where it is
+  and how to reconcile. **`main` is never force-pushed** — a backup tool
+  must never discard remote history it cannot see.
+- The token used for the reconciliation fetch never persists
+  (`.git/FETCH_HEAD` is scrubbed after every fetch — the token hygiene
+  rule held everywhere else and now holds here too).
+- Proven against real local bare repos: fast-forward, up-to-date,
+  diverged-shared (rebase), unrelated (merge), unrelated-conflict and
+  rebase-conflict (rescue), non-rejection passthrough.
+
+### 2 — Self domains + token scrubbing (the bot's own auth links)
+
+The log showed the pipeline FETCHING
+`github-to-obsidian-bot…workers.dev/auth/?token=<64 hex>` — the owner's
+own bot OAuth handoff links, complete with live tokens, fetched and
+stored in `_review` notes and `_inbox` rows.
+
+- **`web_self_domains`** (default: the bot's workers.dev host; Settings →
+  📁 Vault → "Self domains") — the exact never-fetch treatment blocked
+  domains get: process_link guard, intake filter, 🔒 queue bucket, and a
+  purge that deletes the queued retries + failed `_review` placeholders
+  (the tokens go with them). Never fetched, never noted.
+- **`scrub_url_token` / `scrub_urls_in_text`**: secret-named query
+  parameters (`token`, `secret`, `api_key`, `sig`, …) never appear in a
+  stored `_inbox` row again — and the NEXT write rewrites tables that
+  still carry pre-v0.21.0 live tokens (logged). Short non-secret values
+  are untouched; dedupe/retry identity (the local state DB) keeps the
+  full URL, so retries still work.
+
+### 3 — The verification report's full accounting
+
+"GitHub processed: 0 / Non-GitHub recorded: 0 / ALL LINKS VERIFIED" hid
+16 websites-pipeline outcomes and 247 blocked links — every link was
+actually accounted for, but the REPORT couldn't say so.
+
+- `LinkTracker.verify` now buckets everything: **Websites notes / in
+  _review (retry scheduled) / skipped (dedup)**, **Blocked/self domains
+  (recorded in _inbox)**, **Non-GitHub pending** (pipeline off / no
+  vault — visible, not a failure), and **GitHub pending** (unfinished
+  work — now fails verification, matching `get_all_clear`).
+- New **🧮 Accounting** line: `accounted/total` must reconcile or the
+  verdict says so loudly. "ALL LINKS VERIFIED" now requires BOTH no
+  failures and a clean reconciliation.
+- New `mark_blocked` terminal status (blocked links no longer hide
+  inside "skipped"); `_inbox` lookups search the Websites vault's tables
+  too (where they live since v0.20.0). All three report surfaces updated
+  (batch log, final report file, Verify Vault dashboard).
+
+### 4 — Web-fetch direct fallback (the SSL-EOF class)
+
+Ten of sixteen fetches died with `[SSL: UNEXPECTED_EOF_WHILE_READING]`
+THROUGH the proxy (gist.github.com, huggingface.co, anthropic.com… — the
+exit IP is blocked by those CDNs) while the local line reaches some of
+them fine.
+
+- `fetch_url(proxy=...)` now retries once **DIRECT** when the proxied
+  attempt fails without ever getting an HTTP answer (TLS reset, timeout,
+  dead proxy). HTTP errors (4xx/5xx) mean the site ANSWERED — no
+  fallback. Loopback is never proxied and never falls back. A successful
+  fallback says so in the result reason; a double failure carries BOTH
+  reasons ("proxy: … | direct: …") so the `_review` note tells the owner
+  exactly what to fix.
+
+### Infra (agent-side, same release)
+
+- The cloud gate moved to its own public repo **`gitcurator-gate`**
+  (workflow + `GC_PAT` secret + repository_dispatch trigger; first
+  baseline run green). The gate mirror no longer collides with a vault
+  mirror — that collision was root cause #1.
+- `my-awesome-websites-directory` reset as the websites-vault mirror
+  (private, empty): the owner's next websites seal pushes cleanly (the
+  "local commit kept" commits land on an empty remote). Both directory
+  repos are private again — the "public until Oct 1" window closed early
+  because the gate no longer needs them.
+- Suite **742** (38 new tests in `tests/test_sealfix.py`); CI 38 modules.
+
 ## [0.20.0] — The intake truth: blocked domains, missing-repo notes, vault separation — 2026-09-29
 
 Owner requests (three, after the first v0.19-era batch log):

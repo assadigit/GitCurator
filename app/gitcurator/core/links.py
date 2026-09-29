@@ -293,6 +293,87 @@ def domain_is_blocked(url: str, blocked_domains) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# v0.21.0 — Self domains (the app's own bot) + token scrubbing
+# ---------------------------------------------------------------------------
+
+#: Hosts that belong to THIS deployment — the Telegram bot's own worker.
+#: The bot sends its own auth links (``/auth/?token=<hex>``) into the very
+#: chat the curator reads, so without this rule the pipeline would try to
+#: FETCH the bot's OAuth handoff URLs (and store them, token and all, in
+#: _review notes). Never fetched, never noted — the _inbox row (with the
+#: token scrubbed) is the record. Editable in Settings → 📁 Vault and in
+#: config.json (``web_self_domains``).
+DEFAULT_SELF_DOMAINS = ('github-to-obsidian-bot.aliassadi-plus.workers.dev',)
+
+
+def self_domains_from_config(config) -> list:
+    """The self-domain list from the app config (never raises). Same
+    contract as ``blocked_domains_from_config``: list/tuple or comma
+    string; missing key → DEFAULT; empty → opt-out (nothing is self)."""
+    try:
+        raw = (config or {}).get('web_self_domains')
+        if raw is None:
+            return list(DEFAULT_SELF_DOMAINS)
+        if isinstance(raw, str):
+            items = raw.split(',')
+        elif isinstance(raw, (list, tuple)):
+            items = list(raw)
+        else:
+            return list(DEFAULT_SELF_DOMAINS)
+        out, seen = [], set()
+        for item in items:
+            d = str(item or '').strip().lower().lstrip('.')
+            if d and d not in seen:
+                seen.add(d)
+                out.append(d)
+        return out
+    except Exception:
+        return list(DEFAULT_SELF_DOMAINS)
+
+
+def domain_is_self(url: str, self_domains) -> bool:
+    """True when ``url`` points at one of OUR OWN hosts (the bot's
+    worker). Same suffix-anchored matching as ``domain_is_blocked``."""
+    return domain_is_blocked(url, self_domains)
+
+
+#: Secret-named query parameters, as a TEXT-level scrub (values ≥16 chars
+#: of token-ish characters, so ordinary short values survive). Used both
+#: per-URL (new rows) and per-file (rewriting _inbox tables written before
+#: v0.21.0 that still carry live tokens).
+_SECRET_URL_TEXT_RE = re.compile(
+    r'([?&](?:token|secret|access_token|api_key|apikey|password|passcode'
+    r'|signature|sig|auth)='
+    r')([A-Za-z0-9_\-.%]{16,})',
+    re.IGNORECASE)
+
+
+def scrub_url_token(url: str) -> str:
+    """``…/auth/?token=e8d16400…`` → ``…/auth/?token=…`` — the value of
+    any secret-named query parameter is replaced with a literal ``…``.
+    Non-matching parameters and the rest of the URL are untouched; an
+    unparseable input is returned as-is (never raises)."""
+    raw = str(url or '')
+    if '=' not in raw or '?' not in raw:
+        return raw
+    try:
+        return _SECRET_URL_TEXT_RE.sub(r'\1…', raw)
+    except Exception:
+        return raw
+
+
+def scrub_urls_in_text(text: str) -> str:
+    """Scrub secret query values in EVERY URL-shaped run of ``text``
+    (used to clean _inbox tables that were written before v0.21.0)."""
+    if not text:
+        return text
+    try:
+        return _SECRET_URL_TEXT_RE.sub(r'\1…', text)
+    except Exception:
+        return text
+
+
 # Tracking parameters that carry no identity for a website (SPEC §4.3.1:
 # "utm_*/fbclid/gclid/ref parameters … all ignored"). Everything else in
 # a query string is kept — a YouTube video id or a route path in ?p= is

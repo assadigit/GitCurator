@@ -58,6 +58,8 @@
   "web_fetch_timeout_s": 20,
   "web_fetch_max_bytes": 2000000,
   "web_domain_delay_s": 2.0,
+  "web_blocked_domains": ["x.com", "twitter.com", "t.co"],
+  "web_self_domains": ["github-to-obsidian-bot.aliassadi-plus.workers.dev"],
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
   "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
