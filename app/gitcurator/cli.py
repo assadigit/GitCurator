@@ -756,6 +756,9 @@ def cmd_status(args) -> int:
         ("Vault", vault + (paint("  ✓ exists", C.GREEN) if vault and os.path.isdir(vault) else paint("  ✗ missing", C.RED))),
         ("Websites vault", _vault_cell(cfg.get("website_vault_path", ""), "websites")),
         ("Manual vault", _vault_cell(cfg.get("manual_vault_path", ""), "manual")),
+        ("Library mirror", (C.DIM + "tools/mirror_manual.py — dry-run first, then --apply" + C.RESET)
+         if (cfg.get("manual_vault_path") or "").strip()
+         else C.DIM + "(needs the Manual vault)" + C.RESET),
         ("Websites repo", (cfg.get("website_repo_name") or "").strip() or C.DIM + "(not set)" + C.RESET),
         ("Pipelines", _pipelines_cell),
         ("Telegram API ID", str(cfg.get("telegram_api_id", "") or C.DIM + "(not set)" + C.RESET)),

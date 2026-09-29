@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.12.0 (now 0.13.0 on the branch below)
+- **Version at start of this build:** 0.13.0 (now 0.14.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 4 — in review (agent finished, waiting for the owner). Phases 0–3 approved & merged.
+- **Current phase:** 5 — in review (agent finished, waiting for the owner). Phases 0–4 approved & merged.
 
 ## Phases
 
@@ -15,8 +15,8 @@ Keep it short, factual, and in plain language.
 | 1 | Vault settings and ownership | approved | `phase-1-vault-settings` (**merged into main 2026-09-29**, tag v0.10.0) | 0.10.0 | yes — owner said "Merge. proceed" 2026-09-29 |
 | 2 | Website pipeline | approved | `phase-2-website-pipeline` (**merged into main 2026-09-29**, tag v0.11.0) | 0.11.0 | yes — owner said "proceed" 2026-09-29 (golden set approved as proposed; 50-link trial prepped) |
 | 3 | Moves as corrections, and the backfill | approved | `phase-3-moves-backfill` (**merged into main 2026-09-29**, tag v0.12.0) | 0.12.0 | yes — owner said "Proceed. merge" 2026-09-29 |
-| 4 | LLM backends | in review | `phase-4-llm-backends` (pushed, NOT merged) | 0.13.0 | pending |
-| 5 | Mirror into Manual Notes | not started | | | |
+| 4 | LLM backends | approved | `phase-4-llm-backends` (**merged into main 2026-09-29**, tag v0.13.0) | 0.13.0 | yes — owner said "Proceed" 2026-09-29 |
+| 5 | Mirror into Manual Notes | in review | `phase-5-manual-mirror` (pushed, NOT merged) | 0.14.0 | pending |
 | 6 | Linking | not started | | | |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
@@ -72,6 +72,16 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Tests: `tests/test_phase4.py` (45). CI: 28 compiled modules, 320 tests + the offline golden run.
 - Report for the owner: `docs/reports/PHASE-4-report.md`.
 
+## Phase 5 summary (what exists on `phase-5-manual-mirror`)
+
+- `core/mirror.py` — the one-way sync engine into `<manual_vault>/Library/GitHub Projects/…` and `<manual_vault>/Library/Websites/…`: mirror copies carry `mirror_of` front-matter + a read-only `> [!warning]` banner; matching by RAW `source` value so moves propagate and stale copies are removed; **only marker files are ever changed/deleted, only under Library/**; validated target paths (`..`/absolute/drive-letter/backslash rejected) + realpath containment re-verified before every write and delete; idempotent; `run_mirror(..., apply=False)` is the default dry-run.
+- `tools/mirror_manual.py` — CLI: dry-run by default, `--apply` for a real run, `--manual-vault/--github-vault/--websites-vault` overrides (run against a COPY for the owner review), report file (default `app/reports/mirror/`, refuses to land inside any vault), exit codes 0/1/2/3.
+- Refusals: manual vault unset, overlapping either machine vault in EITHER direction, `Library/` exists but is a file, `--apply` with a not-yet-existing manual folder.
+- GitHub banner-image references are stripped from mirror copies (can never resolve inside the manual vault — see PHASE-5-report decision #2).
+- Wiring: `--cli --status` "Library mirror" row; GUI 📁 Vault Manual Notes group updated + tool hint; README §"The Manual Notes Library mirror"; CHANGELOG; VERSION 0.14.0.
+- Tests: `tests/test_phase5.py` (47). CI: 30 compiled modules, 367 tests + the offline golden run.
+- Report for the owner: `docs/reports/PHASE-5-report.md` (§3 = the copy-rehearsal commands; §7 = 3 questions).
+
 ## Inputs still needed from the owner
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
@@ -80,7 +90,7 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - [ ] **Cloudflare token permission**: the new Workers AI token (cfut_…, given 2026-09-29) verifies as active but still lacks the Workers AI permission — every `/ai` endpoint answers "Authentication error". Fix: Cloudflare dashboard → My Profile → API Tokens → the token → Edit → add **Account → Workers AI → Read** → Save. Then the app's cloud provider can use `cloud_api_url = https://api.cloudflare.com/client/v4/accounts/20b665b0bc839144c1e9f16aaf07953d/ai/v1`.
 - [x] **`unique_links.csv`** (done — the owner committed it to the repo root on `main`; the picker ran for real: 784 rows → 30 candidates across 30 domains → `app/tests/golden/websites_candidates.json`, committed on `phase-0-groundwork`)
 - [x] **Phase 1 inputs** (received 2026-09-29, see "Vault map" below)
-- [ ] Manual Notes vault path (needed by Phase 5; optional until then)
+- [x] Manual Notes vault path — **received 2026-09-29**: `C:\Users\Ali Assadi\Documents\Obsidian Vault` (recorded in the Vault map below; Phase 5 wired, in review)
 - [x] ~~Path of a **copy** of the GitHub vault, for the Phase 0 owner review~~ **waived by the owner 2026-09-29** ("this is unnecessary") — Phase 0 approved without the scan. The scan tool stays available any time via one command.
 - [ ] **Phase 2 review**: superseded 2026-09-29 — owner said "proceed" (approved as proposed, merged v0.11.0).
 - [x] **GitHub Actions billing**: worked around 2026-09-29 per the owner's instruction — both directory repos public until Oct 1 (unlimited free minutes); the mirror gate in the websites repo runs the full suite against private GitCurator. Billing itself still needs fixing in GitHub Settings → Billing & plans for private-repo Actions.
@@ -94,6 +104,7 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 |---|---|---|
 | GitHub Projects vault (existing, 600+ notes) | `G:\Docs\Github Projects Obsidian Vault` | `vault_path` (unchanged meaning) |
 | Websites vault (new; folder may not exist yet — status "will be created" is fine) | `G:\Docs\Documents\Obsidian Website Directory` | `website_vault_path` |
+| Manual Notes vault (owner-owned; receives the read-only `Library/` mirror — Phase 5) | `C:\Users\Ali Assadi\Documents\Obsidian Vault` | `manual_vault_path` |
 | GitHub vault backup repo (created by the agent, private, empty) | [`assadigit/my-awesome-github-directory`](https://github.com/assadigit/my-awesome-github-directory) | `vaultseal.repo_name` |
 | Websites vault backup repo (created by the agent, private, empty) | [`assadigit/my-awesome-websites-directory`](https://github.com/assadigit/my-awesome-websites-directory) | `website_repo_name` |
 
@@ -119,11 +130,12 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - 2026-09-29, Phase 0 — Tool output defaults to `app/reports/` (git-ignored), `--out` override; every tool refuses to write inside the vault it targets. Rejected: writing next to the vault.
 - 2026-09-29, Phase 0 — Inbox tables now written via `storage.atomic_write_text` (same bytes + fsync) instead of the duplicated inline copy. Rejected: keeping the private copy.
 - 2026-09-29, Phase 0 — **Owner waived the Phase 0 owner-review scan** of a GitHub-vault copy ("this is unnecessary" — the owner wants to move to the Websites vault). Phase 0 marked approved as-is. Consequence: no "before photo" of human-written sections; the spec's non-negotiables (human sections are never touched by the app) still stand, and the scan/snapshot tools remain available on demand.
+- 2026-09-29, Phase 5 — overlap refusal in BOTH directions (spec names only "equals or contains"; manual-inside-machine is equally dangerous). Rejected: literal one-direction check. Banner-image references stripped from mirror copies (can never resolve inside the manual vault; fixing them needs writes outside Library/). Rejected: copying banners (violates the Library/ jail), leaving broken links. Tool-only invocation (no auto-run at batch end — your vault is written when you say so). Rejected: wiring the mirror into every batch finish. Matching by RAW source value (exact identity; can't drift when URL normalization changes). Rejected: matching by normalized URL. Full list with alternatives: `docs/reports/PHASE-5-report.md` §5.
 
 ## Open questions for the owner
 
-- ~~Phase 3 review~~ — answered 2026-09-29 ("Proceed. merge" — merged, v0.12.0).
-- Phase 4 review: read `docs/reports/PHASE-4-report.md` (§3 has the 5-minute self-check) and `docs/reports/golden-backends-report.md`; then "merge" (or tell me what to change). If you have Ollama or llama.cpp on your machine, the exact golden-set commands are at the bottom of the backends report — the owner-review step for this phase.
+- ~~Phase 4 review~~ — answered 2026-09-29 ("Proceed" — merged, v0.13.0).
+- **Phase 5 review**: read `docs/reports/PHASE-5-report.md` (§3 has the 5-minute rehearsal against a COPY of Manual Notes — dry-run, `--apply`, then an `[[a library note]]` backlink check in Obsidian); then "merge" (or tell me what to change). Report §7 has 3 small questions (auto-run at batch end? banner images in mirrors?).
 - The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging? (Still open — also blocked on a Workers-AI-capable token or your local Ollama for the live LLM.)
 - After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
 
@@ -152,3 +164,5 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - 2026-09-29, Phase 3 — **moves as corrections + the backfill (v0.12.0)** on branch `phase-3-moves-backfill` (NOT merged): the §4.4 state machine runs at the start of every batch for both vaults (moves→corrections with front-matter updates + `category_locked` + corrections log; edits flagged; deletes dismissed forever; duplicates/unmanaged/unmapped report-only); taxonomy-aware folder resolution for the Websites vault (nested legal folders never "unmapped" — a real bug the tests caught); locked notes beat the classifier (pipeline + Recategorize dialog); `tools/backfill_websites.py` (resumable checkpoint, polite, batched, dry-run first, Ollama or OpenAI-compatible); run report "Note State" section + `--status` counts. 36 new tests; **full gate 28 compiles + 275/275 + offline golden 30/30, 0 invalid**. Test-caught bugs fixed en route: the dismissed-table name collision with Phase 2 (no such column: url), unmapped moves incorrectly treated as corrections, and the `p3_moc_` tmp-prefix trap (a `_moc` substring in a temp path makes the vault walk skip everything). `docs/reports/PHASE-3-report.md` written. In review.
 - 2026-09-29, merge-3 (owner: "Proceed. merge") — `phase-3-moves-backfill` **merged into main** (`2caad6d`, tag **v0.12.0**, pushed). Local gate re-run green before merging: 28 compiles + 275/275 tests + offline golden 30/30 (0 invalid). Mirror gate green on main after the merge (run 36578119089). Phase 4 (LLM backends) started on branch `phase-4-llm-backends` (v0.13.0): relabel "Cloud API" → "OpenAI-compatible endpoint", shared timeout wrapper, JSON mode with clean fallback, explicit context window (`num_ctx`), `/v1/models` pre-flight, per-task model overrides (`models.classify`/`models.analyze`) + the deferred Phase-3 few-shot item (past corrections as classifier examples).
 - 2026-09-29, Phase 4 — **LLM backends (v0.13.0)** on branch `phase-4-llm-backends` (NOT merged): the relabel (one `CLOUD_PROVIDER_LABEL` constant, GUI/CLI/README), the shared client in `core/llm_client.py` (same timeout wrapper for both providers, JSON-mode `response_format` with a memoized clean fallback, explicit `num_ctx` on every Ollama call + over-budget warnings on both, `/v1/models` pre-flight at batch start + Test Connection, per-task model overrides `models.classify`/`models.analyze` through every router), the deferred Phase-3 few-shot hook (w01 `PAST_CORRECTIONS` from the corrections log), `--live --backend openai|ollama` for the golden runner (+ transient-retry parity, found the hard way), backfill through the shared helpers. 45 new tests; **full gate 28 compiles + 320/320 + offline golden 30/30, 0 invalid**. Live comparison run on both backends (llm-shim + a disclosed Ollama-API bridge, `options.num_ctx` verified on the wire): 18/20 same category, 16/20 same category+subcategory, splits only on the two known judgment-call sites — `docs/reports/golden-backends-report.md`. In review.
+- 2026-09-29, merge-4 (owner: "Proceed") — `phase-4-llm-backends` **merged into main** (`0376bd6`, tag **v0.13.0**, pushed). Local gate re-run green before merging: 28 compiles + 320/320 tests + offline golden 30/30 (0 invalid). Mirror gate dispatched on main after the merge. Phase 5 (Mirror into Manual Notes) started on branch `phase-5-manual-mirror`; owner provided the Manual Notes vault path in the same message.
+- 2026-09-29, Phase 5 — **the Manual Notes Library mirror (v0.14.0)** on branch `phase-5-manual-mirror` (NOT merged): `core/mirror.py` (one-way sync into `<manual>/Library/{GitHub Projects,Websites}/`, `mirror_of` marker + read-only banner, RAW-source matching so moves propagate, marker-only deletions, outside-Library guarantee with validated paths + realpath containment, idempotent, dry-run default) + `tools/mirror_manual.py` (dry-run default, `--apply`, vault-path overrides for the copy rehearsal, report file, exit codes) + status/GUI/README wiring. Owner provided the Manual Notes vault path (`C:\Users\Ali Assadi\Documents\Obsidian Vault` — vault map updated). 47 new tests; **full gate 30 compiles + 367/367 + offline golden 30/30, 0 invalid**. Test-caught en route: mirror banner inserted inside front matter (off-by-one after the `mirror_of` insert); Bash-tool display artifact (`[h` sequences eaten — same class as merge-1's `[m`; verify bracket text via Read) briefly masqueraded as a Python `%`-formatting bug. `docs/reports/PHASE-5-report.md` written. In review.

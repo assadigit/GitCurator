@@ -201,6 +201,49 @@ Both run the same 30 links through the same pipeline; reports land in
 `app/reports/golden/` (…`live-ollama.md` / …`live-openai.md`) for a
 side-by-side check.
 
+### The Manual Notes Library mirror (v0.14.0)
+
+Your ideas live in your own **Manual Notes vault**; the app now keeps a
+read-only mirror of both libraries inside it, so you can link to
+library notes from your ideas (`[[Some repo]]`) and see the backlinks —
+without the machine ever writing anywhere else in your vault:
+
+```
+<your Manual Notes vault>/Library/GitHub Projects/…   ← your GitHub vault
+<your Manual Notes vault>/Library/Websites/…          ← your Websites vault
+```
+
+```cmd
+python gitcurator/tools/mirror_manual.py
+python gitcurator/tools/mirror_manual.py --apply
+```
+
+- **Dry-run by default** — it prints and reports the plan, writes
+  nothing; `--apply` performs the sync (after re-verifying every
+  safety check).
+- **Only `Library/` is ever touched.** Not one file outside it is
+  created, changed or deleted (tested); only mirror copies carrying
+  the `mirror_of` marker are ever updated or deleted. Your own files —
+  even inside `Library/` — are never touched; anything in the way of a
+  mirror copy is reported as a conflict and left alone.
+- **It follows your moves**: notes are matched by their `source`, so a
+  note you moved between category folders re-mirrors at the new
+  location; a note you deleted removes its mirror copy.
+- **Idempotent**: a second run over unchanged vaults performs zero
+  writes.
+- **Refuses to run** if the manual vault overlaps either machine vault
+  (either direction). The manual vault path comes from the GUI 📁 Vault
+  page / `config.json` (`manual_vault_path`); `--manual-vault` points
+  at a copy for a safe rehearsal.
+- Mirror copies drop the GitHub notes' banner-image references
+  (`attachments/banners/…` can never resolve inside your vault — the
+  image would have to live outside `Library/`, which is forbidden);
+  everything else is the note, verbatim, under a read-only banner.
+
+Run it against a **copy** of your Manual Notes vault first (SPEC owner
+review), then write `[[a library note]]` in an idea and check that
+Obsidian shows the backlink.
+
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd
 cd cloudflare-bot
