@@ -6,6 +6,7 @@ REM  Asks for your Telegram / GitHub / LLM credentials and saves
 REM  them locally to config.json (same file the GUI uses).
 REM  After this, double-click GitCurator-CLI.bat for the
 REM  fully-automatic run.
+REM  v0.14.1: prefers the private .venv created by 1-INSTALL.bat.
 REM ============================================================
 setlocal
 title GitCurator CLI - first-run setup
@@ -16,22 +17,31 @@ REM v0.09.1 ran "chcp 65001" here; a codepage switch INSIDE a batch
 REM file makes cmd.exe re-parse the file at a shifted byte offset, so
 REM fragments of the REM header ran as commands ("'GitCurator' is not
 REM recognized" error wall). Python handles console encoding itself at
-REM startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std streams), so
-REM the chcp was redundant anyway. ASCII-only, codepage-free.
+REM startup (cli.py: SetConsoleOutputCP(65001) + UTF-8 std streams),
+REM so the chcp was redundant anyway. ASCII-only, codepage-free.
 
+REM ---- find a Python: the app's private .venv first, then system ----
+if exist ".venv\Scripts\python.exe" goto :run
+set "PY=python"
 where python >nul 2>nul
+if errorlevel 1 (
+    set "PY=py -3"
+)
+%PY% --version >nul 2>nul
 if errorlevel 1 (
     echo.
     echo  [GitCurator] Python was not found on PATH.
-    echo                Install Python 3.10+ from https://www.python.org/downloads/
-    echo                (check "Add python.exe to PATH" during install), then re-run.
+    echo                Double-click 1-INSTALL.bat first - it sets up
+    echo                everything ^(and tells you what to do if Python
+    echo                is missing^).
     echo.
     pause
     exit /b 1
 )
 
+:run
 echo.
-python main.py --cli --init
+%PY% main.py --cli --init
 set EXITCODE=%ERRORLEVEL%
 
 echo.

@@ -1,3 +1,46 @@
+## [0.14.1] — the first Windows zip — 2026-09-29
+
+The owner asked for "the first .zip version to test locally". This is
+it: a deterministic, one-command build of everything a Windows machine
+needs, with double-click launchers and a 3-step quickstart.
+
+### What you get
+
+1. **`tools/build_zip.py`** — builds
+    `app/reports/dist/GitCurator-v0.14.1-windows.zip` from
+    git-**tracked** files only, so local junk can never ship; a
+    tracked `config.json` / `cache.db` / session file refuses the
+    build outright (defense in depth). Dev-only trees are excluded
+    (`tests/`, `_attic/`, `cloudflare-bot/`, `list of changes.txt`),
+    `VERSION` is stamped into the zip, and the build is
+    **byte-identical across rebuilds** (fixed entry order +
+    timestamps) — a released zip is always reproducible from its tag.
+2. **Six double-click launchers**, every one enforced pure-ASCII +
+    CRLF by the build (the v0.09.1 codepage-reparse bug class can
+    never ship again):
+    - `1-INSTALL.bat` — run once after unzipping: creates the app's
+      private `.venv` and installs the requirements (finds Python
+      3.10+ via `python` then `py -3`; the Microsoft Store stub is
+      filtered out by the version check).
+    - `GitCurator.bat` — the desktop app.
+    - `GitCurator-DRY-RUN.bat` — the fully-automatic run with every
+      write only **reported**: the safe first run.
+    - The three existing CLI bats now prefer the private `.venv`
+      (system Python still works).
+3. **`WINDOWS-QUICKSTART.md`** — the 3-step guide (install → start
+    → dry-run), a what-each-file-is table, the owner's vault paths,
+    and the update-later recipe (copy `config.json` over).
+4. **Verified end-to-end in the build sandbox**: unzip to a fresh
+    folder → fresh venv → `pip install -r requirements.txt` →
+    `main.py --cli --status` runs clean (full vault map + cache
+    sections), the GUI module imports, every `.bat` is ASCII + CRLF,
+    the zip is 73 files / 585 KB.
+5. Tests: 13 new (`tests/test_packaging.py` — policy tables, the
+    ASCII/CRLF enforcement, determinism by double-build sha256, the
+    real build via subprocess, first-run files present, secrets and
+    excluded trees absent, zip validity + size). Suite: **380**.
+    CI: 31 compiled modules.
+
 ## [0.14.0] — Phase 5: the Manual Notes Library mirror — 2026-09-29
 
 Phase 5 of the phased build (SPEC.md §6): your ideas vault gets a

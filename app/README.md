@@ -1,8 +1,17 @@
-# GitHub-to-Obsidian v0.13.0 (Phased Build — Websites Pipeline + Corrections + LLM Backends)
+# GitHub-to-Obsidian v0.14.1 (Phased Build — first Windows zip)
 
 ## Quick Start
 
 ### Desktop App
+
+**From the zip (first run on Windows):** unzip anywhere, double-click
+`1-INSTALL.bat` (once — it creates the app's private `.venv` and
+installs the requirements), then double-click `GitCurator.bat`.
+The 3-step guide with your vault paths is `WINDOWS-QUICKSTART.md`
+next to this file. A safe rehearsal that writes NOTHING:
+`GitCurator-DRY-RUN.bat`.
+
+From a checkout:
 ```cmd
 pip install -r requirements.txt
 python main.py

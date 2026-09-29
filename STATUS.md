@@ -17,6 +17,7 @@ Keep it short, factual, and in plain language.
 | 3 | Moves as corrections, and the backfill | approved | `phase-3-moves-backfill` (**merged into main 2026-09-29**, tag v0.12.0) | 0.12.0 | yes — owner said "Proceed. merge" 2026-09-29 |
 | 4 | LLM backends | approved | `phase-4-llm-backends` (**merged into main 2026-09-29**, tag v0.13.0) | 0.13.0 | yes — owner said "Proceed" 2026-09-29 |
 | 5 | Mirror into Manual Notes | approved | `phase-5-manual-mirror` (**merged into main 2026-09-29**, tag v0.14.0) | 0.14.0 | yes — owner said "proceed and merge" 2026-09-29 |
+| — | First Windows zip (owner-directed, not a SPEC phase) | approved | `packaging-first-zip` (**merged into main 2026-09-29**, tag v0.14.1) | 0.14.1 | yes — owner: "proceed until the first .zip version is ready for me to test locally" 2026-09-29 |
 | 6 | Linking | not started | | | |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
@@ -82,6 +83,15 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Tests: `tests/test_phase5.py` (47). CI: 30 compiled modules, 367 tests + the offline golden run.
 - Report for the owner: `docs/reports/PHASE-5-report.md` (§3 = the copy-rehearsal commands; §7 = 3 questions).
 
+## First Windows zip (v0.14.1 — what exists on `packaging-first-zip`)
+
+- `tools/build_zip.py` — the deterministic zip builder: git-**tracked** files only (a tracked `config.json`/`cache.db`/session file refuses the build), dev-only trees excluded (`tests/`, `_attic/`, `cloudflare-bot/`, `list of changes.txt`), `VERSION` stamped in, fixed entry order + timestamps → **byte-identical rebuilds** (reproducible from a tag).
+- Six double-click launchers, all enforced **ASCII + CRLF** by the build (v0.09.1 codepage-reparse class can never ship): `1-INSTALL.bat` (one-click private `.venv` + requirements; finds Python 3.10+ via `python`/`py -3`, filters the Store stub), `GitCurator.bat` (the desktop app), `GitCurator-DRY-RUN.bat` (fully-automatic run, writes nothing — the safe first run); the three existing CLI bats now prefer the `.venv`.
+- `WINDOWS-QUICKSTART.md` — the owner's 3-step guide (install → start → dry-run), file table, the vault paths, update-later recipe.
+- Smoke-tested end-to-end in the sandbox: unzip → fresh venv → pip install → `--cli --status` clean; GUI module imports; 73 files / 585 KB.
+- Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
+- The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
+
 ## Inputs still needed from the owner
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
@@ -137,6 +147,7 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - ~~Phase 4 review~~ — answered 2026-09-29 ("Proceed" — merged, v0.13.0).
 - ~~Phase 5 review~~ — merged 2026-09-29 (owner: "proceed and merge", v0.14.0). Still open for the owner afterwards: the 5-minute in-Obsidian verification on a COPY of Manual Notes (`docs/reports/PHASE-5-report.md` §3 — dry-run, `--apply`, `[[a library note]]` backlink check) and the 3 small questions in report §7 (auto-run at batch end? banner images in mirrors?).
 - **Phase 6 go**: Linking (recall hooks, embeddings, candidate search, link store) per SPEC §6 — starts on the owner's word, after the Phase 5 in-Obsidian verification.
+- **The zip test (owner, local Windows)**: download `GitCurator-v0.14.1-windows.zip` from the [v0.14.1 release](https://github.com/assadigit/GitCurator/releases) → unzip → `1-INSTALL.bat` → `GitCurator.bat` → `GitCurator-DRY-RUN.bat` (writes nothing). Report back: does it start, does the dry-run read well, any error in the console window (screenshot it).
 - The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging? (Still open — also blocked on a Workers-AI-capable token or your local Ollama for the live LLM.)
 - After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
 
