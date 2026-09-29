@@ -851,7 +851,8 @@ def cmd_status(args) -> int:
             pass  # server down — the batch pre-flight reports it in detail
     elif cfg.get("llm_provider", "ollama") == "llamacpp":
         # v0.15.0 — llama.cpp engine detection: probe + (when the
-        # configured URL is dead) scan the common ports, then report the
+        # configured URL is dead) detect: the RUNNING llama-server
+        # process's ports (v0.15.1) + the common ports — then report the
         # server + its model. Never fails the status command.
         try:
             from gitcurator.core import llm_client as _llm

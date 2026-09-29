@@ -1,3 +1,46 @@
+## [0.15.1] — the automatic llama.cpp catch — 2026-09-29
+
+Owner report after testing the v0.15.0 zip: "it still doesnt auto-detect
+llama cpp, the service is running on task manager, the app must
+automatically catch that!" (+ "the app runs, you can continue for next
+phase"). The app ran fine; the detection never fired on its own. Four
+root causes, four fixes, all covered by 30 new tests (459 total):
+
+1. **Detection was never automatic** — it lived behind the 🔍 Detect
+   button and the batch pre-flight. Now ~1.5s after launch a daemon
+   thread probes for llama-server and the result is applied on the GUI
+   thread through a queued signal: when the current provider is
+   unusable (Ollama not running — the default — or a keyless cloud
+   endpoint), the app SWITCHES to llama.cpp itself, fills URL + model
+   and saves; a working provider is never overridden (one hint line).
+   `llamacpp_autodetect_decision()` is a pure, Qt-free function; the
+   GUI applies it (`_startup_llamacpp_autodetect` /
+   `_apply_llamacpp_autodetect`).
+2. **System proxy swallowed the loopback probes** — urllib's
+   `urlopen` consults env/registry proxies, and the owner's machine
+   runs a proxy/VPN client (GitCurator itself ships a proxy monitor for
+   Telegram). Every llama.cpp probe now bypasses proxies entirely
+   (`ProxyHandler({})`), and `openai_chat`/`openai_list_models` do the
+   same for LOOPBACK endpoints only (cloud endpoints keep proxy
+   support — they may need it).
+3. **Non-default ports were invisible** — the scan guessed 5 ports.
+   Now the app reads llama-server's ACTUAL listening ports from the OS
+   process table first: `tasklist` + `netstat` on Windows, `ss`/`netstat`
+   on POSIX (`llamacpp_process_ports()` — never raises, 5s subprocess
+   cap, no console-window flash under the packaged GUI). Any `--port`
+   is caught; the common-port list grew to 11 as the fallback.
+4. **/props-less builds were skipped** — when `/props` 404s (older
+   llama.cpp releases/forks), the server is now positively identified
+   through `/v1/models` fingerprints: the `Server: llama.cpp` response
+   header, `"owned_by": "llama.cpp"` entries, `.gguf`-suffixed ids.
+   vLLM / LM Studio / plain OpenAI proxies match none of these — still
+   never misreported.
+
+Also: the CLI `--status` / preflight / wizard, the GUI Detect button
+and the worker preflight all ride the new discovery automatically;
+`detect_llamacpp()` results now carry `via` ('process' | 'scan') and
+probes carry `identified_by` ('props' | 'models:<fingerprint>').
+
 ## [0.15.0] — llama.cpp engine detection — 2026-09-29
 
 The owner asked for it directly: "the app must have llama.cpp engine

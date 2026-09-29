@@ -21,12 +21,65 @@ without a server.
 """
 
 import concurrent.futures
+import ipaddress
 import json
+import os
 import re
+import subprocess
 from typing import Any, Callable, List
 
 DEFAULT_TIMEOUT_S = 300      # chat — generous, models are slow to warm
 DEFAULT_LIST_TIMEOUT_S = 15  # list/connectivity — should be instant
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — proxy-safe loopback helpers
+#
+# The owner's report: "the service is running on task manager, the app must
+# automatically catch that!" — llama-server WAS running, detection still
+# failed. Root cause #1: ``urllib.request.urlopen`` consults the system
+# proxy (env HTTP_PROXY/HTTPS_PROXY + the Windows registry). The owner's
+# machine runs a proxy/VPN client (GitCurator itself ships a proxy health
+# monitor for Telegram) — a proxy that doesn't bypass 127.0.0.1 swallows
+# every loopback request, so the probe "could not reach" a server that was
+# up the whole time. Loopback traffic must NEVER ride a proxy.
+# ---------------------------------------------------------------------------
+
+def _is_loopback_url(url) -> bool:
+    """True when the URL points at THIS machine (127.x.x.x / ::1 /
+    localhost). Used to route loopback requests around the system proxy —
+    a proxy can only break them. Accepts bare ``host:port`` spellings
+    too (no scheme)."""
+    from urllib.parse import urlparse
+    raw = str(url or '').strip()
+    if not raw:
+        return False
+    if '://' not in raw:
+        raw = 'http://' + raw
+    try:
+        host = urlparse(raw).hostname or ''
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host.lower() == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _urlopen_direct(req, timeout_s, context=None):
+    """Open ``req`` WITHOUT ever consulting the system/env proxy — for
+    loopback targets (llama.cpp / Ollama / local OpenAI-compatible
+    endpoints) where a proxy client can only break things. Same
+    HTTPError/URLError surface as ``urllib.request.urlopen``."""
+    import urllib.request
+    handlers = [urllib.request.ProxyHandler({})]  # {} = no proxy, period
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers).open(req, timeout=timeout_s)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +377,11 @@ def openai_chat(api_url, api_key, model, messages, timeout_s, *,
         # the shared wrapper is the deterministic authority — callers always
         # get the same TimeoutError they get on the Ollama path.
         sock_timeout = timeout_s + 5 if timeout_s and timeout_s > 0 else 120
+        # v0.15.1 — a LOOPBACK endpoint (local llama.cpp / LM Studio /
+        # Ollama bridge) must bypass the system proxy; everything else
+        # keeps normal proxy behavior (cloud endpoints may NEED it).
+        if _is_loopback_url(base):
+            return _urlopen_direct(req, sock_timeout, context=ctx)
         return urllib.request.urlopen(req, context=ctx,
                                       timeout=sock_timeout)
 
@@ -401,8 +459,12 @@ def openai_list_models(api_url, api_key, timeout_s=15):
     if api_key:
         req.add_header('Authorization', f'Bearer {api_key}')
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            raw = resp.read().decode('utf-8', errors='replace')
+        if _is_loopback_url(base):  # v0.15.1 — never proxy loopback
+            with _urlopen_direct(req, timeout_s) as resp:
+                raw = resp.read().decode('utf-8', errors='replace')
+        else:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                raw = resp.read().decode('utf-8', errors='replace')
     except urllib.error.HTTPError as e:
         raise CloudLLMError(f"GET {base}/models answered HTTP {e.code}")
     except urllib.error.URLError as e:
@@ -500,11 +562,16 @@ LLAMACPP_PROVIDER_LABEL = "llama.cpp server (local)"
 LLAMACPP_DEFAULT_BASE = "http://127.0.0.1:8080"
 
 # Ports the Detect button / auto-detect scan probes, in order. 8080 is
-# the llama-server default; the rest are common manual choices. The scan
-# positively identifies llama.cpp through /props, so anything else
-# answering on these ports (a dev server on 8080, vLLM on 8000…) is
-# skipped — never misreported.
-LLAMACPP_SCAN_PORTS = (8080, 8081, 8082, 8083, 8000)
+# the llama-server default; the rest are common manual choices (5001 is
+# koboldcpp's default, 1234 LM Studio's, 9000/8084/8085 seen in the
+# wild). The scan positively identifies llama.cpp through /props (or the
+# v0.15.1 /v1/models fingerprints), so anything else answering on these
+# ports (a dev server on 8080, vLLM on 8000…) is skipped — never
+# misreported. The RUNNING-PROCESS ports (llamacpp_process_ports) are
+# probed BEFORE this list, so a llama-server on any other --port is
+# caught too.
+LLAMACPP_SCAN_PORTS = (8080, 8081, 8082, 8083, 8084, 8085,
+                       8000, 5000, 5001, 1234, 9000)
 
 # Per-port probe budget. Dead local ports refuse instantly; only a
 # live-but-not-llama.cpp server ever costs the full budget.
@@ -574,12 +641,60 @@ def llamacpp_model_from_props(props):
     return None
 
 
+def _llamacpp_models_fingerprint(payload, headers=None):
+    """v0.15.1 — llama.cpp fingerprints on a ``/v1/models`` response, used
+    ONLY when /props did not identify the server (old builds and some
+    forks 404 /props). Returns the fingerprint name — 'server-header'
+    (llama.cpp's HTTP layer sets ``Server: llama.cpp``), 'owned_by'
+    (llama-server tags its entries ``"owned_by": "llama.cpp"``),
+    'gguf-id' (the advertised id is the loaded GGUF file) — or None.
+    vLLM / LM Studio / plain OpenAI proxies match none of these, so they
+    are still never misreported.
+
+    ``headers`` may be a dict OR an email.message.Message (the live
+    response object): EVERY Server header occurrence is checked —
+    ``dict(msg)`` would collapse duplicates to the first value and miss
+    a llama.cpp line hiding behind a stdlib one."""
+    try:
+        header_pairs = list((headers or {}).items())
+    except Exception:
+        header_pairs = []
+    for k, v in header_pairs:
+        if str(k).lower() == 'server' and 'llama.cpp' in str(v).lower():
+            return 'server-header'
+    data = payload.get('data') if isinstance(payload, dict) else None
+    for m in (data if isinstance(data, list) else []):
+        if not isinstance(m, dict):
+            continue
+        if str(m.get('owned_by', '') or '').lower() == 'llama.cpp':
+            return 'owned_by'
+        if str(m.get('id', '') or '').lower().endswith('.gguf'):
+            return 'gguf-id'
+    return None
+
+
+def _model_ids_from_models_payload(payload):
+    """``/v1/models`` body → the id/name list (same extraction rules as
+    openai_list_models, for a payload already in hand)."""
+    names = []
+    data = payload.get('data') if isinstance(payload, dict) else None
+    for m in (data if isinstance(data, list) else []):
+        if isinstance(m, dict):
+            name = m.get('id') or m.get('name')
+            if name:
+                names.append(str(name))
+        elif m:
+            names.append(str(m))
+    return names
+
+
 def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
     """Probe ONE address for a llama.cpp server. NEVER raises — returns a
     result dict:
 
       found     True only when the server positively identifies as
-                llama.cpp (``GET /props`` answers with the llama.cpp shape)
+                llama.cpp — /props (primary), or — v0.15.1 — the llama.cpp
+                fingerprints on /v1/models for builds that 404 /props
       ready     True/False from ``/health`` (False = model still loading),
                 None when /health is unavailable
       models    model ids from ``GET /v1/models`` ([] when hidden/failed —
@@ -587,8 +702,13 @@ def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
       model     the BEST model name — first /v1/models entry, else the
                 /props alias/basename; None when nothing names it
       props_model  the /props-derived name (before the /v1/models override)
+      identified_by  'props' | 'models:<fingerprint>' (v0.15.1)
       base_url  the normalized ROOT (no /v1) that was probed
       detail    one human-readable summary line
+
+    v0.15.1 — proxy-safe: every request here bypasses the system/env
+    proxy entirely (llama-server is a local service; a VPN/proxy client
+    that doesn't bypass 127.0.0.1 must never swallow the probe).
 
     ``base_url`` accepts every user spelling (``normalize_llamacpp_api_url``
     runs first), so probing the raw Settings field is safe.
@@ -603,35 +723,62 @@ def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
         req = urllib.request.Request(url)
         if api_key:
             req.add_header('Authorization', f'Bearer {api_key}')
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            return resp.getcode(), resp.read().decode(
-                'utf-8', errors='replace')
+        with _urlopen_direct(req, timeout_s) as resp:
+            return (resp.getcode(),
+                    resp.read().decode('utf-8', errors='replace'),
+                    resp.headers)  # the Message object — keeps ALL headers
 
     result = {'found': False, 'ready': None, 'models': [], 'model': None,
-              'props_model': None, 'base_url': root, 'detail': ''}
+              'props_model': None, 'identified_by': None, 'base_url': root,
+              'detail': ''}
 
-    # 1) /props — the positive llama.cpp identification.
+    # 1) /props — the primary positive llama.cpp identification.
     props = None
+    props_err = ''
     try:
-        code, raw = _get_json(root + '/props')
+        code, raw, _hdrs = _get_json(root + '/props')
         if code == 200:
             try:
                 props = json.loads(raw)
             except json.JSONDecodeError:
                 props = None
     except urllib.error.HTTPError as e:
-        result['detail'] = f"/props answered HTTP {e.code}"
+        props_err = f"/props answered HTTP {e.code}"
     except Exception as e:
-        result['detail'] = f"could not reach {root} ({type(e).__name__})"
+        props_err = f"could not reach {root} ({type(e).__name__})"
     if props is not None and is_llamacpp_props(props):
         result['found'] = True
+        result['identified_by'] = 'props'
         result['props_model'] = llamacpp_model_from_props(props)
     elif props is not None:
-        result['detail'] = "/props answered but is not llama.cpp"
+        props_err = "/props answered but is not llama.cpp"
+
+    # 1b) v0.15.1 — secondary identification: /props-less llama.cpp builds
+    # (old releases, some forks) still fingerprint on /v1/models. The
+    # payload fetched here is reused for the model list in step 3.
+    models_payload = None
+    models_headers = {}
+    if not result['found']:
+        try:
+            code, raw, models_headers = _get_json(api + '/models')
+            if code == 200:
+                try:
+                    models_payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    models_payload = None
+        except Exception:
+            models_payload = None
+        if models_payload is not None:
+            fingerprint = _llamacpp_models_fingerprint(
+                models_payload, models_headers)
+            if fingerprint:
+                result['found'] = True
+                result['identified_by'] = f'models:{fingerprint}'
+        if not result['found'] and not props_err:
+            props_err = "no llama.cpp /props at this address"
 
     if not result['found']:
-        if not result['detail']:
-            result['detail'] = "no llama.cpp /props at this address"
+        result['detail'] = props_err or "no llama.cpp server at this address"
         return result
 
     # 2) /health — ready vs still-loading. llama-server answers 503 while
@@ -640,7 +787,7 @@ def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
     code = None
     raw = ''
     try:
-        code, raw = _get_json(root + '/health')
+        code, raw, _hdrs = _get_json(root + '/health')
     except urllib.error.HTTPError as e:
         code = e.code
         try:
@@ -660,11 +807,15 @@ def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
         else:
             result['ready'] = False
 
-    # 3) /v1/models — the model list (a missing route is tolerated).
-    try:
-        result['models'] = openai_list_models(api, api_key, int(timeout_s))
-    except CloudLLMError:
-        result['models'] = []
+    # 3) /v1/models — the model list (a missing route is tolerated). The
+    # secondary identification already fetched it → reuse that payload.
+    if models_payload is not None:
+        result['models'] = _model_ids_from_models_payload(models_payload)
+    else:
+        try:
+            result['models'] = openai_list_models(api, api_key, int(timeout_s))
+        except CloudLLMError:
+            result['models'] = []
 
     # Best name: what the server ADVERTISES (/v1/models) wins; the /props
     # name is the fallback for builds that hide the route.
@@ -680,20 +831,267 @@ def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
     return result
 
 
-def detect_llamacpp(api_key='', ports=LLAMACPP_SCAN_PORTS,
-                    host='127.0.0.1', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
-    """Scan the common llama-server ports and return the probe result of
-    the FIRST server that positively identifies as llama.cpp (its
-    ``base_url`` names where), or ``None`` when nothing matches. Dead
-    local ports refuse instantly, so the scan is fast when nothing is
-    running; live non-llama.cpp servers cost at most one probe timeout
-    each and are skipped, never misreported."""
-    for port in (ports or ()):
+def detect_llamacpp(api_key='', ports=None,
+                    host='127.0.0.1', timeout_s=LLAMACPP_PROBE_TIMEOUT_S,
+                    include_process_ports=True):
+    """Find a llama.cpp server on this machine (v0.15.1 — the auto-detect
+    engine behind "the app must automatically catch that!"). Candidate
+    ports, in order:
+
+      1. the LISTENING ports of every running llama-server/llamafile
+         PROCESS (``llamacpp_process_ports`` — tasklist+netstat on
+         Windows, ss on POSIX) — catches ANY ``--port``, including ports
+         no guess list would ever contain;
+      2. the common llama-server ports (``ports``, default
+         LLAMACPP_SCAN_PORTS — pass an explicit list/() to restrict).
+
+    Returns the probe result of the FIRST server that positively
+    identifies as llama.cpp — its ``base_url`` names where, and ``via``
+    ('process' | 'scan') names which candidate list found it — or ``None``
+    when nothing matches. Dead local ports refuse instantly, so the scan
+    is fast when nothing is running; live non-llama.cpp servers cost at
+    most one probe timeout each and are skipped, never misreported."""
+    proc_ports = []
+    if include_process_ports:
+        try:
+            proc_ports = [int(p) for p in llamacpp_process_ports()]
+        except Exception:
+            proc_ports = []
+    scan_ports = list(LLAMACPP_SCAN_PORTS if ports is None else (ports or ()))
+    candidates = []
+    for port in proc_ports + scan_ports:
+        if port not in candidates:
+            candidates.append(port)
+    for port in candidates:
         probe = probe_llamacpp(f'http://{host}:{int(port)}', api_key,
                                timeout_s)
         if probe.get('found'):
+            probe['via'] = 'process' if port in proc_ports else 'scan'
             return probe
     return None
+
+
+# ===========================================================================
+# v0.15.1 — process-based discovery ("the service is running on task
+# manager"): read llama-server's ACTUAL listening ports from the OS
+# process table instead of guessing. Pure stdlib; every entry point is
+# wrapped so nothing here can ever raise or hang the caller.
+# ===========================================================================
+
+# Image basenames (lowercase, .exe stripped) that count as llama-server.
+_LLAMACPP_PROCESS_NAMES = ('llama-server', 'llamafile', 'ik_llama_server',
+                           'llama-server-bin')
+
+
+def _run_cmd(argv, timeout_s=5.0):
+    """``subprocess.run`` with a hard timeout, text output and NO console
+    window on Windows (the packaged GUI runs windowless — a flashing cmd
+    popup on every Detect would be a regression). Returns stdout or '' on
+    ANY failure."""
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' \
+        else 0
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True,
+                             timeout=timeout_s, creationflags=flags)
+        return out.stdout or ''
+    except Exception:
+        return ''
+
+
+def _parse_tasklist_pids(csv_text):
+    """Windows ``tasklist /FO CSV /NH`` stdout → the set of PIDs whose
+    image is a llama-server. Lines look like::
+
+        "llama-server.exe","12345","Console","1","123,456 K"
+
+    csv handles the quoting; a non-numeric PID column (localized headers,
+    summary rows) is skipped. Pure string parsing — unit-tested against
+    canned output on any OS."""
+    import csv as _csv
+    pids = set()
+    for row in _csv.reader(str(csv_text or '').splitlines()):
+        if len(row) < 2:
+            continue
+        image = row[0].strip().lower()
+        if image.endswith('.exe'):
+            image = image[:-4]
+        if image not in _LLAMACPP_PROCESS_NAMES \
+                and not image.startswith('llama-server'):
+            continue
+        pid = row[1].strip()
+        if pid.isdigit():
+            pids.add(int(pid))
+    return pids
+
+
+def _parse_netstat_listening_ports(netstat_text, pids):
+    """Windows ``netstat -ano -p TCP`` stdout → ordered unique LISTENING
+    ports owned by ``pids``. Handles IPv4 (``127.0.0.1:8080``) and IPv6
+    (``[::]:8080`` / ``[::1]:8080``) local addresses; ESTABLISHED /
+    TIME_WAIT noise is skipped. Pure string parsing — unit-tested against
+    canned output on any OS."""
+    ports = []
+    for line in str(netstat_text or '').splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0].upper() != 'TCP':
+            continue
+        if parts[3].upper() != 'LISTENING':
+            continue
+        local = parts[1]
+        if ':' not in local:
+            continue
+        try:
+            port = int(local.rsplit(':', 1)[1].strip('[]'))
+        except ValueError:
+            continue
+        try:
+            pid = int(parts[4])
+        except ValueError:
+            continue
+        if pid in pids and port not in ports:
+            ports.append(port)
+    return ports
+
+
+def _llamacpp_ports_windows():
+    """tasklist → llama-server PIDs → netstat → their LISTENING ports."""
+    pids = _parse_tasklist_pids(_run_cmd(['tasklist', '/FO', 'CSV', '/NH']))
+    if not pids:
+        return []
+    return _parse_netstat_listening_ports(
+        _run_cmd(['netstat', '-ano', '-p', 'TCP']), pids)
+
+
+def _llamacpp_ports_posix():
+    """``ss -ltnp`` (netstat fallback) → the LISTENING ports of any
+    llama-server/llamafile process. A typical line::
+
+        LISTEN 0 4096 127.0.0.1:8080 0.0.0.0:0 \
+            users:(("llama-server",pid=1234,fd=3))
+    """
+    out = _run_cmd(['ss', '-ltnp']) or _run_cmd(['netstat', '-ltnp'])
+    ports = []
+    for line in out.splitlines():
+        low = line.lower()
+        if 'llama-server' not in low and 'llamafile' not in low \
+                and 'ik_llama_server' not in low:
+            continue
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local = parts[3]
+        if ':' not in local:
+            continue
+        try:
+            port = int(local.rsplit(':', 1)[1].strip('[]'))
+        except ValueError:
+            continue
+        if port not in ports:
+            ports.append(port)
+    return ports
+
+
+def llamacpp_process_ports():
+    """The listening ports of every llama-server/llamafile process on
+    this machine — the Task-Manager guarantee (v0.15.1): if llama-server
+    is RUNNING, its port is here, whatever ``--port`` it was given.
+    Windows: tasklist + netstat; POSIX: ss/netstat. Never raises, never
+    blocks longer than the 5s subprocess cap; [] on any failure or when
+    nothing runs."""
+    try:
+        if os.name == 'nt':
+            return _llamacpp_ports_windows()
+        return _llamacpp_ports_posix()
+    except Exception:
+        return []
+
+
+def ollama_reachable(base_url='http://127.0.0.1:11434', timeout_s=1.5):
+    """Quick socket-level check (v0.15.1 auto-switch policy): is an
+    Ollama server listening at ``base_url``? No HTTP, no ollama SDK
+    import, never raises — used to decide whether switching an
+    unresponsive default provider to a detected llama.cpp server is
+    warranted."""
+    from urllib.parse import urlparse
+    import socket
+    try:
+        parts = urlparse(str(base_url or '')
+                         or 'http://127.0.0.1:11434')
+        host = parts.hostname or '127.0.0.1'
+        port = parts.port or 11434
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(float(timeout_s))
+        try:
+            return sock.connect_ex((host, int(port))) == 0
+        finally:
+            sock.close()
+    except Exception:
+        return False
+
+
+def llamacpp_autodetect_decision(config, probe, ollama_up=None):
+    """v0.15.1 — what the STARTUP auto-detect should do once a llama.cpp
+    server has been found (the owner: "the app must automatically catch
+    that!"). Pure function — the GUI thread applies the result; the policy
+    stays unit-testable without Qt.
+
+    Policy — never override a provider choice that WORKS:
+      * provider already 'llamacpp'     → refresh URL/model (no switch)
+      * provider 'ollama' + Ollama DOWN → SWITCH (the default provider's
+        server is dead; the local engine the user actually has running
+        takes over — this is the owner's exact situation)
+      * provider 'cloud' + no API key  → SWITCH (cloud is unusable)
+      * anything else (a working Ollama, a keyed cloud endpoint, a custom
+        endpoint) → NO switch, one hint line only
+
+    Returns a dict: ``switch`` (bool), ``url`` (the /v1 URL to persist —
+    set only when it differs from the configured one), ``model`` (the
+    detected model name, or None), ``message`` (one log line for the
+    GUI), ``level`` (its log level)."""
+    cfg = config if isinstance(config, dict) else {}
+    if not (probe or {}).get('found'):
+        return {'switch': False, 'url': None, 'model': None,
+                'message': '', 'level': 'info'}
+    root = (probe.get('base_url') or LLAMACPP_DEFAULT_BASE).rstrip('/')
+    url = root if root.endswith('/v1') else root + '/v1'
+    model = probe.get('model')
+    provider = str(cfg.get('llm_provider', 'ollama') or 'ollama').lower()
+    configured_url = str(cfg.get('llamacpp_api_url', '') or '').strip()
+    configured_model = str(cfg.get('llamacpp_model', '') or '').strip()
+    url_changed = configured_url != url
+    model_changed = bool(model) and model != configured_model
+    where = f"🦙 llama.cpp detected at {root}" \
+        + (f" · model '{model}'" if model else '')
+
+    if provider == 'llamacpp':
+        note = where
+        if url_changed and configured_url:
+            note += f" (was {configured_url})"
+        return {'switch': False,
+                'url': url if url_changed else None,
+                'model': model if model_changed else None,
+                'message': note, 'level': 'success'}
+
+    switch = False
+    why = ''
+    if provider == 'ollama' and ollama_up is False:
+        switch = True
+        why = " — Ollama is not running, switching the LLM provider to " \
+              "llama.cpp"
+    elif provider == 'cloud' and not str(
+            cfg.get('cloud_api_key', '') or '').strip():
+        switch = True
+        why = " — no cloud API key is configured, switching the LLM " \
+              "provider to llama.cpp"
+    if switch:
+        return {'switch': True, 'url': url if url_changed else None,
+                'model': model or '',
+                'message': f"🦙 llama.cpp caught automatically at {root}"
+                + (f" · model '{model}'" if model else '') + why + ".",
+                'level': 'success'}
+    return {'switch': False, 'url': None, 'model': None,
+            'message': where + " — Settings → 🧠 LLM → 🦙 llama.cpp to "
+            "use it.", 'level': 'info'}
 
 
 def resolve_llamacpp_model(config, models, props_model=None):

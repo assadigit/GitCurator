@@ -1,12 +1,15 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 31 audited
-# Python modules and runs the full 429-case suite (34 core + 11 e2e +
+# Python modules and runs the full 459-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 49
-# llamacpp — v0.15.0 llama.cpp engine detection: /props positive server
-# ID, port scan, automatic model detection, provider 'llamacpp' through
-# GUI/CLI/worker/backfill/golden. Prior: v0.14.1 the first Windows zip.
+# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
+# llamacpp — v0.15.1 the automatic catch: startup auto-detect with
+# auto-switch, process-based port discovery (tasklist+netstat / ss),
+# proxy-safe loopback, /v1/models fingerprints for /props-less builds
+# (on top of v0.15.0: /props positive ID, port scan, automatic model
+# detection, provider 'llamacpp' through GUI/CLI/worker/backfill/golden).
+# Prior: v0.14.1 the first Windows zip.
 # test_quarantine, test_phase0, test_phase1 and test_phase2 import
 # gitcurator/gui/app.py (CacheDB and ProcessingWorker live there), so the
 # app requirements are installed first; the suite runs headless on the
@@ -24,7 +27,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 429 tests + websites pipeline)
+    name: Python gate (compile + 459 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -90,4 +93,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 31 compiles + 429 tests + offline golden run (v0.15.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 31 compiles + 459 tests + offline golden run (v0.15.1)."

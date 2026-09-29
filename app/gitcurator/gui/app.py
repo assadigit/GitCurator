@@ -2058,9 +2058,11 @@ class ProcessingWorker(QThread):
                     probe = scan
             if not probe.get('found'):
                 self.log_message.emit(
-                    "❌ No llama.cpp server detected. Start it with: "
+                    "❌ No llama.cpp server detected (no llama-server "
+                    "process, nothing on the common ports). Start it with: "
                     "llama-server -m <model>.gguf --port 8080\n"
-                    "   (then Settings → 🧠 LLM → 🔍 Detect, or switch "
+                    "   (the app auto-detects llama.cpp at launch and here "
+                    "in Settings → 🧠 LLM → 🔍 Detect, or switch "
                     "providers).", "error")
                 self.finished_signal.emit(
                     False, "llama.cpp server not detected")
@@ -4790,6 +4792,12 @@ class SettingsDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    # v0.15.1 — startup llama.cpp auto-detect: the detector daemon thread
+    # hands its result to the GUI thread through this queued signal (the
+    # owner: "the service is running on task manager, the app must
+    # automatically catch that!").
+    _llamacpp_autodetect_signal = pyqtSignal(dict)
+
     def __init__(self):
         super().__init__()
         self.config = self.load_config()
@@ -4901,6 +4909,23 @@ class MainWindow(QMainWindow):
             self._tg_watchdog_timer = QTimer(self)
             self._tg_watchdog_timer.timeout.connect(self._tg_lock_watchdog)
             self._tg_watchdog_timer.start(60000)  # check every 60s
+        except Exception:
+            pass  # best-effort — never crash on a timer issue
+
+        # v0.15.1 — llama.cpp STARTUP auto-detect (owner report: llama-server
+        # running in Task Manager but the app never noticed — detection used
+        # to live only behind the 🔍 Detect button and the batch preflight).
+        # ~1.5s after launch a daemon thread probes the configured URL, the
+        # LISTENING PORTS OF THE RUNNING llama-server PROCESS (whatever
+        # --port it uses) and the common ports — all proxy-safe — and the
+        # result is applied on the GUI thread: auto-switch when the current
+        # provider is unusable, otherwise a one-line hint. Never blocks the
+        # UI; runs exactly once per session.
+        try:
+            self._llamacpp_autodetect_done = False
+            self._llamacpp_autodetect_signal.connect(
+                self._apply_llamacpp_autodetect)
+            QTimer.singleShot(1500, self._startup_llamacpp_autodetect)
         except Exception:
             pass  # best-effort — never crash on a timer issue
 
@@ -5683,9 +5708,10 @@ class MainWindow(QMainWindow):
 
         llamacpp_detect_btn = QPushButton("🔍 Detect")
         llamacpp_detect_btn.setToolTip(
-            "Scan the common llama-server ports (8080 first), positively\n"
-            "identify llama.cpp through /props, then fill this URL and the\n"
-            "model automatically.")
+            "Find the running llama-server automatically: its PROCESS's\n"
+            "listening ports first (any --port), then the common ports\n"
+            "(8080 first). Positively identifies llama.cpp, then fills\n"
+            "this URL and the model automatically.")
         llamacpp_detect_btn.clicked.connect(self.detect_llamacpp_service)
         self._style_btn(llamacpp_detect_btn, 'secondary')
         llamacpp_model_row.addWidget(llamacpp_detect_btn)
@@ -7645,21 +7671,146 @@ class MainWindow(QMainWindow):
         self.config['llamacpp_model'] = choice
         return choice
 
+    def _startup_llamacpp_autodetect(self):
+        """v0.15.1 — fires ~1.5s after launch (once per session): find
+        llama-server in a daemon thread — the configured URL first, then
+        the RUNNING PROCESS's listening ports (Task-Manager guarantee:
+        any --port), then the common-port scan — and hand the result to
+        the GUI thread through the queued signal. The UI never blocks;
+        dead local ports refuse instantly, so the whole probe is ~instant
+        when nothing runs."""
+        if getattr(self, '_llamacpp_autodetect_done', False) \
+                or getattr(self, '_closing', False):
+            return
+        self._llamacpp_autodetect_done = True
+
+        def _detect():
+            payload = {'probe': None, 'decision': None,
+                       'ollama_up': None}
+            try:
+                url = (self.config.get('llamacpp_api_url', '')
+                       or _llm_client.LLAMACPP_DEFAULT_BASE)
+                key = self.config.get('llamacpp_api_key', '')
+                probe = _llm_client.probe_llamacpp(url, key)
+                if not probe.get('found'):
+                    probe = _llm_client.detect_llamacpp(key) or probe
+                payload['probe'] = probe
+                if probe.get('found'):
+                    # The switch policy needs to know whether the CURRENT
+                    # (default) provider actually works — only a dead
+                    # Ollama / keyless cloud justifies taking over.
+                    if str(self.config.get('llm_provider',
+                                           'ollama')).lower() == 'ollama':
+                        oll = self.config.get('ollama') or {}
+                        base = (oll.get('base_url',
+                                        'http://127.0.0.1:11434')
+                                if isinstance(oll, dict)
+                                else 'http://127.0.0.1:11434')
+                        payload['ollama_up'] = _llm_client.ollama_reachable(
+                            base)
+                    payload['decision'] = _llm_client \
+                        .llamacpp_autodetect_decision(
+                            self.config, probe, payload['ollama_up'])
+            except Exception as e:
+                payload['error'] = str(e)
+            try:
+                self._llamacpp_autodetect_signal.emit(payload)
+            except Exception:
+                pass  # window already gone — nothing to update
+
+        threading.Thread(target=_detect, daemon=True,
+                         name='llamacpp-autodetect').start()
+
+    def _apply_llamacpp_autodetect(self, payload):
+        """v0.15.1 — GUI thread: apply the startup auto-detect result.
+        The policy itself lives in llm_client.llamacpp_autodetect_decision
+        (pure, unit-tested): switch ONLY when the current provider is
+        unusable (dead Ollama / keyless cloud), otherwise a one-line hint.
+        Every write is in-place + MERGE-saved — never rebinds self.config."""
+        try:
+            if getattr(self, '_closing', False):
+                return
+            payload = payload or {}
+            probe = payload.get('probe') or {}
+            decision = payload.get('decision') or {}
+            if not probe.get('found'):
+                # Quiet unless llama.cpp IS the configured provider — a
+                # warning at every launch for a server the user never
+                # asked about would be noise, but a llama.cpp user whose
+                # server died wants to know immediately.
+                if str(self.config.get('llm_provider', '')).lower() \
+                        == 'llamacpp':
+                    self.log_message(
+                        "🦙 llama.cpp is the selected provider but no "
+                        "llama-server was detected. Start it with: "
+                        "llama-server -m <model>.gguf --port 8080",
+                        "warning")
+                return
+            if decision.get('message'):
+                self.log_message(decision['message'],
+                                 decision.get('level', 'info'))
+            changed = False
+            if decision.get('switch'):
+                self.config['llm_provider'] = 'llamacpp'
+                if hasattr(self, 'llm_provider_llamacpp'):
+                    self.llm_provider_llamacpp.setChecked(True)
+                changed = True
+            new_url = decision.get('url')
+            if new_url:
+                self.config['llamacpp_api_url'] = new_url
+                if hasattr(self, 'llamacpp_api_url'):
+                    self.llamacpp_api_url.setText(new_url)
+                changed = True
+            if decision.get('switch') or decision.get('url') \
+                    or decision.get('model'):
+                # A switch or a refresh — fill the combo. The pure-hint
+                # case (switch/url/model all None) touches NOTHING: no
+                # config write, no save, just the log line above.
+                if probe.get('models') or probe.get('props_model'):
+                    before = str(self.config.get('llamacpp_model', '')
+                                 or '')
+                    model = self._fill_llamacpp_models(
+                        probe.get('models'), probe.get('props_model'),
+                        pick=decision.get('model') or probe.get('model'))
+                    if model and model != before:
+                        changed = True
+            if changed:
+                # save_config MERGES — nothing else in config.json is
+                # touched by persisting the auto-detected values.
+                self.save_config()
+                if decision.get('switch'):
+                    self.log_message(
+                        "✅ llama.cpp set as the LLM provider — saved to "
+                        "Settings.", "success")
+                else:
+                    self.log_message(
+                        "✅ llama.cpp settings refreshed — saved to "
+                        "Settings.", "success")
+        except Exception as e:
+            try:
+                self.log_message(
+                    f"⚠️ llama.cpp auto-detect failed: {e}", "warning")
+            except Exception:
+                pass
+
     def detect_llamacpp_service(self):
-        """🔍 Detect: scan the common llama-server ports, positively
-        identify llama.cpp through /props, fill the URL + model list and
-        auto-select the model. Never raises — every failure is a clear log
-        line with the exact command that starts the server."""
+        """🔍 Detect: find the running llama-server (its PROCESS's listening
+        ports first — any --port — then the common ports), positively
+        identify llama.cpp, fill the URL + model list and auto-select the
+        model. Never raises — every failure is a clear log line with the
+        exact command that starts the server."""
         _key = self._llamacpp_fields()[1]
         self.log_message(
-            "🦙 Detecting llama.cpp server (ports "
+            "🦙 Detecting llama.cpp server (running llama-server processes "
+            "+ ports "
             + ", ".join(str(p) for p in _llm_client.LLAMACPP_SCAN_PORTS)
             + ")…", "info")
         probe = _llm_client.detect_llamacpp(_key)
         if not probe:
             self.log_message(
-                "❌ No llama.cpp server found on the common ports. Start it "
-                "with:\n   llama-server -m <model>.gguf --port 8080\n"
+                "❌ No llama.cpp server found (no llama-server process, "
+                "nothing on the common ports). Start it with:\n   "
+                "llama-server -m <model>.gguf --port 8080\n"
                 "   (llama-server ships with llama.cpp — 'winget install "
                 "ggml.llamacpp' or build from source), then click Detect "
                 "again — or type a custom URL in the Server URL field.",

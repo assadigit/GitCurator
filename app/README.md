@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.15.0 (Phased Build — llama.cpp engine detection)
+# GitHub-to-Obsidian v0.15.1 (Phased Build — llama.cpp auto-detect)
 
 ## Quick Start
 
@@ -210,24 +210,47 @@ Both run the same 30 links through the same pipeline; reports land in
 `app/reports/golden/` (…`live-ollama.md` / …`live-openai.md`) for a
 side-by-side check.
 
-### llama.cpp engine detection (v0.15.0)
+### llama.cpp engine detection (v0.15.0) + the automatic catch (v0.15.1)
 
 The app always saw two LLM providers — 🧠 Local Ollama and the custom
 ☁️ OpenAI-compatible endpoint. A local **llama.cpp server
 (`llama-server`)** is now the third, and it is **DETECTED like Ollama**
-instead of hand-configured like the cloud endpoint:
+instead of hand-configured like the cloud endpoint — and since v0.15.1
+the catch is AUTOMATIC (owner report: "the service is running on task
+manager, the app must automatically catch that!"):
 
+- **Caught at launch, no clicks**: ~1.5s after the app starts, a
+  background probe finds llama-server (configured URL → the RUNNING
+  PROCESS's listening ports → the common ports). When the current
+  provider is unusable (Ollama not running / no cloud API key), the app
+  switches to llama.cpp itself, fills URL + model and saves — the log
+  says exactly what happened. A working provider is never overridden;
+  you get a one-line hint instead.
+- **Process-based discovery — the Task-Manager guarantee**: on Windows
+  the app reads llama-server's ACTUAL listening ports from `tasklist` +
+  `netstat` (POSIX: `ss`/`netstat`), so ANY `--port` is caught — even a
+  port no guess list would ever contain.
+- **Proxy-safe loopback**: every local probe/list/chat bypasses the
+  system & env proxy entirely — a VPN/proxy client that doesn't bypass
+  127.0.0.1 can no longer hide a running llama-server (the reported
+  v0.15.0 failure on a proxy-running machine).
+- **Old builds too**: when `/props` 404s (older llama.cpp
+  releases/forks), the server is still positively identified through
+  `/v1/models` fingerprints (`Server: llama.cpp` header,
+  `"owned_by": "llama.cpp"` entries, `.gguf` model ids). vLLM / LM
+  Studio / plain OpenAI proxies match none of these — still never
+  misreported.
 - Settings → 🧠 LLM → radio **🦙 llama.cpp (local)** → **🔍 Detect**
-  scans the common llama-server ports (8080 first) and positively
-  identifies llama.cpp through its `/props` route — a vLLM/LM Studio/
-  dev server answering on those ports is skipped, never misreported.
+  does the same on demand (the running process's ports first, then the
+  common llama-server ports — 8080 first) and fills the URL + model.
 - **The model is detected automatically**: the loaded model's id comes
   from `/v1/models` (the `/props` alias/basename is the fallback), the
   model field is filled for you, and an empty `llamacpp_model` in
   `config.json` means "ask the server". `/health` is reported too
   (⏳ still-loading servers say so).
-- Every batch pre-flight does the same: probe the configured URL, scan
-  when it is dead (switching + saving what it finds), auto-fill the
+- Every batch pre-flight does the same: probe the configured URL, then
+  the process ports + the common-port scan when it is dead (switching +
+  saving what it finds), auto-fill the
   model, and abort with the exact `llama-server -m <model>.gguf
   --port 8080` command when nothing is detected — 100 per-link failures
   against a known-dead server help nobody.
