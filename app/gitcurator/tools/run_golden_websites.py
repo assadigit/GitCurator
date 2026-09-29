@@ -151,15 +151,33 @@ def live_llm(api_url, api_key, model, timeout_s, num_ctx=None):
 def live_llm_ollama(host, model, timeout_s, num_ctx=None):
     """v0.13.0 — Phase 4: the golden set on a local Ollama server, through
     llm_client.ollama_chat (explicit options.num_ctx + the shared timeout
-    wrapper). Raises with a clear message when the server is down."""
+    wrapper). Retries twice on transient server errors (5xx/429) exactly
+    like the openai backend — parity found the hard way in the v0.13.0
+    backends comparison run, where one upstream hiccup sent four links to
+    _review that the openai path would have retried. Raises with a clear
+    message when the server is down."""
+    import re
+    import time as _time
     import ollama as _ol
     from gitcurator.core import llm_client as _llm
     client = _ol.Client(host=host)
+    _transient = re.compile(r'(?:status code|HTTP Error)\s*[:=]?\s*(429|50[0234])',
+                            re.IGNORECASE)
 
     def llm(messages, task=None):
-        return _llm.ollama_chat(
-            client, model, messages, timeout_s,
-            json_mode=True, num_ctx=num_ctx)
+        last_err = None
+        for attempt in range(3):
+            try:
+                return _llm.ollama_chat(
+                    client, model, messages, timeout_s,
+                    json_mode=True, num_ctx=num_ctx)
+            except Exception as e:
+                last_err = e
+                if _transient.search(str(e)) and attempt < 2:
+                    _time.sleep(45)
+                    continue
+                raise
+        raise last_err
     return llm
 
 
@@ -400,7 +418,8 @@ def main(argv=None):
         out_dir = os.path.join(_APP, 'reports', 'golden')
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, 'websites-report-'
-                                + ('offline' if args.offline else 'live')
+                                + ('offline' if args.offline
+                                   else f'live-{args.backend}')
                                 + '.md')
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, 'w', encoding='utf-8') as f:

@@ -1,9 +1,9 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 28 audited
-# Python modules and runs the full 319-case suite (34 core + 11 e2e +
+# Python modules and runs the full 320-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 71 phase2 + 36 phase3 + 44 phase4 — v0.13.0 LLM backends: the shared
+# 71 phase2 + 36 phase3 + 45 phase4 — v0.13.0 LLM backends: the shared
 # timeout wrapper + JSON-mode fallback for OpenAI-compatible endpoints,
 # explicit num_ctx, /v1/models pre-flight, per-task model overrides,
 # corrections-as-examples, and the golden runner's --backend flag). The
@@ -26,7 +26,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 319 tests + websites pipeline)
+    name: Python gate (compile + 320 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -89,4 +89,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 28 compiles + 319 tests + offline golden run (v0.13.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 28 compiles + 320 tests + offline golden run (v0.13.0)."

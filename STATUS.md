@@ -5,7 +5,7 @@ Keep it short, factual, and in plain language.
 
 - **Version at start of this build:** 0.12.0 (now 0.13.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 4 — in progress (LLM backends, branch `phase-4-llm-backends`). Phases 0–3 approved & merged.
+- **Current phase:** 4 — in review (agent finished, waiting for the owner). Phases 0–3 approved & merged.
 
 ## Phases
 
@@ -15,7 +15,7 @@ Keep it short, factual, and in plain language.
 | 1 | Vault settings and ownership | approved | `phase-1-vault-settings` (**merged into main 2026-09-29**, tag v0.10.0) | 0.10.0 | yes — owner said "Merge. proceed" 2026-09-29 |
 | 2 | Website pipeline | approved | `phase-2-website-pipeline` (**merged into main 2026-09-29**, tag v0.11.0) | 0.11.0 | yes — owner said "proceed" 2026-09-29 (golden set approved as proposed; 50-link trial prepped) |
 | 3 | Moves as corrections, and the backfill | approved | `phase-3-moves-backfill` (**merged into main 2026-09-29**, tag v0.12.0) | 0.12.0 | yes — owner said "Proceed. merge" 2026-09-29 |
-| 4 | LLM backends | in progress | `phase-4-llm-backends` | 0.13.0 | pending |
+| 4 | LLM backends | in review | `phase-4-llm-backends` (pushed, NOT merged) | 0.13.0 | pending |
 | 5 | Mirror into Manual Notes | not started | | | |
 | 6 | Linking | not started | | | |
 
@@ -60,6 +60,17 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - `tools/backfill_websites.py`: resumable (`backfill_state` checkpoint in `cache.db`), polite (fixed + per-domain pauses), batched (`--limit 30`), dry-run first, `--report`, Ollama or any OpenAI-compatible endpoint.
 - Tests: `tests/test_phase3.py` (36). CI: 28 compiled modules, 275 tests + the offline golden run.
 - Report for the owner: `docs/reports/PHASE-3-report.md`.
+
+## Phase 4 summary (what exists on `phase-4-llm-backends`)
+
+- `core/llm_client.py` — the shared LLM client: `openai_chat` (every OpenAI-compatible endpoint through the SAME wall-clock timeout wrapper as Ollama; `response_format` JSON mode with a memoized clean fallback when a server rejects it; clear `CloudLLMError` family on malformed bodies), `openai_list_models` + `preflight_openai` (the `/v1/models` pre-flight), `ollama_chat` (explicit `options.num_ctx` on EVERY call + the over-budget warning), `resolve_task_model` (per-task overrides), `estimate_tokens`.
+- Relabel everywhere: "Cloud API" → **"OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, cloud)"** — one constant (`CLOUD_PROVIDER_LABEL`), GUI radio + settings group + tooltips, CLI wizard/status, README. Config VALUE stays `cloud`; old configs load unchanged.
+- New config (optional): `llm_num_ctx` (default 8192; 0 = server decides) + `models` (`{"classify": "", "analyze": ""}`). GUI: a shared Context-window field + Test Connection now starts with the `/v1/models` pre-flight; the batch-start pre-flight covers the default AND both overrides (warn-never-block).
+- Per-task model overrides wired through both worker routers (GitHub analyze + websites classify/analyze), the backfill tool and the golden runner; the `llm_call` contract is now `llm_call(messages, task=None)`.
+- The deferred Phase-3 few-shot item shipped: the w01 category prompt carries `PAST_CORRECTIONS` (this URL's own history + the owner's 3 most recent moves in the Websites vault, deduped) — the classifier follows the owner's filing taste.
+- `tools/run_golden_websites.py --live --backend openai|ollama` (+ `--num-ctx`, per-backend pre-flight, transient-retry parity on both paths); comparison report: `docs/reports/golden-backends-report.md` — 20 links classified on both backends: 18/20 same category (16/20 same category+subcategory); the only category splits are the two known judgment-call sites, split 1-1 between the backends.
+- Tests: `tests/test_phase4.py` (45). CI: 28 compiled modules, 320 tests + the offline golden run.
+- Report for the owner: `docs/reports/PHASE-4-report.md`.
 
 ## Inputs still needed from the owner
 
@@ -112,6 +123,7 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 ## Open questions for the owner
 
 - ~~Phase 3 review~~ — answered 2026-09-29 ("Proceed. merge" — merged, v0.12.0).
+- Phase 4 review: read `docs/reports/PHASE-4-report.md` (§3 has the 5-minute self-check) and `docs/reports/golden-backends-report.md`; then "merge" (or tell me what to change). If you have Ollama or llama.cpp on your machine, the exact golden-set commands are at the bottom of the backends report — the owner-review step for this phase.
 - The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging? (Still open — also blocked on a Workers-AI-capable token or your local Ollama for the live LLM.)
 - After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
 
@@ -139,3 +151,4 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - 2026-09-29, merge-2 + infra (owner: "make the two repos temporarily public… unlimited github actions / use this token / yes prep them / proceed") — (1) phase-2 addendum on the branch (50-link trial file + `docs/trials/README.md` guide, Websites switch labels updated to v0.11.0 reality, ci.yml installs Qt system libs — runner images stopped bundling libEGL) then **phase 2 merged into main** (`2cf8f4c`, tag **v0.11.0**); (2) both directory repos flipped **public until Oct 1** per the owner's instruction — a mirror CI gate (`.github/workflows/gate-runner.yml` + `GC_PAT` secret in the public websites repo) now runs the full gate against private GitCurator: first green cloud run since the Sep-24 billing block (run 36569001597, and main after the merge); (3) GitCurator itself was NOT made public — a history secret-scan found the live bot token + a live old PAT in early commits (kept private, options documented); (4) the new Cloudflare token verified ACTIVE but still without Workers AI permission (exact fix in "Inputs still needed"); (5) 50-link trial prepped from the real CSV (same spread rule as the golden set, 50 domains). Full gate green before merging: 27 compiles + 239/239 + offline golden 30/30.
 - 2026-09-29, Phase 3 — **moves as corrections + the backfill (v0.12.0)** on branch `phase-3-moves-backfill` (NOT merged): the §4.4 state machine runs at the start of every batch for both vaults (moves→corrections with front-matter updates + `category_locked` + corrections log; edits flagged; deletes dismissed forever; duplicates/unmanaged/unmapped report-only); taxonomy-aware folder resolution for the Websites vault (nested legal folders never "unmapped" — a real bug the tests caught); locked notes beat the classifier (pipeline + Recategorize dialog); `tools/backfill_websites.py` (resumable checkpoint, polite, batched, dry-run first, Ollama or OpenAI-compatible); run report "Note State" section + `--status` counts. 36 new tests; **full gate 28 compiles + 275/275 + offline golden 30/30, 0 invalid**. Test-caught bugs fixed en route: the dismissed-table name collision with Phase 2 (no such column: url), unmapped moves incorrectly treated as corrections, and the `p3_moc_` tmp-prefix trap (a `_moc` substring in a temp path makes the vault walk skip everything). `docs/reports/PHASE-3-report.md` written. In review.
 - 2026-09-29, merge-3 (owner: "Proceed. merge") — `phase-3-moves-backfill` **merged into main** (`2caad6d`, tag **v0.12.0**, pushed). Local gate re-run green before merging: 28 compiles + 275/275 tests + offline golden 30/30 (0 invalid). Mirror gate green on main after the merge (run 36578119089). Phase 4 (LLM backends) started on branch `phase-4-llm-backends` (v0.13.0): relabel "Cloud API" → "OpenAI-compatible endpoint", shared timeout wrapper, JSON mode with clean fallback, explicit context window (`num_ctx`), `/v1/models` pre-flight, per-task model overrides (`models.classify`/`models.analyze`) + the deferred Phase-3 few-shot item (past corrections as classifier examples).
+- 2026-09-29, Phase 4 — **LLM backends (v0.13.0)** on branch `phase-4-llm-backends` (NOT merged): the relabel (one `CLOUD_PROVIDER_LABEL` constant, GUI/CLI/README), the shared client in `core/llm_client.py` (same timeout wrapper for both providers, JSON-mode `response_format` with a memoized clean fallback, explicit `num_ctx` on every Ollama call + over-budget warnings on both, `/v1/models` pre-flight at batch start + Test Connection, per-task model overrides `models.classify`/`models.analyze` through every router), the deferred Phase-3 few-shot hook (w01 `PAST_CORRECTIONS` from the corrections log), `--live --backend openai|ollama` for the golden runner (+ transient-retry parity, found the hard way), backfill through the shared helpers. 45 new tests; **full gate 28 compiles + 320/320 + offline golden 30/30, 0 invalid**. Live comparison run on both backends (llm-shim + a disclosed Ollama-API bridge, `options.num_ctx` verified on the wire): 18/20 same category, 16/20 same category+subcategory, splits only on the two known judgment-call sites — `docs/reports/golden-backends-report.md`. In review.

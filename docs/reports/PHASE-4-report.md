@@ -57,8 +57,8 @@ empty = the single configured model).
 | Set the context window explicitly (Ollama `num_ctx`; the equivalent server setting elsewhere), never truncate silently | done — `options.num_ctx` on EVERY Ollama call (default 8192; Ollama's own default silently chops long prompts from the front); OpenAI-compatible servers fix the window at launch (llama.cpp `-c` / vLLM `--max-model-len` — documented in the tooltip + README), so the client's job is the over-budget WARNING: `estimate_tokens` vs `llm_num_ctx`, logged BEFORE the call on both providers |
 | A `/v1/models` pre-flight check | done — at batch start (default model + both overrides; warn-never-block) and as step 1 of Test Connection; hidden `/models` routes are reported, not punished |
 | Optional per-task model override (`models.classify`, `models.analyze`) | done — `resolve_task_model` + both worker routers + the backfill; applies to both providers |
-| Tests against a fake local HTTP server: success, timeout, malformed JSON, server that rejects `response_format` | done — `tests/test_phase4.py`: 44 tests; the fake server is a stdlib `http.server`; plus the REAL ollama client library against a fake Ollama server (proves `options.num_ctx` reaches the wire) |
-| Acceptance: CI green; golden set runnable on Ollama and on a llama.cpp server; comparison report | done — gate 28 compiles + 319/319 + offline golden 30/30 (0 invalid); both backends run the golden set (see `docs/reports/golden-backends-report.md`); mirror gate dispatched on the branch |
+| Tests against a fake local HTTP server: success, timeout, malformed JSON, server that rejects `response_format` | done — `tests/test_phase4.py`: 45 tests; the fake server is a stdlib `http.server`; plus the REAL ollama client library against a fake Ollama server (proves `options.num_ctx` reaches the wire) |
+| Acceptance: CI green; golden set runnable on Ollama and on a llama.cpp server; comparison report | done — gate 28 compiles + 320/320 + offline golden 30/30 (0 invalid); both backends run the golden set (see `docs/reports/golden-backends-report.md`); mirror gate dispatched on the branch |
 
 ## 3. The owner's 5-minute self-check
 
@@ -80,7 +80,7 @@ empty = the single configured model).
 
 ## 4. What I verified end to end (sandbox)
 
-- The full gate (28 compiles + 319/319 + offline golden 30/30, 0
+- The full gate (28 compiles + 320/320 + offline golden 30/30, 0
   invalid).
 - The live golden set on the OpenAI-compatible protocol through a real
   HTTP server (the sandbox llm-shim over the z-ai SDK — the same
@@ -136,7 +136,7 @@ empty = the single configured model).
 
 ## 7. Numbers
 
-- 44 new tests (`tests/test_phase4.py`); full suite 319 (was 275).
+- 45 new tests (`tests/test_phase4.py`); full suite 320 (was 275).
 - `llm_client.py` 169 → ~560 lines (the shared client section).
 - Surgical hooks: `gui/app.py` +~120 lines net (relabel + pre-flight +
   ctx field + routers), `cli.py` ~15, `website_pipeline.py` +~70

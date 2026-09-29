@@ -59,7 +59,7 @@ about timeouts, JSON mode and context.
 
 ### Tests
 
-- 44 new (`tests/test_phase4.py`): a stdlib fake OpenAI server (success,
+- 45 new (`tests/test_phase4.py`): a stdlib fake OpenAI server (success,
   response_format rejection + memoized fallback, wall-clock timeout,
   malformed JSON, error objects, connection refused, /v1/models
   pre-flight), ollama_chat (num_ctx on every call, over-budget warning,
@@ -68,7 +68,7 @@ about timeouts, JSON mode and context.
   routing through the real ProcessingWorker routers, config
   compatibility, the relabel, the golden-runner backends, and the
   corrections-as-examples hook.
-- Full gate: 28 compiled modules, 319 tests (was 275), offline golden
+- Full gate: 28 compiled modules, 320 tests (was 275), offline golden
   30/30 with 0 invalid answers.
 
 ## [0.12.0] — Phase 3: moves are corrections + the backfill — 2026-09-29

@@ -720,6 +720,33 @@ class TestRelabel(unittest.TestCase):
 # The golden runner backends
 # ---------------------------------------------------------------------------
 
+class _OllamaFlakyHandler(BaseHTTPRequestHandler):
+    """502s the first N POSTs (transient upstream errors), then works."""
+    fail_left = 2
+    count = {'n': 0}
+
+    def log_message(self, *args):
+        pass
+
+    def _raw(self, code, payload):
+        data = json.dumps(payload).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length') or 0)
+        self.rfile.read(length)
+        _OllamaFlakyHandler.count['n'] += 1
+        if _OllamaFlakyHandler.count['n'] <= _OllamaFlakyHandler.fail_left:
+            self._raw(502, {'error': 'upstream busy'})
+            return
+        self._raw(200, {'model': 'x', 'done': True, 'message': {
+            'role': 'assistant', 'content': '{"category": "Design"}'}})
+
+
 class TestGoldenBackends(unittest.TestCase):
 
     def setUp(self):
@@ -747,6 +774,23 @@ class TestGoldenBackends(unittest.TestCase):
         self.assertEqual(out, '{"category": "Design"}')
         payload = server.state['requests'][-1]
         self.assertEqual(payload['options'], {'num_ctx': 2048})
+
+    def test_live_llm_ollama_retries_transient_5xx(self):
+        """Parity with the openai backend (found in the v0.13.0 backends
+        comparison run): one upstream hiccup must not send the link to
+        _review — transient 5xx/429 errors are retried, twice."""
+        from unittest import mock
+        from gitcurator.tools.run_golden_websites import live_llm_ollama
+        server = HTTPServer(('127.0.0.1', 0), _OllamaFlakyHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        llm = live_llm_ollama(
+            f'http://127.0.0.1:{server.server_port}', 'llama3', 10)
+        with mock.patch('time.sleep') as slept:
+            out = llm([{'role': 'user', 'content': 'hi'}])
+        self.assertEqual(out, '{"category": "Design"}')
+        self.assertEqual(_OllamaFlakyHandler.count['n'], 3)
+        self.assertEqual(slept.call_count, 2)
 
     def test_offline_fake_accepts_task(self):
         from gitcurator.tools.run_golden_websites import offline_llm
