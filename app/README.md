@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.11.0 (Phased Build — Websites Pipeline)
+# GitHub-to-Obsidian v0.12.0 (Phased Build — Websites Pipeline + Corrections)
 
 ## Quick Start
 
@@ -114,6 +114,45 @@ python gitcurator/tools/run_golden_websites.py --live       (your configured LLM
 The golden set lives in `tests/golden/websites.json` (30 links from your
 bookmarks, with proposed expected categories — edit them as you see fit
 and re-run).
+
+### Moves are corrections + the backfill (v0.12.0)
+
+**Your folder moves are corrections, never damage (SPEC §4.4).** At the
+start of every batch — for both vaults — the app compares each vault
+with its persistent record in `cache.db` and acts:
+
+- **moved** → accepted: the note's `category:`/`subcategory:` lines and
+  tags are updated to the folder you chose, `category_locked: true` is
+  added, the correction is logged (append-only `corrections_log`), and
+  the note never moves back. Moving out of `_review/` counts too.
+- **edited by hand** → flagged in the run report, file untouched.
+- **deleted** → the URL is dismissed (never re-added; listed in the
+  report in case it was accidental).
+- **duplicates** → flagged, neither copy touched. **Unmanaged** files
+  (no `source:`) → ignored and listed. **Unmapped folders** → kept
+  exactly as placed, reported — no category is ever invented.
+
+The first run after v0.11.0/v0.12.0 records a **silent baseline** (your
+600+ existing notes are never flagged); a dry-run detects and logs
+without recording. The classifier never overrides a locked note
+(retry upgrades included), and the Recategorize dialog skips locked
+notes. The run report gains a "Note State" section; `--cli --status`
+shows baseline / corrections / dismissed counts per vault.
+
+**The backfill** loads your existing bookmarks into the Websites vault,
+safely:
+
+```cmd
+python gitcurator/tools/backfill_websites.py ../unique_links.csv --dry-run
+python gitcurator/tools/backfill_websites.py ../unique_links.csv --limit 30
+```
+
+GitHub links are excluded by the same routing the app uses; the tool is
+resumable (per-URL checkpoint in `cache.db` — interrupt it any time,
+re-run and it continues exactly where it stopped), polite (fixed pause
++ per-domain pause), works with local Ollama or any OpenAI-compatible
+endpoint (`--api-url/--api-key/--model`), and can write a Markdown
+batch report (`--report`).
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd

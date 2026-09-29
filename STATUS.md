@@ -13,8 +13,8 @@ Keep it short, factual, and in plain language.
 |---|---|---|---|---|---|
 | 0 | Groundwork | approved | `phase-0-groundwork` (**merged into main 2026-09-29**) | 0.09.5 | yes — review waived by owner 2026-09-29 |
 | 1 | Vault settings and ownership | approved | `phase-1-vault-settings` (**merged into main 2026-09-29**, tag v0.10.0) | 0.10.0 | yes — owner said "Merge. proceed" 2026-09-29 |
-| 2 | Website pipeline | in review | `phase-2-website-pipeline` (pushed, NOT merged) | 0.11.0 | pending |
-| 3 | Moves as corrections, and the backfill | not started | | | |
+| 2 | Website pipeline | approved | `phase-2-website-pipeline` (**merged into main 2026-09-29**, tag v0.11.0) | 0.11.0 | yes — owner said "proceed" 2026-09-29 (golden set approved as proposed; 50-link trial prepped) |
+| 3 | Moves as corrections, and the backfill | in review | `phase-3-moves-backfill` (pushed, NOT merged) | 0.12.0 | pending |
 | 4 | LLM backends | not started | | | |
 | 5 | Mirror into Manual Notes | not started | | | |
 | 6 | Linking | not started | | | |
@@ -51,18 +51,33 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Tests: `tests/test_phase2.py` (71). CI: 27 compiled modules, 239 tests + the offline golden run.
 - Report for the owner: `docs/reports/PHASE-2-report.md`; live golden report: `docs/reports/golden-websites-report.md`.
 
+## Phase 3 summary (what exists on `phase-3-moves-backfill`)
+
+- `core/note_state.py` grown into the full §4.4 machine: `apply_corrections` (front-matter line surgery + atomic write + lock + corrections log), `run_start_check` (baseline → detect → apply; dry-run detects and logs, records nothing), taxonomy-aware folder resolver for the Websites vault, `move_summary_lines` ("N notes moved from X to Y").
+- New `cache.db` tables: `corrections_log` (append-only) + `note_state_dismissed` (deleted notes; named to avoid Phase 2's `dismissed_urls` collision — caught by the full suite).
+- Wiring: start-of-run state machine for BOTH vaults (pipeline switches respected, dry-run aware); dismissed URLs filtered before any GitHub API call; run report "Note State" section; `--cli --status` corrections/dismissed counts; Recategorize dialog skips `category_locked` notes.
+- Websites classifier never overrides a locked note (including retry upgrades) — tested through the real pipeline with the fake LLM.
+- `tools/backfill_websites.py`: resumable (`backfill_state` checkpoint in `cache.db`), polite (fixed + per-domain pauses), batched (`--limit 30`), dry-run first, `--report`, Ollama or any OpenAI-compatible endpoint.
+- Tests: `tests/test_phase3.py` (36). CI: 28 compiled modules, 275 tests + the offline golden run.
+- Report for the owner: `docs/reports/PHASE-3-report.md`.
+
 ## Inputs still needed from the owner
 
 - [x] `website-library-categories.md` placed at `app/taxonomy/` (done; needed by Phase 2)
+- [x] **Phase 2 review** — owner said "proceed" 2026-09-29: golden set approved as proposed, phase 2 merged (v0.11.0), 50-link trial prepped (`docs/trials/`)
+- [ ] **Phase 3 review**: read `docs/reports/PHASE-3-report.md`; then either "merge" or tell me what to change. The 5-minute self-check + the SPEC owner-review walkthrough (dry-run backfill → 5-link batch → move two notes by hand → run again) are in the report §3.
+- [ ] **Cloudflare token permission**: the new Workers AI token (cfut_…, given 2026-09-29) verifies as active but still lacks the Workers AI permission — every `/ai` endpoint answers "Authentication error". Fix: Cloudflare dashboard → My Profile → API Tokens → the token → Edit → add **Account → Workers AI → Read** → Save. Then the app's cloud provider can use `cloud_api_url = https://api.cloudflare.com/client/v4/accounts/20b665b0bc839144c1e9f16aaf07953d/ai/v1`.
 - [x] **`unique_links.csv`** (done — the owner committed it to the repo root on `main`; the picker ran for real: 784 rows → 30 candidates across 30 domains → `app/tests/golden/websites_candidates.json`, committed on `phase-0-groundwork`)
 - [x] **Phase 1 inputs** (received 2026-09-29, see "Vault map" below)
 - [ ] Manual Notes vault path (needed by Phase 5; optional until then)
 - [x] ~~Path of a **copy** of the GitHub vault, for the Phase 0 owner review~~ **waived by the owner 2026-09-29** ("this is unnecessary") — Phase 0 approved without the scan. The scan tool stays available any time via one command.
-- [ ] **Phase 2 review**: read `docs/reports/PHASE-2-report.md` and `docs/reports/golden-websites-report.md`; then either "merge" or tell me what to change. The golden set's expected categories are MY proposal — edit `app/tests/golden/websites.json` freely and re-run the live report.
-- [ ] **GitHub Actions billing**: runners fail to start since 2026-09-24 ("recent account payments have failed or your spending limit needs to be increased") — fix in GitHub Settings → Billing & plans. Local gate is green and mirrors CI exactly.
-- [ ] **Cloudflare tokens**: both provided tokens are valid but carry no Workers AI permission (the /ai endpoints return "Authentication error") — if you want Workers AI as the cloud LLM, the token needs that permission added.
+- [ ] **Phase 2 review**: superseded 2026-09-29 — owner said "proceed" (approved as proposed, merged v0.11.0).
+- [x] **GitHub Actions billing**: worked around 2026-09-29 per the owner's instruction — both directory repos public until Oct 1 (unlimited free minutes); the mirror gate in the websites repo runs the full suite against private GitCurator. Billing itself still needs fixing in GitHub Settings → Billing & plans for private-repo Actions.
+- [x] **Cloudflare tokens**: the owner provided a NEW token 2026-09-29 — still missing the Workers AI permission (see "Inputs still needed" above for the exact fix).
 
 ## Vault map (owner-provided 2026-09-29 — the single source of truth for Phase 1+)
+
+**Temporary repo state (2026-09-29 → 2026-10-01, owner instruction):** both directory repos are **PUBLIC** until the month resets (unlimited free GitHub Actions minutes — see the mirror CI gate below). **Do not run a vault seal to either repo while public** — notes would be public. Revert both to private after Oct 1. GitCurator itself must stay **private**: its git history contains live secrets (Telegram bot token, an old-but-live GitHub PAT, api_id/api_hash) — see the session log 2026-09-29 (phase-3 session) for remediation options.
 
 | What | Windows path / repo | Config key it will land in |
 |---|---|---|
@@ -96,9 +111,15 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 
 ## Open questions for the owner
 
-- Phase 1 review: read `docs/reports/PHASE-1-report.md`; then "merge" (or tell me what to change first).
-- After merge + first real run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
-- For Phase 2 (when you say go): the golden-set list (30 candidates) needs your approval — including the one unresolved t.co short link.
+- Phase 3 review: read `docs/reports/PHASE-3-report.md`; then "merge" (or tell me what to change).
+- The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging?
+- After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
+
+## Notes for Phase 3
+
+- **Mirror CI gate** (2026-09-29): the public `my-awesome-websites-directory` repo runs GitCurator's exact gate against the private repo via the `GC_PAT` secret + `repository_dispatch` — free unlimited Actions minutes while the billing block lasts. Trigger: API call `event_type=gate` with optional `ref` (any branch/tag); weekly heartbeat cron. First green cloud run since Sep 24: run 36569001597 (v0.11.0 gate on phase-2 branch, then main).
+- **Secrets in GitCurator's history** (found 2026-09-29 before making it public — it stayed private): the LIVE Telegram bot token + api_id/api_hash in old commits (`app/config.json`, `installer.config.json`, `cloudflare-bot/DEPLOYMENT.md` — all since removed from HEAD, but present in history), plus ONE still-live fine-grained GitHub PAT and one dead ghp_ token. Options if the owner ever wants it public: (a) rotate the bot token (BotFather /revoke) + the PAT, accept the permanent api_id/hash exposure; (b) history purge (git filter-repo — rewrites every commit hash, needs a re-clone on Windows); (c) keep it private (current choice). Recommended regardless: rotate that old PAT.
+- Runner-image fix: GitHub runners stopped bundling `libEGL.so.1` (same issue as the build sandbox) — both CI files now `apt-get install libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0` before the suite.
 
 ## Notes for Phase 2 (from the real golden-set run)
 
@@ -115,3 +136,5 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - 2026-09-29, Phase 0 (same day, close-out) — owner waived the vault-copy scan review; Phase 0 marked **approved**. Branch left unmerged; awaiting the owner's word on merging before Phase 1 starts on top of it.
 - 2026-09-29, pre-Phase-1 — owner provided all Phase 1 inputs (vault paths + backup repo names). Agent created both private repos via API and verified them (`assadigit/my-awesome-github-directory`, `assadigit/my-awesome-websites-directory` — both private, empty). Recorded in the Vault map. No code changes; bookkeeping only.
 - 2026-09-29, Phase 1 — owner said "merge, then go": phase-0-groundwork merged into main (34fdc63), `phase-1-vault-settings` branched. Built: note_state record + baseline, ownership stamps + banner on new notes (human placeholder sections dropped from NEW notes per SPEC §4.5), 5 new config keys + GUI vault page + CLI status vault map, pipeline switches (github default on / websites default off), second VaultSeal gated on the websites switch. 38 new tests; full gate 21 compiles + 168/168 green. `docs/reports/PHASE-1-report.md` written. Branch pushed, NOT merged — in review.
+- 2026-09-29, merge-2 + infra (owner: "make the two repos temporarily public… unlimited github actions / use this token / yes prep them / proceed") — (1) phase-2 addendum on the branch (50-link trial file + `docs/trials/README.md` guide, Websites switch labels updated to v0.11.0 reality, ci.yml installs Qt system libs — runner images stopped bundling libEGL) then **phase 2 merged into main** (`2cf8f4c`, tag **v0.11.0**); (2) both directory repos flipped **public until Oct 1** per the owner's instruction — a mirror CI gate (`.github/workflows/gate-runner.yml` + `GC_PAT` secret in the public websites repo) now runs the full gate against private GitCurator: first green cloud run since the Sep-24 billing block (run 36569001597, and main after the merge); (3) GitCurator itself was NOT made public — a history secret-scan found the live bot token + a live old PAT in early commits (kept private, options documented); (4) the new Cloudflare token verified ACTIVE but still without Workers AI permission (exact fix in "Inputs still needed"); (5) 50-link trial prepped from the real CSV (same spread rule as the golden set, 50 domains). Full gate green before merging: 27 compiles + 239/239 + offline golden 30/30.
+- 2026-09-29, Phase 3 — **moves as corrections + the backfill (v0.12.0)** on branch `phase-3-moves-backfill` (NOT merged): the §4.4 state machine runs at the start of every batch for both vaults (moves→corrections with front-matter updates + `category_locked` + corrections log; edits flagged; deletes dismissed forever; duplicates/unmanaged/unmapped report-only); taxonomy-aware folder resolution for the Websites vault (nested legal folders never "unmapped" — a real bug the tests caught); locked notes beat the classifier (pipeline + Recategorize dialog); `tools/backfill_websites.py` (resumable checkpoint, polite, batched, dry-run first, Ollama or OpenAI-compatible); run report "Note State" section + `--status` counts. 36 new tests; **full gate 28 compiles + 275/275 + offline golden 30/30, 0 invalid**. Test-caught bugs fixed en route: the dismissed-table name collision with Phase 2 (no such column: url), unmapped moves incorrectly treated as corrections, and the `p3_moc_` tmp-prefix trap (a `_moc` substring in a temp path makes the vault walk skip everything). `docs/reports/PHASE-3-report.md` written. In review.

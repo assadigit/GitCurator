@@ -670,6 +670,24 @@ class WebsitePipeline:
         upgraded = bool(in_vault and prior
                         and prior.get('fetch_status') == 'failed')
 
+        # v0.12.0 — Phase 3 (locked-skip, SPEC §4.4/§6): a note the owner
+        # moved by hand is LOCKED — its folder placement beats the
+        # classifier. When a locked row exists (e.g. a _review placeholder
+        # the owner moved into a category folder, later upgraded by a
+        # successful retry), the model's category/subcategory are ignored
+        # and the locked row's values are written instead.
+        locked_row = None
+        if self.note_state_db is not None:
+            try:
+                from gitcurator.core import note_state as _note_state
+                _row = self.note_state_db.row_for(
+                    _note_state.VAULT_WEBSITES, canonical)
+                if _row is not None and _row.get('locked') \
+                        and _row.get('category'):
+                    locked_row = _row
+            except Exception:
+                locked_row = None
+
         # ---- 3. fetch ------------------------------------------------------
         fetch = self.fetch_fn(
             url, timeout_s=self.fetch_timeout_s,
@@ -709,30 +727,40 @@ class WebsitePipeline:
         description = page.meta_description or ''
 
         # ---- 5. classify ---------------------------------------------------
-        category, conf1 = self._classify_category(
-            canonical, title, description, page.text)
-        if not category or conf1 == LOW_CONFIDENCE:
-            # Low confidence is NOT a fetch failure — no fetch retry. The
-            # note waits in _review for the owner's move (a correction,
-            # SPEC §4.4), and the run report lists it.
-            reason = ("classification confidence was low"
-                      if category else "no valid category after retries")
-            note = build_review_note(
-                canonical, fetch_status, reason, title=title)
-            path = self._review_path(canonical)
-            self._write_note(path, note)
-            self._record(canonical, path, note, '', '', fetch_status)
-            result.update(outcome='review', note_path=path, error=reason,
-                          fetch_status=fetch_status)
-            self.counters['review'] += 1
-            self.last_results.append(result)
-            self.log(f"🗂️ {url}: {reason} — filed under _review", "warning")
-            return result
+        if locked_row is not None:
+            # The owner already placed this note — no model call, no
+            # _review: their correction IS the classification.
+            category = locked_row['category']
+            subcategory = locked_row.get('subcategory') or ''
+            self.log(f"🔒 {url}: locked note — owner's placement "
+                     f"({category}"
+                     + (f" / {subcategory}" if subcategory else "")
+                     + ") kept, classifier skipped", "info")
+        else:
+            category, conf1 = self._classify_category(
+                canonical, title, description, page.text)
+            if not category or conf1 == LOW_CONFIDENCE:
+                # Low confidence is NOT a fetch failure — no fetch retry. The
+                # note waits in _review for the owner's move (a correction,
+                # SPEC §4.4), and the run report lists it.
+                reason = ("classification confidence was low"
+                          if category else "no valid category after retries")
+                note = build_review_note(
+                    canonical, fetch_status, reason, title=title)
+                path = self._review_path(canonical)
+                self._write_note(path, note)
+                self._record(canonical, path, note, '', '', fetch_status)
+                result.update(outcome='review', note_path=path, error=reason,
+                              fetch_status=fetch_status)
+                self.counters['review'] += 1
+                self.last_results.append(result)
+                self.log(f"🗂️ {url}: {reason} — filed under _review", "warning")
+                return result
 
-        subcategory, conf2 = self._classify_subcategory(
-            canonical, category, title, description, page.text)
-        if conf2 == LOW_CONFIDENCE:
-            subcategory = ''      # low-confidence subcategory: category only
+            subcategory, conf2 = self._classify_subcategory(
+                canonical, category, title, description, page.text)
+            if conf2 == LOW_CONFIDENCE:
+                subcategory = ''      # low-confidence subcategory: category only
 
         # ---- 6. analyze ----------------------------------------------------
         try:

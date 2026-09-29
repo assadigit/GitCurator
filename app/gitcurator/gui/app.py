@@ -2087,18 +2087,58 @@ class ProcessingWorker(QThread):
 
         # v0.10.0 — Phase 1 (note state): ONE-TIME silent baseline of the
         # GitHub vault (SPEC §4.4: "the first run after this feature ships
-        # records a baseline silently"). Records every note's path,
-        # fingerprint and folder-derived category. Nothing ACTS on the
-        # record yet — Phase 3 turns on the start-of-run comparison
-        # (moves accepted, edits flagged, deletes dismissed).
-        if vault_path and note_state_db is not None:
+        # records a baseline silently").
+        # v0.12.0 — Phase 3: this is now the FULL start-of-run §4.4 pass for
+        # BOTH vaults — baseline-if-empty, then detect + act: the owner's
+        # moves become corrections (front-matter updated, category locked,
+        # correction logged), deleted notes are dismissed (never re-added),
+        # edits/duplicates/unmapped are report-only. A dry-run detects and
+        # logs, never records (run_start_check enforces that itself).
+        self._note_state_run = {}
+        _pipes_cfg = self.config.get('pipelines') or {}
+        _github_on = _pipes_cfg.get('github', True)
+        _websites_on = _pipes_cfg.get('websites', False)
+        if _github_on and vault_path:
             try:
-                _note_state.record_baseline_if_empty(
-                    _note_state.VAULT_GITHUB, vault_path,
-                    db_path=note_state_db.db_path,
+                self._note_state_run['github'] = _note_state.run_start_check(
+                    _note_state.VAULT_GITHUB, vault_path, db=note_state_db,
                     log=self.log_message.emit)
             except Exception:
-                pass  # best-effort by design
+                self._note_state_run['github'] = None  # never break a run
+        if _websites_on:
+            _web_vault = (self.config.get('website_vault_path') or '').strip()
+            if _web_vault:
+                _web_taxonomy = None
+                try:
+                    from gitcurator.core.taxonomy import \
+                        load_taxonomy_from_config
+                    _web_taxonomy = load_taxonomy_from_config(self.config)
+                except Exception as exc:
+                    self.log_message.emit(
+                        f"⚠️ Note state: websites taxonomy unavailable "
+                        f"({exc}) — websites vault check skipped", "warning")
+                if _web_taxonomy is not None:
+                    try:
+                        self._note_state_run['websites'] = \
+                            _note_state.run_start_check(
+                                _note_state.VAULT_WEBSITES, _web_vault,
+                                db=note_state_db, taxonomy=_web_taxonomy,
+                                log=self.log_message.emit)
+                    except Exception:
+                        self._note_state_run['websites'] = None
+
+        # v0.12.0 — Phase 3: the dismissed list for the GitHub loop (notes
+        # the owner deleted — §4.4 "never re-add"). Checked per-URL before
+        # any processing work below.
+        _dismissed_github = set()
+        if note_state_db is not None:
+            try:
+                _dismissed_github = note_state_db.dismissed_set(
+                    _note_state.VAULT_GITHUB)
+            except Exception:
+                _dismissed_github = set()
+        dismissed_skipped = 0
+        self._dismissed_skipped = 0
 
         # v22 Feature 6: Batch Undo — snapshot the vault BEFORE processing so
         # we can compute the list of NEW files written by this batch and let
@@ -2196,6 +2236,26 @@ class ProcessingWorker(QThread):
                             pass
                     self.progress_updated.emit(self._current_position, self.total)
                     continue
+
+                # v0.12.0 — Phase 3 (§4.4 "deleted"): a URL whose note the
+                # owner deleted is NEVER re-added. Checked here, BEFORE any
+                # GitHub API call — the note is gone, so the vault-index
+                # dedupe below cannot know about it.
+                if _dismissed_github and \
+                        _note_state.normalize_url(url) in _dismissed_github:
+                    self.log_message.emit(
+                        f"🚫 Dismissed (you deleted its note): {url}", "info")
+                    dismissed_skipped += 1
+                    if self.link_tracker:
+                        try:
+                            self.link_tracker.mark_skipped(
+                                url, "dismissed (note deleted)")
+                        except Exception:
+                            pass
+                    self.progress_updated.emit(self._current_position,
+                                               self.total)
+                    continue
+                self._dismissed_skipped = dismissed_skipped
 
                 parts = url.replace("https://github.com/", "").split("/")
                 if len(parts) < 2:
@@ -2362,6 +2422,10 @@ class ProcessingWorker(QThread):
                     cache.reset_dead_links(url)
                 except Exception:
                     pass
+
+                # v0.12.0 — Phase 3 (§4.4 "deleted") — the dismissed check
+                # runs earlier, with the dead-link filter above (before any
+                # GitHub API call).
 
                 # === DEDUP CHECK (vault index is ground truth) ===
                 # 1. Check the vault index FIRST — if the note exists in the
@@ -2872,6 +2936,12 @@ class ProcessingWorker(QThread):
                 f"🚫 {dead_skipped} dead link(s) skipped — 404 quarantine "
                 f"(confirmed after {DEAD_LINK_THRESHOLD} attempts in earlier runs; "
                 f"More ▸ View 404 Quarantine to manage).", "info")
+        # v0.12.0 — Phase 3: one aggregate line for dismissed URLs (the
+        # GitHub notes the owner deleted — never re-added, §4.4).
+        if dismissed_skipped:
+            self.log_message.emit(
+                f"🗑️ {dismissed_skipped} dismissed link(s) skipped — you "
+                "deleted their notes (run report lists them).", "info")
         if summary_path:
             self.log_message.emit(f"📝 Summary log saved: {summary_path}", "success")
 
@@ -3250,6 +3320,84 @@ class ProcessingWorker(QThread):
             lines.append(f"| ⏭️ Skipped (dedup) | {skipped_count} |")
             lines.append(f"| 📁 Categories used | {len(categories)} |")
             lines.append("")
+
+            # v0.12.0 — Phase 3: the note-state section (SPEC: "add its
+            # results (moved, edited, deleted, duplicate, unmanaged,
+            # unmapped) to the run report").
+            ns_run = getattr(self, '_note_state_run', None) or {}
+            ns_lines = []
+            for _vkey, _ns in ns_run.items():
+                if not _ns:
+                    continue
+                _ch = _ns.get('changes') or {}
+                _ap = _ns.get('applied') or {}
+                _counts = [
+                    _ap.get('moved_applied', 0),
+                    _ap.get('moved_unmapped', 0),
+                    _ap.get('dismissed', 0),
+                    len(_ch.get('edited') or []),
+                    len(_ch.get('duplicates') or []),
+                    len(_ch.get('unmanaged') or []),
+                    len(_ch.get('unmapped') or []),
+                    len(_ch.get('unknown') or []),
+                ]
+                if not any(_counts) and _ns.get('baseline') is None:
+                    continue
+                _vname = 'GitHub' if _vkey == 'github' else 'Websites'
+                ns_lines.append(f"### {_vname} vault")
+                ns_lines.append("")
+                if _ns.get('baseline') is not None:
+                    ns_lines.append(
+                        f"- 📋 Baseline recorded: {_ns['baseline']} notes "
+                        "(first run after v0.12.0 — nothing flagged)")
+                if _ap.get('moved_applied'):
+                    ns_lines.append(f"- 📌 Moves accepted as corrections: "
+                                    f"{_ap['moved_applied']}")
+                    for _ml in _note_state.move_summary_lines(
+                            _ap.get('corrections') or []):
+                        ns_lines.append(f"  - {_ml}")
+                if _ap.get('moved_unmapped'):
+                    ns_lines.append(
+                        f"- 📍 Moved into unmapped folders (kept as-is): "
+                        f"{_ap['moved_unmapped']}")
+                if _ap.get('dismissed'):
+                    ns_lines.append(
+                        f"- 🗑️ Deleted notes dismissed (never re-added): "
+                        f"{_ap['dismissed']}")
+                if _ch.get('edited'):
+                    ns_lines.append(f"- ✏️ Edited by hand (skipped, listed): "
+                                    f"{len(_ch['edited'])}")
+                    for _e in _ch['edited'][:10]:
+                        ns_lines.append(f"  - {_e.get('path')}")
+                if _ch.get('duplicates'):
+                    ns_lines.append(
+                        f"- ⚠️ Duplicates (flagged, untouched): "
+                        f"{len(_ch['duplicates'])}")
+                if _ch.get('unmanaged'):
+                    ns_lines.append(
+                        f"- 📄 Unmanaged files (no source, ignored): "
+                        f"{len(_ch['unmanaged'])}")
+                if _ch.get('unmapped'):
+                    ns_lines.append(
+                        f"- ❓ Notes in unmapped folders (kept, reported): "
+                        f"{len(_ch['unmapped'])}")
+                    for _u in _ch['unmapped'][:10]:
+                        ns_lines.append(
+                            f"  - {_u.get('folder')} — {_u.get('path')}")
+                if _ch.get('unknown'):
+                    ns_lines.append(
+                        f"- ❔ Notes with an unrecorded source (listed): "
+                        f"{len(_ch['unknown'])}")
+                ns_lines.append("")
+            if getattr(self, '_dismissed_skipped', 0):
+                ns_lines.append(
+                    f"- 🚫 Dismissed URLs skipped in this batch: "
+                    f"{self._dismissed_skipped}")
+                ns_lines.append("")
+            if ns_lines:
+                lines.append("## 🔄 Note State (moves are corrections)")
+                lines.append("")
+                lines.extend(ns_lines)
 
             # LinkTracker verification report
             if link_tracker_report:
@@ -9030,6 +9178,7 @@ class MainWindow(QMainWindow):
 
         # Collect all notes with their current categories
         notes = []
+        locked_count = 0
         for root, dirs, files in os.walk(vault):
             for fname in files:
                 if not fname.endswith('.md'):
@@ -9038,11 +9187,23 @@ class MainWindow(QMainWindow):
                 try:
                     with open(fpath, 'r', encoding='utf-8') as f:
                         content = f.read(1000)
+                    # v0.12.0 — Phase 3 (§4.4): locked notes (the owner
+                    # moved them by hand — a correction) are never
+                    # re-categorized, not even listed here.
+                    if re.search(r'^category_locked:\s*true', content,
+                                 re.MULTILINE):
+                        locked_count += 1
+                        continue
                     cat_match = re.search(r'category:\s*(.+)', content)
                     cat = cat_match.group(1).strip() if cat_match else "Unknown"
                     notes.append({'path': fpath, 'name': fname, 'category': cat})
                 except Exception:
                     pass
+
+        if locked_count:
+            self.log_message.emit(
+                f"🔒 {locked_count} locked note(s) skipped — your own moves "
+                "are never re-categorized.", "info")
 
         if not notes:
             self._show_custom_message_box("Recategorize", "No notes found in vault.", success=True)
