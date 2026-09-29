@@ -292,11 +292,12 @@ def main(argv=None):
     ap.add_argument('--api-key', default='', help='live: bearer token'
                     ' (overrides config; never printed)')
     ap.add_argument('--model', default='', help='live: model name')
-    ap.add_argument('--backend', choices=['openai', 'ollama'],
+    ap.add_argument('--backend', choices=['openai', 'ollama', 'llamacpp'],
                     default='openai',
                     help='live: backend to run against (default openai ='
                     ' any OpenAI-compatible endpoint: llama.cpp, vLLM, LM'
-                    ' Studio, cloud; ollama = local Ollama server)')
+                    ' Studio, cloud; ollama = local Ollama server;'
+                    ' llamacpp = local llama-server, auto-detected)')
     ap.add_argument('--num-ctx', type=int, default=0,
                     help='live: explicit context window in tokens (0 ='
                     ' config llm_num_ctx / the server default)')
@@ -361,6 +362,43 @@ def main(argv=None):
                      + '. Expected values are the agent\'s proposal — '
                        'the owner approves or edits them in '
                        'tests/golden/websites.json.')
+        elif args.backend == 'llamacpp':
+            # v0.15.0 — llama.cpp engine detection: /props positive ID +
+            # the model auto-detected from the running llama-server;
+            # chat rides the OpenAI-compatible path (live_llm).
+            from gitcurator.core import llm_client as _llm
+            base = (args.api_url or cfg.get('llamacpp_api_url', '')
+                    or _llm.LLAMACPP_DEFAULT_BASE + '/v1')
+            api_key = args.api_key or cfg.get('llamacpp_api_key', '')
+            probe = _llm.probe_llamacpp(base, api_key)
+            if not probe.get('found'):
+                probe = _llm.detect_llamacpp(api_key) or probe
+            if not probe.get('found'):
+                print(f'llama.cpp server not detected '
+                      f'({probe.get("detail")}) — start it with: '
+                      'llama-server -m <model>.gguf --port 8080',
+                      file=sys.stderr)
+                return 2
+            model = (args.model or cfg.get('llamacpp_model', '')
+                     or probe.get('model') or '')
+            if not model:
+                print('llama.cpp mode needs --model (or a server with a '
+                      'loaded model)', file=sys.stderr)
+                return 2
+            if probe.get('models') and model.lower() not in {
+                    n.lower() for n in probe['models']}:
+                print(f"⚠️ '{model}' is not in the /v1/models list "
+                      f"({', '.join(probe['models'][:5])}) — trying anyway",
+                      file=sys.stderr)
+            api_url = probe['base_url'] + '/v1'
+            llm = live_llm(api_url, api_key, model, args.timeout,
+                           num_ctx=num_ctx)
+            notes = (f'Live mode (llama.cpp): real fetches + `{model}` at '
+                     f'`{probe["base_url"]}`'
+                     + (f' (llm_num_ctx={num_ctx})' if num_ctx else '')
+                     + '. Expected values are the agent\'s proposal —'
+                       ' the owner approves or edits them in'
+                       ' tests/golden/websites.json.')
         else:
             model = args.model or cfg.get('cloud_model', '')
             if not api_url or not model:

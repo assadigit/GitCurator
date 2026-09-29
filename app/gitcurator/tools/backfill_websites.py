@@ -210,15 +210,41 @@ def _vault_source_set(vault_path):
 def _build_llm_call(config, args):
     """Same router as the worker's website phase: an OpenAI-compatible
     endpoint (llama.cpp / vLLM / LM Studio / Cloudflare Workers AI all
-    speak it) or a local Ollama. v0.13.0 — Phase 4: both paths go through
-    the shared llm_client helpers (timeout wrapper, JSON mode with clean
-    fallback, explicit num_ctx) and honor the per-task model overrides
-    (models.classify / models.analyze) — the llm closure takes the task
-    tag the pipeline now passes."""
+    speak it), the DETECTED local llama.cpp server (v0.15.0 — /props
+    positive ID + auto-detected model), or a local Ollama. v0.13.0 —
+    Phase 4: every path goes through the shared llm_client helpers
+    (timeout wrapper, JSON mode with clean fallback, explicit num_ctx)
+    and honors the per-task model overrides (models.classify /
+    models.analyze) — the llm closure takes the task tag the pipeline
+    now passes."""
     from gitcurator.core import llm_client as _llm
     provider = (args.provider or config.get('llm_provider', 'ollama'))
     num_ctx = int(config.get('llm_num_ctx', _llm.DEFAULT_NUM_CTX) or 0) or None
-    if provider == 'cloud' or args.api_url:
+
+    if provider == 'llamacpp':
+        # v0.15.0 — llama.cpp engine detection: probe the configured URL,
+        # scan the common ports when it is dead, and take the server's own
+        # model when none is configured — then ride the OpenAI-compatible
+        # path (llama-server speaks the protocol natively).
+        base = (args.api_url or config.get('llamacpp_api_url', '')
+                or _llm.LLAMACPP_DEFAULT_BASE + '/v1')
+        api_url = _llm.normalize_llamacpp_api_url(base)
+        api_key = args.api_key or config.get('llamacpp_api_key', '')
+        default_model = args.model or config.get('llamacpp_model', '')
+        if not default_model:
+            probe = _llm.probe_llamacpp(api_url, api_key)
+            if not probe.get('found'):
+                probe = _llm.detect_llamacpp(api_key) or probe
+            if probe.get('found'):
+                api_url = probe['base_url'] + '/v1'
+                default_model = probe.get('model') or ''
+        if not default_model:
+            raise SystemExit(
+                "llama.cpp provider needs a running llama-server (its "
+                "model is detected automatically) or --api-url and "
+                "--model (or config.json llamacpp_api_url/llamacpp_model)")
+        route_label = f"llama.cpp {api_url}"
+    elif provider == 'cloud' or args.api_url:
         api_url = args.api_url or config.get('cloud_api_url', '')
         api_key = args.api_key or config.get('cloud_api_key', '')
         default_model = args.model or config.get('cloud_model', '')
@@ -226,6 +252,11 @@ def _build_llm_call(config, args):
             raise SystemExit(
                 "cloud provider needs --api-url and --model "
                 "(or config.json cloud_api_url/cloud_model)")
+        route_label = api_url
+    else:
+        api_url = None  # Ollama route below
+
+    if api_url is not None:
         timeout = float(args.timeout or config.get('llm_timeout_s', 300)
                         or 300)
 
@@ -235,7 +266,7 @@ def _build_llm_call(config, args):
                 api_url, api_key, model, messages, timeout,
                 json_mode=True, num_ctx=num_ctx)
 
-        print(f"  LLM: {default_model} via {api_url}"
+        print(f"  LLM: {default_model} via {route_label}"
               + (f" (num_ctx={num_ctx})" if num_ctx else ""))
         return llm
 
@@ -447,13 +478,16 @@ def main(argv=None):
                              "happen")
     parser.add_argument('--report', default='',
                         help="also write a Markdown report to this path")
-    parser.add_argument('--provider', choices=('ollama', 'cloud'),
-                        default='', help="override llm_provider")
+    parser.add_argument('--provider',
+                        choices=('ollama', 'cloud', 'llamacpp'),
+                        default='', help="override llm_provider "
+                        "(llamacpp = the detected local llama-server)")
     parser.add_argument('--api-url', default='',
                         help="OpenAI-compatible endpoint "
-                             "(overrides cloud_api_url)")
+                             "(overrides cloud_api_url / llamacpp_api_url)")
     parser.add_argument('--api-key', default='',
-                        help="API key (overrides cloud_api_key)")
+                        help="API key (overrides cloud_api_key / "
+                             "llamacpp_api_key)")
     parser.add_argument('--model', default='',
                         help="model name (overrides cloud_model / "
                              "ollama_model)")

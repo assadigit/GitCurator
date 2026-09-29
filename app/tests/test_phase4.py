@@ -561,7 +561,13 @@ class TestWorkerRouters(unittest.TestCase):
         self.addCleanup(self._restore)
 
     def _restore(self):
-        gui_app.ProcessingWorker._call_cloud_llm = self._orig_cloud
+        # v0.15.0: staticmethod re-wrap — class access unwraps the original
+        # into a plain function, and assigning that back would turn every
+        # LATER self._call_cloud_llm(...) into a bound call (self passed as
+        # api_url). Latent until test_llamacpp's end-to-end router test ran
+        # after these recorder tests in one process.
+        gui_app.ProcessingWorker._call_cloud_llm = staticmethod(
+            self._orig_cloud)
         _wp.APP_DIR = self._orig_app_dir
 
     def _worker(self, config):
