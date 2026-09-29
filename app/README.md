@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.14.1 (Phased Build — first Windows zip)
+# GitHub-to-Obsidian v0.15.0 (Phased Build — llama.cpp engine detection)
 
 ## Quick Start
 
@@ -209,6 +209,40 @@ python gitcurator/tools/run_golden_websites.py --live --backend openai --api-url
 Both run the same 30 links through the same pipeline; reports land in
 `app/reports/golden/` (…`live-ollama.md` / …`live-openai.md`) for a
 side-by-side check.
+
+### llama.cpp engine detection (v0.15.0)
+
+The app always saw two LLM providers — 🧠 Local Ollama and the custom
+☁️ OpenAI-compatible endpoint. A local **llama.cpp server
+(`llama-server`)** is now the third, and it is **DETECTED like Ollama**
+instead of hand-configured like the cloud endpoint:
+
+- Settings → 🧠 LLM → radio **🦙 llama.cpp (local)** → **🔍 Detect**
+  scans the common llama-server ports (8080 first) and positively
+  identifies llama.cpp through its `/props` route — a vLLM/LM Studio/
+  dev server answering on those ports is skipped, never misreported.
+- **The model is detected automatically**: the loaded model's id comes
+  from `/v1/models` (the `/props` alias/basename is the fallback), the
+  model field is filled for you, and an empty `llamacpp_model` in
+  `config.json` means "ask the server". `/health` is reported too
+  (⏳ still-loading servers say so).
+- Every batch pre-flight does the same: probe the configured URL, scan
+  when it is dead (switching + saving what it finds), auto-fill the
+  model, and abort with the exact `llama-server -m <model>.gguf
+  --port 8080` command when nothing is detected — 100 per-link failures
+  against a known-dead server help nobody.
+- Chat rides the SAME hardened OpenAI-compatible path (wall-clock
+timeout, JSON mode with fallback, the over-budget `llm_num_ctx`
+warning) — llama-server speaks the protocol natively.
+- Also wired: `--cli --init` (choice 3), `--cli --status`, the run
+  card, the batch pre-flight, the backfill tool
+  (`--provider llamacpp`) and the golden runner
+  (`--live --backend llamacpp`). `llamacpp_api_key` stays empty unless
+  you started llama-server with `--api-key`.
+
+```cmd
+python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
+```
 
 ### The Manual Notes Library mirror (v0.14.0)
 
