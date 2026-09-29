@@ -221,9 +221,10 @@ class RealRepoBuild(unittest.TestCase):
             data = self.zf_bytes[f"{ZIP_ROOT}/{bat}"]
             data.decode("ascii")  # raises on any non-ASCII byte
             self.assertIn(b"\r\n", data, f"{bat} missing CRLF")
-            self.assertNotIn(b"\n\r", data)  # no double-terminated runs
+            self.assertNotIn(b"\r\r", data)  # no double-terminated runs
             bare_lf = data.replace(b"\r\n", b"")
             self.assertNotIn(b"\n", bare_lf, f"{bat} has a bare LF")
+            self.assertNotIn(b"\r", bare_lf, f"{bat} has a bare CR")
 
     def test_f_zip_is_small_and_valid(self):
         self.assertLess(os.path.getsize(self.out), 5 * 1024 * 1024)
