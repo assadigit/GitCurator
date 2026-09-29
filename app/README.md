@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.17.0 (Phased Build + Test Connection)
+# GitHub-to-Obsidian v0.18.0 (Phased Build + Test Connection + Detect & Set)
 
 ## Quick Start
 
@@ -266,6 +266,40 @@ warning) — llama-server speaks the protocol natively.
 ```cmd
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
 ```
+
+### Detect & Set — the LLM quick-switch (v0.18.0)
+
+Two buttons — **🧠 Detect & Set Ollama** and **🦙 Detect & Set
+llama.cpp** — in a compact `LLM:` row on the main screen right under
+the SYNC / Test Connection hero row (and again as a `⚡ Quick switch:`
+row in Settings → 🧠 LLM). The owner runs BOTH local engines and
+switches between them ("sometimes I use llama.cpp model, sometimes
+ollama") — one click per engine now does the whole switch:
+
+- **Detect**: probe the engine in a background worker (the GUI never
+  blocks). Ollama: one `/api/tags` probe at the configured URL
+  (`llm_client.detect_ollama`, raw HTTP, proxy-safe loopback). llama.cpp:
+  the FULL catch — configured URL first, then the RUNNING llama-server
+  PROCESS's listening ports (any `--port`), then the common-port scan.
+- **Pick the model**: the engine's ONLY model is set directly; when
+  SEVERAL models are installed, a compact menu (a dropdown like the
+  current model field, the configured model pre-selected when still
+  installed) lets you pick the one to use.
+- **Set + save**: switch the provider radio, fill the URL + model in
+  every live Settings widget, MERGE-save. The log ends with
+  `✅ LLM provider SET to … — saved. The next batch uses it immediately.`
+  A cancelled menu changes nothing ("the LLM provider was NOT changed").
+- Every failure is one clear remedy: engine down → the exact start
+  command (`llama-server -m <model>.gguf --port 8080` / Start Server),
+  up-but-empty → `ollama pull <model>` / `-m <model>.gguf`, a loading
+  model says so ("still LOADING…"). A running batch refuses the switch
+  so the config it reads stays consistent; a URL typed but not yet
+  Saved is still probed (the live widgets are snapshotted).
+- **CLI twin**: `--cli --detect-llm ollama` / `--cli --detect-llm
+  llamacpp` — the same probe behind a spinner, a numbered model menu
+  when several are installed (Enter keeps the current model, `--yes`
+  skips the menu), the same keys through the same MERGE save. Exit 0 =
+  set + saved.
 
 ### Test Connection (v0.17.0 — everything-up-and-ready, in the log)
 

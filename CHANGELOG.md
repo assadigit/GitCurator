@@ -1,3 +1,68 @@
+## [0.18.0] — Detect & Set: the LLM quick-switch — 2026-09-29
+
+Owner request: "I want these two buttons: Detect and Set ollama, Detect
+and Set llama.cpp. In my system I have both llama.cpp and ollama,
+sometimes I use llama.cpp model, sometimes ollama, so I want two buttons
+that detect, and set the model for me. If there were multiple models for
+each, a menu like the current one should help user to select their
+desired model. The point is that there is still not dedicated way to
+connect fast to llama.cpp."
+
+### The fast lane between the two local engines
+
+- **Two buttons on the MAIN screen** (a compact `LLM:` row right under
+  the SYNC/Test Connection hero row): **🧠 Detect & Set Ollama** and
+  **🦙 Detect & Set llama.cpp** — one click each way between the engines
+  the owner runs side by side. The same two buttons also live in
+  Settings → 🧠 LLM as a `⚡ Quick switch:` row, right under the provider
+  radios. No radio-clicking, no Detect, no model typing, no Save — the
+  button does all four.
+- **What a click does**: probe the engine in a background worker (the
+  GUI never blocks) → when the engine advertises SEVERAL models, a
+  compact themed menu (a dropdown like the current model field, the
+  configured model pre-selected when still installed) lets you pick the
+  one to use — the only model is set directly → switch the provider
+  radio + fill the URL + model in every live Settings widget →
+  MERGE-save. The log tells the whole story, ending
+  `✅ LLM provider SET to … — saved. The next batch uses it
+  immediately.`
+- **Ollama leg** (`llm_client.detect_ollama`, the Ollama twin of
+  `probe_llamacpp`): ONE raw-HTTP `/api/tags` probe (no ollama SDK —
+  thread-safe and testable against a stdlib http.server), loopback
+  bypasses the proxy per the v0.15.1 rule, never raises; the model list
+  is the server's own (name/model keys, deduped, server order kept).
+- **llama.cpp leg**: the FULL catch — the configured URL first, then the
+  RUNNING llama-server PROCESS's listening ports (any `--port`, the
+  Task-Manager guarantee), then the common-port scan; models from
+  `/v1/models` with the `/props` alias merged in; `via: process` is
+  named in the log line.
+- **Failure paths are one clear remedy each**: engine down → the exact
+  command to start it (llama-server line for llama.cpp; Start Server /
+  `ollama serve` for Ollama), up-but-empty → `ollama pull` / `-m
+  <model>.gguf` (+ "still LOADING…" when `/health` says so), menu
+  cancelled → "the LLM provider was NOT changed". Nothing is ever
+  half-set: no save happens without a chosen model.
+- **Guards**: a running batch refuses the switch (the config a batch
+  reads stays consistent); a second click while a detect runs is
+  refused; the live LLM widgets are snapshotted so a URL typed but not
+  yet Saved is probed, not the stale one.
+- **CLI twin**: `--cli --detect-llm ollama` / `--cli --detect-llm
+  llamacpp` — the same probe behind a spinner, a numbered model menu
+  when several are installed (`Enter` keeps the current model, `--yes`
+  skips the menu for scripts), the same keys written through the same
+  MERGE save. Exit 0 = set + saved; 1 = not found / no model / aborted.
+- Tests: `tests/test_detectset.py` (47) — `detect_ollama` against fake
+  `/api/tags` servers (models/dedup/normalization/hostile inputs), the
+  background job (configured-hit, process-fallback, crash-guard), the
+  SET half on a stubbed window (every branch incl. menu pick/cancel),
+  GUI wiring (both button rows, the dialog contract, the runner guards),
+  and the CLI end-to-end (parse/dispatch/help, fake servers, patched
+  input, `--yes`, dead engines, MERGE-survival of the other provider's
+  keys). Plus `gitcurator/tools/smoke_detectset.py` — the offscreen
+  end-to-end click-through (real MainWindow + TestWorker threading +
+  queued signals + widget updates against local fakes). Suite 611 (47
+  new); CI 38 modules.
+
 ## [0.17.0] — Test Connection — 2026-09-29
 
 Owner request: "There is a button in the main GUI (we need same thing in
