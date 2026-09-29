@@ -5151,15 +5151,16 @@ class MainWindow(QMainWindow):
             "GitHub projects — the existing pipeline")
         self.pipeline_github_check.setChecked(_pipes_cfg.get('github', True))
         self.pipeline_websites_check = QCheckBox(
-            "Websites — the new pipeline (leave OFF until Phase 2 is ready)")
+            "Websites — the new pipeline (v0.11.0: non-GitHub links become notes)")
         self.pipeline_websites_check.setChecked(_pipes_cfg.get('websites', False))
         pipes_layout.addWidget(self.pipeline_github_check)
         pipes_layout.addWidget(self.pipeline_websites_check)
         pipes_info = QLabel(
             "💡 The GitHub switch is ON by default and keeps today's behavior "
-            "exactly. The Websites switch does nothing yet — the Phase 2 "
-            "pipeline it enables is not built. Both OFF = a SYNC processes "
-            "nothing.")
+            "exactly. The Websites switch runs the Phase 2 pipeline: fetched, "
+            "classified notes in the Websites vault (OFF = non-GitHub links "
+            "keep going to the _inbox tables, like before). Both OFF = a SYNC "
+            "processes nothing.")
         pipes_info.setWordWrap(True)
         pipes_info.setObjectName("info_note")
         pipes_layout.addWidget(pipes_info)

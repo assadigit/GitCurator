@@ -1,0 +1,58 @@
+# GitCurator — 50-link Websites pipeline trial (Phase 2 owner review)
+#
+# 50 real links from your unique_links.csv, picked with the same
+# deterministic spread rule as the golden set: no duplicates, no GitHub
+# links, one link per site, 50 different sites in total.
+#
+# Lines starting with '#' are ignored by the importer.
+#
+http://ui-skills.com/skills/emilkowalski/emil-design-eng
+https://icons8.com/
+https://designs.ai/graphicmaker
+http://pixabay.com
+https://t.co/Mxdio85wvQ
+http://mixkit.co
+https://www.figma.com/resources/learn-design/
+https://www.reddit.com/r/FREEMEDIAHECKYEAH/wiki/reading
+https://60fps.design/
+http://cleanup.pictures
+https://cobalt.tools/
+http://colormind.io/bootstrap/
+https://colors.dopely.top/palettes
+https://coolors.co/
+https://designdetails.fm/episodes
+https://designmd.me/
+https://developer.apple.com/design/resources/
+https://iconscout.com/free-icons
+http://informationisbeautiful.net
+https://kinetics.colorion.co/
+http://letsenhance.io
+https://mobbin.com/
+http://motionsites.ai
+https://namethatui.com/
+https://neuform.ai/
+http://pageflows.com
+https://posts.design/
+https://recent.design/
+http://remove.bg
+https://styles.refero.design/
+https://supahero.io/
+https://superdesigner.co/
+https://text-effects.colorion.co/
+https://uibreakfast.com/category/podcast/
+http://uizard.io
+https://www.aura.build/
+https://www.colorcombos.com/grabcolors.html
+https://www.designmattersmedia.com/designmatters
+https://www.designspiration.com/explore/
+https://www.livecoinwatch.com/
+https://www.seobility.net/
+https://www.streamlinehq.com/icons
+https://www.toptal.com/designers/colourcode/freebuild-color-builder
+https://www.typeui.sh/prompts
+https://www.uistore.design/
+https://x.com/Abmankendrick/status/2076248712418848918
+https://0to255.com/
+http://10.playwright
+http://10015.io
+http://101.com
