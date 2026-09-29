@@ -204,7 +204,7 @@ CONFIG_EXAMPLE = {
     # unchanged (every read site uses .get with the same defaults below).
     # ``vault_path`` keeps meaning "the GitHub Projects vault".
     "website_vault_path": "",          # Websites vault (Phase 2 pipeline)
-    "manual_vault_path": "",           # Manual Notes vault (owner-owned, Phase 5)
+    "manual_vault_path": "",           # Manual Notes vault (owner-owned; receives the read-only Library/ mirror)
     "website_repo_name": "my-awesome-websites-directory",  # its backup repo
     "taxonomy_path": "",               # empty = bundled app/taxonomy file
     "pipelines": {

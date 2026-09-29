@@ -5323,15 +5323,16 @@ class MainWindow(QMainWindow):
         web_layout.addLayout(web_repo_row)
         vault_layout.addWidget(web_group)
 
-        # --- Manual Notes vault (owner-owned; the app never writes there) ---
-        manual_group = QGroupBox("✍️ Manual Notes vault (yours — read-only for the app, Phase 5)")
+        # --- Manual Notes vault (owner-owned; the app writes only the
+        #     read-only Library/ mirror there — v0.14.0 Phase 5) ---
+        manual_group = QGroupBox("✍️ Manual Notes vault (yours — the app writes only its Library/ mirror)")
         manual_layout = QVBoxLayout(manual_group)
         manual_layout.setSpacing(6)
         manual_row = QHBoxLayout()
         self.manual_vault_input = QLineEdit(
             (self.config.get('manual_vault_path') or '').strip())
         self.manual_vault_input.setPlaceholderText(
-            "path to your Manual Notes vault (optional until Phase 5)")
+            "path to your Manual Notes vault (receives the read-only Library/ mirror)")
         manual_row.addWidget(self.manual_vault_input, 1)
         manual_browse = QPushButton("📂 Browse...")
         self._style_btn(manual_browse, 'secondary')
@@ -5342,6 +5343,12 @@ class MainWindow(QMainWindow):
         self.manual_vault_status.setStyleSheet(
             "font-size: 12px; font-weight: bold;")
         manual_layout.addWidget(self.manual_vault_status)
+        self.manual_mirror_hint = QLabel(
+            "Library mirror: run tools/mirror_manual.py — dry-run first, "
+            "then --apply. Only Library/ is ever touched.")
+        self.manual_mirror_hint.setWordWrap(True)
+        self.manual_mirror_hint.setStyleSheet("font-size: 11px; color: gray;")
+        manual_layout.addWidget(self.manual_mirror_hint)
         vault_layout.addWidget(manual_group)
 
         # --- Pipeline switches ---

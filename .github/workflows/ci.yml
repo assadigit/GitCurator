@@ -1,9 +1,11 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 28 audited
-# Python modules and runs the full 320-case suite (34 core + 11 e2e +
+# Every push to main, every tag, and every PR compiles the 30 audited
+# Python modules and runs the full 367-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 71 phase2 + 36 phase3 + 45 phase4 — v0.13.0 LLM backends: the shared
+# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 — v0.14.0 the Manual
+# Notes Library mirror: one-way sync into <manual>/Library/, marker-only
+# deletes, outside-Library guarantee. Prior: v0.13.0 LLM backends: the shared
 # timeout wrapper + JSON-mode fallback for OpenAI-compatible endpoints,
 # explicit num_ctx, /v1/models pre-flight, per-task model overrides,
 # corrections-as-examples, and the golden runner's --backend flag). The
@@ -26,7 +28,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 320 tests + websites pipeline)
+    name: Python gate (compile + 367 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,7 +51,7 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 28 audited modules
+      - name: Compile the 30 audited modules
         run: >
           python -m py_compile
           main.py
@@ -67,6 +69,7 @@ jobs:
           gitcurator/core/web_fetch.py
           gitcurator/core/web_extract.py
           gitcurator/core/website_pipeline.py
+          gitcurator/core/mirror.py
           gitcurator/integrations/vaultseal.py
           gitcurator/integrations/goodrepos.py
           gitcurator/integrations/telegram_fetch_worker.py
@@ -80,13 +83,14 @@ jobs:
           gitcurator/tools/pick_golden_links.py
           gitcurator/tools/run_golden_websites.py
           gitcurator/tools/backfill_websites.py
+          gitcurator/tools/mirror_manual.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 28 compiles + 320 tests + offline golden run (v0.13.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 30 compiles + 367 tests + offline golden run (v0.14.0)."

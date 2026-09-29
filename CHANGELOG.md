@@ -1,3 +1,68 @@
+## [0.14.0] — Phase 5: the Manual Notes Library mirror — 2026-09-29
+
+Phase 5 of the phased build (SPEC.md §6): your ideas vault gets a
+read-only mirror of both libraries, and nothing else in it is ever
+touched.
+
+### What you get
+
+1. **`core/mirror.py` + `tools/mirror_manual.py`** — one-way sync from
+   the GitHub and Websites vaults into
+   `<manual_vault>/Library/GitHub Projects/…` and
+   `<manual_vault>/Library/Websites/…`, so you can write
+   `[[a library note]]` in an idea and see the backlink in Obsidian.
+2. **Dry-run by default.** Running the tool prints and reports the
+   plan and writes nothing; `--apply` performs the sync. Every safety
+   check re-runs before a real run.
+3. **Only `Library/` is ever touched — proven.** 47 new tests on
+   temporary folders assert nothing outside `Library/` is ever
+   created, changed or deleted; only files carrying the new
+   `mirror_of` front-matter marker are ever updated or deleted (a
+   marker lookalike without the marker survives); any other file in
+   the way of a mirror copy is a reported conflict, never overwritten.
+   Target paths are built from validated components (no `..`, no
+   absolute paths, no drive letters) and re-verified by realpath
+   containment before every write and delete.
+4. **Moves propagate** (matched by `source`, per SPEC §4.4): a note
+   you moved between category folders re-mirrors at the new location
+   and the stale copy is removed; deletions remove the orphaned mirror
+   copy. The sync is **idempotent** — a second run performs zero
+   writes (byte-identical).
+5. **Refusals**: the mirror refuses to run when `manual_vault_path`
+   is unset or overlaps either machine vault in EITHER direction
+   (manual inside machine, machine inside manual), or when `Library/`
+   exists but is a file, or (on `--apply`) when the manual vault
+   folder does not exist yet — the owner creates their own vault.
+6. **Mirror notes** carry `mirror_of` plus a read-only
+   `> [!warning]` banner as the first body line. GitHub notes' banner
+   image references (`attachments/banners/…`) are dropped from mirror
+   copies — they could never resolve inside the manual vault (the
+   image would have to live outside `Library/`, which is forbidden).
+7. **Wiring**: `--cli --status` gains a "Library mirror" row; the
+   GUI 📁 Vault page's Manual Notes group now says what the app
+   actually writes and points at the tool. `config.example.json`
+   unchanged (`manual_vault_path` has existed since v0.10.0).
+
+### Owner review (SPEC)
+
+Run it against a **copy** of Manual Notes:
+`python gitcurator/tools/mirror_manual.py --manual-vault "<copy>"`,
+then with `--apply`, then write `[[a library note]]` in an idea and
+check that Obsidian shows the backlink.
+
+### Tests
+
+`tests/test_phase5.py` (47): note construction (marker, banner,
+banner-ref stripping, no-front-matter wrap), refusals (all overlap
+directions, unset paths, apply-needs-existing-folder),
+`_safe_join` traversal battery, the outside-Library guarantee,
+dry-run-writes-nothing, idempotency, source-edit updates, move
+propagation (incl. a two-note swap), orphan deletion, duplicate
+sources/markers, conflict handling, empty-dir cleanup, the tool
+(config-driven paths, exit codes 1/2, report-inside-vault refusal,
+report content), the CLI status row, the GUI wiring. CI: 30 compiled
+modules, 367 tests + the offline golden run.
+
 ## [0.13.0] — Phase 4: LLM backends — 2026-09-29
 
 Phase 4 of the phased build (SPEC.md §6): every OpenAI-compatible
