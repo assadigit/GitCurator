@@ -1,10 +1,81 @@
-# Changelog
+## [0.12.0] — Phase 3: moves are corrections + the backfill — 2026-09-29
 
-All notable changes to GitCurator are documented here.
-Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`.
+Phase 3 of the phased build (SPEC.md §4.4 + §6): **your folder moves are
+corrections, never damage** — and your existing bookmarks can finally be
+loaded into the Websites vault.
 
-> **v0.09 lineage note** — the tree forked after v0.07: the owner's local
-> lineage shipped **0.07.1 / 0.08** (Lucide icons, main-screen redesign,
+### What you get
+
+1. **The §4.4 state machine runs at the start of every batch, for both
+   vaults.** Move a note to another category folder and the app now
+   ACCEPTS it: the note's `category:`/`subcategory:` lines and tags are
+   updated to match the new folder (targeted line edit, atomic write),
+   a `category_locked: true` line is added, the move is logged in the
+   new corrections log, and the note is never moved back. Moving a note
+   OUT of `_review/` counts as a correction the same way.
+2. **Edits are flagged, never touched.** A note you edited by hand is
+   listed in the run report and skipped. Duplicates are flagged, neither
+   copy touched. Notes without a `source:` line are ignored and listed.
+   Moves into a folder the taxonomy doesn't define are kept exactly where
+   you put them and reported — the app never invents a category.
+3. **Deletes are permanent.** Delete a note and its URL goes on the
+   dismissed list — it is never re-added, even if the link comes back
+   from the bot. It's listed in the run report in case it was accidental.
+4. **The classifier skips locked notes.** A note you placed yourself is
+   locked: the model's category is ignored on every re-processing
+   (retry upgrades included) and your folder wins. The bulk
+   "Recategorize Notes" dialog skips locked notes too.
+5. **`--cli --status` shows the record**: baseline counts, corrections
+   applied, dismissed URLs — per vault.
+6. **`tools/backfill_websites.py`** — load your existing bookmarks
+   (`unique_links.csv`, ~930 links: 777 websites + GitHub links excluded
+   by the same routing the app uses). Resumable (a per-URL checkpoint in
+   `cache.db` — interrupted runs pick up exactly where they stopped),
+   polite (a fixed pause between links plus the pipeline's per-domain
+   pause), small batches (`--limit 30` new links per run), dry-run first
+   (`--dry-run` writes nothing anywhere), progress lines + a Markdown
+   batch report (`--report`). Works with your local Ollama or any
+   OpenAI-compatible endpoint (`--api-url/--api-key/--model`; Cloudflare
+   Workers AI's `/ai/v1` endpoint included).
+7. **The run report gains a "Note State" section**: moves accepted
+   (with "N notes moved from X to Y" lines), edits, deletes, duplicates,
+   unmanaged files, unmapped folders, unknown notes — per vault, plus
+   baseline notices and dismissed-URL counts.
+8. **Websites-vault folder awareness fixed**: website notes live under
+   taxonomy NAMES (`Design/UI-UX & Product Design`), which the GitHub
+   category map cannot parse — the state machine now validates website
+   folders against the taxonomy (nested legal folders are never
+   "unmapped").
+
+### Compatibility
+
+- Websites pipeline OFF (the default) → the run-start state machine runs
+  for the GitHub vault only, and nothing else changes vs v0.11.0.
+- Old configs load unchanged; no new required keys.
+- The first run after v0.12.0 records a silent baseline (nothing flagged
+  on your 600+ existing notes) — then corrections begin.
+
+### Tests
+
+- 36 new (`tests/test_phase3.py`): front-matter surgery, corrections +
+  dismissed tables, the full §4.4 table on temp vaults (moves, edits,
+  deletes, duplicates, unmapped, idempotency, dry-run), the taxonomy
+  resolver, locked-skip through the real pipeline, goodrepos/_moc
+  agreement after moves, and the backfill tool (routing, resume,
+  interrupt, limit, dry-run).
+- Full gate: **28 modules compile, 275/275 tests green, offline golden
+  run 30/30, 0 invalid.**
+
+### Known limits
+
+- The corrections log is a record (report + `--status`); a browsing UI
+  for it comes with the dashboard work later in the build.
+- The optional "most similar past corrections as classifier examples"
+  item from the SPEC is deferred to Phase 4's backend work (needs the
+  models-classify override first).
+
+---
+
 > 404 quarantine, its own rich-based CLI) while the sandbox lineage shipped
 > **0.07.2 / 0.07.3** (CLI model picker + pre-flight, GUI strike manager).
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one

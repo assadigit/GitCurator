@@ -847,6 +847,11 @@ def cmd_status(args) -> int:
             _ns = _note_state.NoteStateDB(_db_file)
             _gh_count = _ns.count(_note_state.VAULT_GITHUB)
             _web_count = _ns.count(_note_state.VAULT_WEBSITES)
+            # v0.12.0 — Phase 3: corrections + dismissed counts.
+            _gh_corr = _ns.correction_count(_note_state.VAULT_GITHUB)
+            _web_corr = _ns.correction_count(_note_state.VAULT_WEBSITES)
+            _gh_dis = _ns.dismissed_count(_note_state.VAULT_GITHUB)
+            _web_dis = _ns.dismissed_count(_note_state.VAULT_WEBSITES)
             _ns.close()
             print(paint("Note state (moves-as-corrections record)", C.BOLD))
             print(rule())
@@ -856,6 +861,12 @@ def cmd_status(args) -> int:
                   f"{_gh_count} note(s) recorded{_extra}")
             print(f"  {paint('Websites vault record'.ljust(22), C.BOLD)} "
                   f"{_web_count} note(s) recorded")
+            print(f"  {paint('Corrections applied'.ljust(22), C.BOLD)} "
+                  f"{_gh_corr + _web_corr} "
+                  f"(github {_gh_corr} · websites {_web_corr})")
+            print(f"  {paint('Dismissed URLs'.ljust(22), C.BOLD)} "
+                  f"{_gh_dis + _web_dis} "
+                  f"(github {_gh_dis} · websites {_web_dis})")
             print()
     except Exception as exc:
         cli_print(f"Note state unavailable ({exc})", "warning")
