@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.15.0 (now 0.15.1 on the branch below)
+- **Version at start of this build:** 0.15.1 (now 0.16.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 6 (Linking) — the owner gave the go 2026-09-29 ("the app runs, you can continue for next phase") after the v0.15.0 zip test; the automatic llama.cpp catch fix (v0.15.1, owner-directed) merges first.
+- **Current phase:** 6 (Linking) — the last phase — implemented on `phase-6-linking` after the owner's go ("the app runs, you can continue for next phase", 2026-09-29). The runtime owner gates are built in: recall hooks need the 20-sample approval before bulk, link suggestions need the Suggestions-note ticks.
 
 ## Phases
 
@@ -20,7 +20,7 @@ Keep it short, factual, and in plain language.
 | — | First Windows zip (owner-directed, not a SPEC phase) | approved | `packaging-first-zip` (**merged into main 2026-09-29**, tag v0.14.1) | 0.14.1 | yes — owner: "proceed until the first .zip version is ready for me to test locally" 2026-09-29 |
 | — | llama.cpp engine detection (owner-directed, not a SPEC phase) | approved | `llamacpp-detection` (**merged into main 2026-09-29**, tag v0.15.0) | 0.15.0 | yes — requested 2026-09-29: "the app must have llama.cpp engine detection… its model detected automatically" (delivered as release v0.15.0 for the owner's Windows test) |
 | — | The automatic llama.cpp catch (owner-directed fix, not a SPEC phase) | approved | `llamacpp-autodetect` (**merged into main 2026-09-29**, tag v0.15.1) | 0.15.1 | yes — owner 2026-09-29 after testing the v0.15.0 zip: "it still doesnt auto-detect llama cpp, the service is running on task manager, the app must automatically catch that!" (+ the Phase-6 go: "the app runs, you can continue for next phase") |
-| 6 | Linking | in progress | `phase-6-linking` | | go given 2026-09-29 ("the app runs, you can continue for next phase") |
+| 6 | Linking | in review | `phase-6-linking` (merged into main 2026-09-29, tag v0.16.0) | 0.16.0 | go given 2026-09-29 ("the app runs, you can continue for next phase") — the SPEC's step-level approvals are RUNTIME gates: the 20-recall-sample approval and the Suggestions-note ticks |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
 
@@ -93,6 +93,18 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Smoke-tested end-to-end in the sandbox: unzip → fresh venv → pip install → `--cli --status` clean; GUI module imports; 73 files / 585 KB.
 - Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
 - The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
+
+## Phase 6 — Linking (v0.16.0, SPEC §4.8/§6)
+
+All four steps, on branch `phase-6-linking`:
+
+- **Recall hooks** — `core/recall.py` + `prompts/r01_recall.txt` (NEUTRAL — no about_me.md) + `tools/add_recall_hooks.py`: one delimited, fingerprint-invisible block (`gitcurator:recall:start/end` — the Phase-1 markers) per GitHub note, replace-in-place/idempotent/CRLF-safe; sanitizer requires "Use when you need to…" + something after it (a bare prefix = a refusal in disguise → the explicit placeholder). Tool: dry-run default + report under `reports/recall/`, `--sample 20` = the owner-approves-20 gate, `--apply` writes. Website notes already carry the field in their body (`recall_fields_for` unifies both).
+- **Embeddings** — `core/embeddings.py`: `embed_text_for` (recall + one-line + tags ONLY, never full text); Ollama `/api/embed` with the legacy `/api/embeddings` fallback auto-detected (a 404 = old server, not dead server), any OpenAI-compatible `/v1/embeddings` (llama-server `--embeddings`); loopback never rides the proxy (the v0.15.1 rule); SQLite `embeddings` table (vault/url/model + text-hash → stale-only refresh); pure-Python cosine. Config `embedding_model` (empty = provider default: nomic-embed-text / the served model).
+- **Candidates + confirm** — `core/linking.py` + `prompts/l01_confirm.txt`: cosine neighbors across BOTH vaults, top-k above a floor; one LLM call per pair (yes/no + ≤20-word reason); a NO is recorded rejected — never asked again.
+- **Link store + surfaces** — `link_suggestions` table (pending/approved/rejected; a pair is suggested AT MOST once; cap 7 approved/note, strongest first). The suggest step's ONLY write is `<manual>/Library/Suggestions.md` (checkboxes + the URL pair lines; tick = approve, strike = reject; `--collect` reads ONLY URL-carrying lines — free text can never be misparsed). Related (auto) blocks go into `Library/` MIRROR copies only (by `mirror_of` marker; unmarked files untouched; tested), and `mirror._plan_tree` now carries approved blocks across re-syncs (`preserve_related_block` — the rebuild no longer wipes them; tested with a full re-apply + a move).
+- **GUI** — More menu: 🪝 Recall hooks (dry-run) + 🔗 Build link suggestions (the tools' SAFE defaults through TestWorker, stdout streamed to the log); apply/collect stay on the CLI where the owner-approval flow lives.
+- **Tests** — `tests/test_phase6.py` (45): block ops + fingerprint invisibility, sanitizers, extraction, prompts filled + neutral, plan/run (dry/apply/unchanged/garbage/failure-tolerant), cosine + embed text, fake embedding servers (openai index-reorder, wrong-count, ollama batched + legacy fallback), provider routing, store roundtrip + stale refresh, candidates, confirm parsing, link-store lifecycle + never-resuggest + cap, Suggestions roundtrip (tick/strike/free-text), Related mirror-only + removal, the mirror carry-over, and BOTH tools end-to-end (synthetic vaults, suggest → tick → collect → re-suggest shows 0 new). Suite **504**; CI **36 modules** + golden 30/30.
+- Test-caught en route: ollama_embed treated a 404 on /api/embed as fatal (no legacy fallback); recall_fields_for broke its uniform contract for website notes; the bare-prefix sanitizer gap.
 
 ## llama.cpp engine detection (v0.15.0 — merged into main, tag v0.15.0) + the automatic catch (v0.15.1 — merged, tag v0.15.1)
 
