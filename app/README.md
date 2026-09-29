@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.16.0 (Phased Build — Phase 6: Linking)
+# GitHub-to-Obsidian v0.17.0 (Phased Build + Test Connection)
 
 ## Quick Start
 
@@ -266,6 +266,39 @@ warning) — llama-server speaks the protocol natively.
 ```cmd
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
 ```
+
+### Test Connection (v0.17.0 — everything-up-and-ready, in the log)
+
+One button — **Test Connection**, in the hero row next to SYNC — checks
+the four subsystems a batch needs and logs one verdict line per result,
+then a final `🏁` verdict (the CLI twin is `--cli --test-connection`):
+
+```text
+📋 [1/4] Vaults      ✅ GitHub vault — found · writable — ready to receive notes
+                     ℹ️ Websites vault — not on disk yet — created by the pipeline on its first run
+📋 [2/4] LLM         ✅ llama.cpp — up @ http://127.0.0.1:8080 · model 'qwen2.5-3b'
+📋 [3/4] GitHub      ✅ GitHub token — valid — account you (5000 req/h)
+                     ✅ Vault repo — my-awesome-github-directory ready (private)
+📋 [4/4] Telegram    ✅ Credentials · ✅ Account session · ✅ Bot @githubfetcherbot
+                     ✅ Proxy 127.0.0.1:10808 reachable · ✅ Live connection — account
+                     login OK · bot queue readable (12 link(s) waiting)
+🏁 Test Connection — ALL SYSTEMS READY — vaults, Telegram, LLM and GitHub are up
+```
+
+- **Vaults** are checked for WRITABILITY too (a temp-file write+delete —
+  the app must be able to write notes into them), not just existence.
+- **LLM** tests the ACTIVE provider — cloud API, Ollama, or llama.cpp
+  (with the v0.15.1 automatic probe + port scan).
+- **GitHub** verifies the token AND the backup repos (a PUBLIC backup
+  repo gets a warning; a missing repo is fine — the seal creates it).
+- **Telegram** runs a LIVE connection test: with a bot configured, the
+  bot-queue fetch through your own session proves both the account
+  login and the bot chat in one shot. The login dialog is wired, so a
+  first run can complete the account login during the test.
+- The battery runs in the background (the GUI stays usable); the live
+  Telegram leg follows it — session.session is single-user, so the legs
+  are serialized like every other Telegram button. Warnings never fail
+  the CLI exit code; errors do (rc 1).
 
 ### The Linking layer (v0.16.0 — Phase 6, the last phase)
 

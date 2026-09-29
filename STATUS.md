@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.15.1 (now 0.16.0 on the branch below)
+- **Version at start of this build:** 0.16.0 (now 0.17.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 6 (Linking) — the last phase — implemented on `phase-6-linking` after the owner's go ("the app runs, you can continue for next phase", 2026-09-29). The runtime owner gates are built in: recall hooks need the 20-sample approval before bulk, link suggestions need the Suggestions-note ticks.
+- **Current phase:** all six SPEC phases are DONE and merged (0 — groundwork → 6 — Linking). Latest: the owner-requested **Test Connection** feature (v0.17.0) — one button / one CLI flag that checks vaults, Telegram, LLM and GitHub and shows it all in the log.
 
 ## Phases
 
@@ -21,6 +21,7 @@ Keep it short, factual, and in plain language.
 | — | llama.cpp engine detection (owner-directed, not a SPEC phase) | approved | `llamacpp-detection` (**merged into main 2026-09-29**, tag v0.15.0) | 0.15.0 | yes — requested 2026-09-29: "the app must have llama.cpp engine detection… its model detected automatically" (delivered as release v0.15.0 for the owner's Windows test) |
 | — | The automatic llama.cpp catch (owner-directed fix, not a SPEC phase) | approved | `llamacpp-autodetect` (**merged into main 2026-09-29**, tag v0.15.1) | 0.15.1 | yes — owner 2026-09-29 after testing the v0.15.0 zip: "it still doesnt auto-detect llama cpp, the service is running on task manager, the app must automatically catch that!" (+ the Phase-6 go: "the app runs, you can continue for next phase") |
 | 6 | Linking | in review | `phase-6-linking` (merged into main 2026-09-29, tag v0.16.0) | 0.16.0 | go given 2026-09-29 ("the app runs, you can continue for next phase") — the SPEC's step-level approvals are RUNTIME gates: the 20-recall-sample approval and the Suggestions-note ticks |
+| — | Test Connection (owner-directed, not a SPEC phase) | in review | `test-connection` (branch, 2026-09-29) | 0.17.0 | requested 2026-09-29: "There is a button in the main GUI (we need same thing in cli as well), which is called Test Connection… THIS WAY USER IS ENSURED THAT EVERYTHING IS UP AND READY" |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
 
@@ -93,6 +94,15 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Smoke-tested end-to-end in the sandbox: unzip → fresh venv → pip install → `--cli --status` clean; GUI module imports; 73 files / 585 KB.
 - Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
 - The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
+
+## Test Connection (v0.17.0 — branch `test-connection`)
+
+The owner's exact ask: one button (GUI) + the same thing in the CLI that tests and shows IN THE LOGS: (1) vaults found and ready to be input to, (2) Telegram connected (bot) and account login, (3) LLM whether via API, ollama, llama.cpp, (4) GitHub repos ready (token working).
+
+- **`core/connection_check.py`** (pure stdlib + llm_client): `check_vaults` (found + **WRITABLE** — the repo's first writability probe, a temp-file write+delete; github vault must exist, websites may be created, manual is the owner's), `check_llm` (the ACTIVE provider: Ollama `/api/tags` + configured-model check · cloud via the real `preflight_openai` · llama.cpp via the v0.15.1 probe + port scan + model resolution), `check_github` (stdlib GET /user → valid/rejected/unreachable, then the backup repos: ready / PUBLIC-should-be-private warn / not-yet = info, the seal creates it), `check_telegram_local` (credentials · session file = login state · bot · proxy TCP), `telegram_live_result` (maps the subprocess result), `run_local_checks` (the ordered battery, callback-driven, never raises), `summarize` (the verdict math). Result dicts `{name, level ok|warn|error|info, detail}` + GUI/CLI level maps.
+- **GUI**: the hero button (was "Test Connectivity") is now **Test Connection** → rewritten `test_all`: snapshot (saved config + live credential widgets) → `_connection_battery_job` in a background TestWorker (GUI stays usable, one log line per result, sections 📋 [1/4]…[4/4]) → `_cc_telegram_leg` (the LIVE test after the battery — session.session is single-user; bot-queue fetch when a bot is configured = account login AND bot chat in one subprocess, else the Saved-Messages preview; login dialog wired) → `_cc_finish` (🏁 verdict). A crashed battery surfaces as an error — never "ALL SYSTEMS READY" from an empty result (GUI-smoke caught exactly that + a _fn-arity bug). The old sequential telegram→proxy chain and its five dead helpers are gone; the per-test More-menu entries stay for deep dives.
+- **CLI**: `--cli --test-connection` (`cmd_test_connection` + `_connection_live_telegram`, the fetch_bot_queue thread+spinner pattern) — the same four sections via `_check_line`, exit 0 when no error-level issue (warnings don't fail), 1 otherwise. Double-clickable: **`GitCurator-TEST-CONNECTION.bat`** (7th launcher; ASCII+CRLF enforced; in `_BATS`).
+- **Tests**: `tests/test_connection.py` (60) — vault matrix (chmod-readonly, will-be-created, parent-missing, pipeline on/off), fake Ollama/cloud/llama.cpp/GitHub-API servers (one JSON-route handler), telegram local/live tables, verdict math, battery + wiring (button text, menu entry, lock owner, crash fallback), CLI (flag parse, missing config rc=1, dead-services rc=1, fake-Ollama + mocked-live rc=0). Suite **564**; CI **37 modules**.
 
 ## Phase 6 — Linking (v0.16.0, SPEC §4.8/§6)
 
@@ -184,7 +194,7 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 - ~~Phase 4 review~~ — answered 2026-09-29 ("Proceed" — merged, v0.13.0).
 - ~~Phase 5 review~~ — merged 2026-09-29 (owner: "proceed and merge", v0.14.0). Still open for the owner afterwards: the 5-minute in-Obsidian verification on a COPY of Manual Notes (`docs/reports/PHASE-5-report.md` §3 — dry-run, `--apply`, `[[a library note]]` backlink check) and the 3 small questions in report §7 (auto-run at batch end? banner images in mirrors?).
 - ~~Phase 6 go~~ — given 2026-09-29 ("the app runs, you can continue for next phase"); Phase 6 (Linking: recall hooks, embeddings, candidate search, link store per SPEC §6) starts on branch `phase-6-linking` right after the v0.15.1 fix merge. The Phase 5 in-Obsidian verification (`docs/reports/PHASE-5-report.md` §3) + §7's 3 questions stay open for the owner in parallel.
-- **The zip test (owner, local Windows)**: download **`GitCurator-v0.16.0-windows.zip`** from the [v0.16.0 release](https://github.com/assadigit/GitCurator/releases) (Phase 6 Linking + the automatic llama.cpp catch; v0.15.0 already starts/dry-runs fine per the owner's test, v0.15.1 added the automatic catch) → unzip → copy the old `config.json` + `cache.db` over → `GitCurator.bat`. To try Phase 6: More ▸ 🪝 Recall hooks (dry-run) first, then the Suggestions flow in the release notes. Report back: does the automatic llama.cpp catch fire (~2s after launch, log line "🦙 llama.cpp caught automatically at …"), do the recall dry-run diffs read well.
+- **The zip test (owner, local Windows)**: download **`GitCurator-v0.17.0-windows.zip`** from the [v0.17.0 release](https://github.com/assadigit/GitCurator/releases) (Test Connection + Phase 6 Linking + the automatic llama.cpp catch) → unzip → copy the old `config.json` + `cache.db` over → `GitCurator.bat` → click **Test Connection** (next to SYNC): the log should show all four subsystems, one line each, ending 🏁. Same in a terminal: double-click `GitCurator-TEST-CONNECTION.bat`. Then the Phase 6 try-out: More ▸ 🪝 Recall hooks (dry-run) first, then the Suggestions flow in the release notes. Also report: does the automatic llama.cpp catch fire (~2s after launch, log line "🦙 llama.cpp caught automatically at …"), do the recall dry-run diffs read well.
 - The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging? (Still open — also blocked on a Workers-AI-capable token or your local Ollama for the live LLM.)
 - After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
 

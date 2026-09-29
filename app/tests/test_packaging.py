@@ -41,6 +41,7 @@ _BATS = [
     "GitCurator-CLI.bat",
     "GitCurator-CLI-Setup.bat",
     "Start-GitCurator-CLI.bat",
+    "GitCurator-TEST-CONNECTION.bat",
 ]
 
 

@@ -1,3 +1,75 @@
+## [0.17.0] — Test Connection — 2026-09-29
+
+Owner request: "There is a button in the main GUI (we need same thing in
+cli as well), which is called Test Connection. It must test connect this
+and show in logs: 1. Vaults are found. and ready to be input to.
+2. Telegram is connected (bot) and account login. 3. LLM whether via
+API, ollama, llama.cpp. 4. github repo's are ready (token working).
+THIS WAY USER IS ENSURED THAT EVERYTHING IS UP AND READY."
+
+### The four-subsystem prober (`core/connection_check.py`)
+
+- One button — the GUI's **Test Connection** (was "Test Connectivity",
+  in the hero row next to SYNC) — checks, in order, and logs one verdict
+  line per result, then a final `🏁` verdict:
+  **[1/4] Vaults** (found + **writable** — the repo's FIRST writability
+  probe: a temp-file write+delete in each vault; github vault must
+  exist, websites vault may be created, manual vault is the owner's),
+  **[2/4] LLM** (the ACTIVE provider — Ollama `/api/tags` with the
+  configured-model check, cloud API through the real `preflight_openai`,
+  llama.cpp through the v0.15.1 probe + port scan + model resolution),
+  **[3/4] GitHub** (stdlib GET `/user` → token valid/rejected/unreachable,
+  then the backup repos: ready / PUBLIC-should-be-private warn /
+  not-on-GitHub-yet-info — VaultSeal creates it on the next seal),
+  **[4/4] Telegram** (credentials, session file = login state,
+  bot username, proxy TCP reachability) + a **LIVE** connection test.
+- Every check never raises and survives hostile configs; loopback HTTP
+  bypasses the system proxy (the v0.15.1 rule), api.github.com honors it.
+- The live Telegram leg: the BOT QUEUE fetch when a bot is configured
+  (one Telethon subprocess proves BOTH the account login and the bot
+  chat — the queue is read through the user's own session), else the
+  Saved-Messages preview (account login only). Runs AFTER the battery —
+  session.session is single-user, so the legs are serialized like every
+  other Telegram button. Interactive login still works (the code dialog
+  is wired), so a first-run user can log in during the test.
+- GUI flow: the battery (vaults + LLM + GitHub + Telegram-local) runs in
+  one background TestWorker — the GUI stays usable — with a snapshot of
+  the saved config overlaid with the live credential widgets (unsaved
+  edits get tested too); the live leg follows under the same
+  `connection_check` Telegram lock; a crashed battery surfaces as an
+  error (never "ALL SYSTEMS READY" from an empty result — GUI-smoke
+  caught exactly that).
+- CLI twin: `--cli --test-connection` — the same four sections with the
+  house `_check_line` formatting, a spinner during the live probe, exit
+  code 0 when no error-level issue was found (warnings don't fail), 1
+  otherwise.
+
+### Details
+
+- New module `gitcurator/core/connection_check.py` (pure stdlib +
+  llm_client, no PyQt): `check_vaults` / `check_llm` / `check_github` /
+  `check_telegram_local` / `telegram_live_result` / `run_local_checks` /
+  `summarize` — result dicts `{name, level ok|warn|error|info, detail}`,
+  level maps for the GUI and CLI vocabularies.
+- GUI: `test_all` rewritten (the old sequential telegram→proxy chain and
+  its five dead helpers removed); `_connection_battery_job` +
+  `_cc_telegram_leg` + `_cc_finish`; button/tooltip/menu relabeled
+  ("🔌 Test Connection (all systems)"); the old per-test More-menu
+  entries (Ollama / Cloud API / llama.cpp / Proxy / Telegram & GitHub)
+  remain for the deep dives.
+- CLI: `cmd_test_connection` + `_connection_live_telegram` (the
+  `fetch_bot_queue` thread+spinner pattern, minus vault filtering);
+  `--test-connection` in the parser, the dispatch (before batch modes)
+  and the "Nothing to do" help list.
+- Tests: `tests/test_connection.py` — 60 tests: the vault matrix incl.
+  chmod-readonly + will-be-created + parent-missing, fake Ollama /
+  cloud / llama.cpp / GitHub-API servers (one stdlib JSON-route handler),
+  the telegram local/live tables, the verdict math, the battery +
+  wiring (button text, menu entry, lock owner, the crash fallback), the
+  CLI (flag parse, missing config rc=1, full dead-services run rc=1,
+  fake-Ollama + mocked-live run rc=0). Suite **564**; CI **37 modules**.
+
+
 ## [0.16.0] — Phase 6: Linking — 2026-09-29
 
 The owner's go: "the app runs, you can continue for next phase." SPEC
