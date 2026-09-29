@@ -4737,6 +4737,70 @@ def _connection_battery_job(config, log_signal):
     return {"success": True, "sections": sections}
 
 
+def _quick_detect_job(provider, config, log_signal):
+    """v0.18.0 — the background half of "Detect & Set": probe ONE local
+    engine (Ollama or llama.cpp) and return where it runs + its models.
+    Never raises — the worst outcome is a result dict with found=False.
+
+    * ollama    — ONE /api/tags probe at the configured URL
+                  (llm_client.detect_ollama; raw HTTP, no ollama SDK →
+                  thread-safe + testable against a stdlib http.server).
+    * llamacpp  — the FULL catch (the startup auto-detect order): the
+                  configured URL first, then the RUNNING llama-server
+                  process's listening ports (any --port — the Task-Manager
+                  guarantee), then the common-port scan.
+
+    Returns ``{'success': bool, 'provider': str, 'found': bool,
+    'base_url': str, 'models': [str], 'detail': str, 'props_model': str,
+    'ready': bool, 'via': str}`` — success only means the probe RAN;
+    found says whether the engine answered."""
+    provider = str(provider or 'ollama').lower()
+    out = {'success': False, 'provider': provider, 'found': False,
+           'base_url': '', 'models': [], 'detail': 'not run',
+           'props_model': None, 'ready': None, 'via': None}
+    cfg = config if isinstance(config, dict) else {}
+    try:
+        if provider == 'ollama':
+            oll = cfg.get('ollama') or {}
+            base = (str(oll.get('base_url',
+                                'http://127.0.0.1:11434') or '').strip()
+                    if isinstance(oll, dict)
+                    else 'http://127.0.0.1:11434') \
+                or 'http://127.0.0.1:11434'
+            log_signal.emit(f"🧠 Detecting Ollama at {base}…", "info")
+            r = _llm_client.detect_ollama(base)
+            out.update({'success': True, 'found': bool(r.get('found')),
+                        'base_url': r.get('base_url', base),
+                        'models': list(r.get('models') or []),
+                        'detail': r.get('detail', '')})
+        else:
+            key = str(cfg.get('llamacpp_api_key', '') or '')
+            url = str(cfg.get('llamacpp_api_url', '') or '').strip() \
+                or _llm_client.LLAMACPP_DEFAULT_BASE
+            log_signal.emit(
+                f"🦙 Detecting llama.cpp — {url} first, then the running "
+                "llama-server process + common ports…", "info")
+            probe = _llm_client.probe_llamacpp(url, key)
+            via = 'configured'
+            if not probe.get('found'):
+                probe = _llm_client.detect_llamacpp(key) or probe
+                via = probe.get('via')  # 'process' | 'scan' | None
+            models = [m for m in (probe.get('models') or []) if m]
+            props_model = probe.get('props_model')
+            if props_model and props_model not in models:
+                models.append(props_model)
+            out.update({'success': True,
+                        'found': bool(probe.get('found')),
+                        'base_url': probe.get('base_url') or url,
+                        'models': models,
+                        'detail': probe.get('detail', ''),
+                        'props_model': props_model,
+                        'ready': probe.get('ready'), 'via': via})
+    except Exception as e:  # noqa: BLE001 — the probe must never raise
+        out['detail'] = f'{type(e).__name__}: {e}'
+    return out
+
+
 # ============================================================================
 # Main GUI (PyQt6) with Tabbed Layout and Per-tab Test Buttons
 # ============================================================================
@@ -5601,6 +5665,32 @@ class MainWindow(QMainWindow):
         provider_row.addStretch()
         ollama_layout.addLayout(provider_row)
 
+        # --- v0.18.0 — Quick switch: the same two fast-lane buttons as the
+        # main screen, right where the LLM settings live. One click per
+        # engine: probe → model menu when several → provider+model+URL
+        # set AND saved (no separate Save needed). ---
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(6)
+        quick_lbl = QLabel("⚡ Quick switch:")
+        quick_row.addWidget(quick_lbl)
+        quick_ollama_btn = QPushButton("🧠 Detect & Set Ollama")
+        quick_ollama_btn.setToolTip(
+            "Probe the Ollama server, pick the model when several are "
+            "installed, set the provider + model + URL and save")
+        quick_ollama_btn.clicked.connect(self.quick_detect_set_ollama)
+        self._style_btn(quick_ollama_btn, 'secondary')
+        quick_row.addWidget(quick_ollama_btn)
+        quick_llamacpp_btn = QPushButton("🦙 Detect & Set llama.cpp")
+        quick_llamacpp_btn.setToolTip(
+            "Find the running llama-server (process ports + common ports), "
+            "pick the model when several are advertised, set the provider "
+            "+ model + URL and save")
+        quick_llamacpp_btn.clicked.connect(self.quick_detect_set_llamacpp)
+        self._style_btn(quick_llamacpp_btn, 'secondary')
+        quick_row.addWidget(quick_llamacpp_btn)
+        quick_row.addStretch()
+        ollama_layout.addLayout(quick_row)
+
         # --- Context window (v0.13.0 — Phase 4) ---
         # The EXPLICIT context window shared by both providers. Ollama:
         # sent as options.num_ctx on every call (Ollama's own default is
@@ -6273,6 +6363,50 @@ class MainWindow(QMainWindow):
         self.test_btn.clicked.connect(self.test_all)
         cta_row.addWidget(self.test_btn)
         cta_layout.addLayout(cta_row)
+
+        # ---- v0.18.0 — LLM quick-switch row: the owner runs BOTH local
+        # engines side by side ("sometimes I use llama.cpp model, sometimes
+        # ollama") — one click per engine: probe it, pick the model when
+        # several are installed, switch the provider + model + URL and
+        # SAVE. The dedicated fast lane llama.cpp never had. ----
+        llm_row = QHBoxLayout()
+        llm_row.setSpacing(10)
+        llm_row.setContentsMargins(0, 8, 0, 0)
+        llm_caption = QLabel("LLM:")
+        llm_caption.setObjectName("pipeline_caption")
+        llm_caption.setToolTip(
+            "Quick-switch between the local LLM engines — one click each "
+            "way, no Settings digging")
+        llm_row.addWidget(llm_caption)
+
+        self.detect_set_ollama_btn = QPushButton("🧠 Detect & Set Ollama")
+        self.detect_set_ollama_btn.setMinimumHeight(32)
+        self.detect_set_ollama_btn.setToolTip(
+            "Find the running Ollama server and switch to it in one click.\n"
+            "When several models are installed, a menu lets you pick the "
+            "one to use.\nSets the provider + model + URL and saves — the "
+            "next batch uses it immediately.")
+        self.detect_set_ollama_btn.clicked.connect(
+            self.quick_detect_set_ollama)
+        self._style_btn(self.detect_set_ollama_btn, 'secondary')
+        llm_row.addWidget(self.detect_set_ollama_btn)
+
+        self.detect_set_llamacpp_btn = QPushButton(
+            "🦙 Detect & Set llama.cpp")
+        self.detect_set_llamacpp_btn.setMinimumHeight(32)
+        self.detect_set_llamacpp_btn.setToolTip(
+            "Find the running llama-server (its process's listening ports "
+            "first — any --port — then the common ports) and switch to it "
+            "in one click.\nWhen the server advertises several models, a "
+            "menu lets you pick the one to use.\nSets the provider + model "
+            "+ URL and saves — the next batch uses it immediately.")
+        self.detect_set_llamacpp_btn.clicked.connect(
+            self.quick_detect_set_llamacpp)
+        self._style_btn(self.detect_set_llamacpp_btn, 'secondary')
+        llm_row.addWidget(self.detect_set_llamacpp_btn)
+
+        llm_row.addStretch()
+        cta_layout.addLayout(llm_row)
         main_layout.addWidget(cta_card)
 
         # ---- Pipeline strip: PROCESSED x / y counter · determinate bar ·
@@ -8037,6 +8171,244 @@ class MainWindow(QMainWindow):
                 "Check that the model is fully loaded (⏳ loading state) "
                 "and that the context window (-c) is large enough.",
                 success=False)
+
+    # ------------------------------------------------------------------
+    # v0.18.0 — Detect & Set: the fast lane between the two local engines
+    # (the owner runs BOTH llama.cpp and Ollama and switches between
+    # them). One click: probe → model menu when several are installed →
+    # provider + model + URL set and SAVED.
+    # ------------------------------------------------------------------
+    def quick_detect_set_ollama(self):
+        """🧠 Detect & Set Ollama — probe the Ollama server, list its
+        models, let the user pick when several are installed, then switch
+        the LLM provider to Ollama + set the model + URL and save. One
+        click — no Settings digging."""
+        self._run_quick_detect('ollama')
+
+    def quick_detect_set_llamacpp(self):
+        """🦙 Detect & Set llama.cpp — find the running llama-server (its
+        PROCESS's listening ports first — any --port — then the configured
+        URL, then the common ports), let the user pick the model when
+        several are advertised, then switch the LLM provider to llama.cpp
+        + set the URL + model and save. The dedicated quick path."""
+        self._run_quick_detect('llamacpp')
+
+    def _run_quick_detect(self, provider):
+        """Shared fast-lane runner: guards (no batch running, no double
+        click), live-widget snapshot (unsaved edits count), background
+        probe in a TestWorker (the GUI never blocks), then
+        _apply_quick_detect on the GUI thread."""
+        if self.worker is not None and not self.worker.isFinished():
+            self.log_message(
+                "⏳ A batch is running — wait for it to finish before "
+                "switching the LLM engine.", "warning")
+            return
+        if getattr(self, '_quick_detect_running', False):
+            self.log_message(
+                "⏳ A Detect & Set is already running — one moment…",
+                "warning")
+            return
+        self._quick_detect_running = True
+        # Snapshot: saved config + the LIVE LLM widgets — a URL the user
+        # just typed (but did not Save) is probed, not the stale one.
+        snapshot = dict(self.config or {})
+        try:
+            if hasattr(self, 'ollama_url'):
+                u = self.ollama_url.text().strip()
+                if u:
+                    oll = dict(snapshot.get('ollama') or {})
+                    oll['base_url'] = u
+                    snapshot['ollama'] = oll
+            if hasattr(self, 'llamacpp_api_url'):
+                u = self.llamacpp_api_url.text().strip()
+                if u:
+                    snapshot['llamacpp_api_url'] = u
+            if hasattr(self, 'llamacpp_api_key'):
+                snapshot['llamacpp_api_key'] = \
+                    self.llamacpp_api_key.text().strip()
+        except Exception:
+            pass  # widget access must never break the fast lane
+
+        worker = TestWorker(_quick_detect_job, 'quick_detect_' + provider,
+                            provider, snapshot)
+
+        def _job(prov, cfg):
+            return _quick_detect_job(prov, cfg, worker.log_message)
+        worker._fn = _job
+        worker.log_message.connect(self.log_message)
+
+        def _done(_name, result):
+            self._quick_detect_running = False
+            if getattr(self, '_closing', False):
+                return
+            try:
+                self._apply_quick_detect(provider, result or {})
+            except Exception as e:  # noqa: BLE001 — apply must never raise
+                self.log_message(
+                    f"❌ Detect & Set failed: {type(e).__name__}: {e}",
+                    "error")
+
+        worker.finished_signal.connect(_done)
+        self._active_test_workers.append(worker)
+        worker.start()
+
+    def _quick_model_dialog(self, provider, base_url, models, current=''):
+        """The model menu when an engine advertises SEVERAL models ("a menu
+        like the current one" — the owner's words): a compact themed dialog
+        with a dropdown, pre-set to the configured model when it is still
+        installed, else the first. Returns the chosen name, or '' when the
+        user cancelled (nothing changes)."""
+        label = 'Ollama' if provider == 'ollama' else 'llama.cpp'
+        icon = '🧠' if provider == 'ollama' else '🦙'
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{icon} Select the {label} model")
+        dlg.setModal(True)
+        dlg.setMinimumWidth(440)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(10)
+        prompt = QLabel(
+            f"{len(models)} models detected at <b>{base_url}</b> — "
+            f"pick the one to use:")
+        prompt.setWordWrap(True)
+        lay.addWidget(prompt)
+        combo = QComboBox()
+        combo.addItems(models)
+        # v33.1 rule: long model tags must not size the dialog to the sky.
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(24)
+        cur = str(current or '').strip()
+        if cur in models:
+            combo.setCurrentText(cur)
+        lay.addWidget(combo)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(
+            QDialogButtonBox.StandardButton.Ok).setText("Use this model")
+        buttons.button(
+            QDialogButtonBox.StandardButton.Cancel).setText("Cancel")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        lay.addWidget(buttons)
+        combo.setFocus()
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return combo.currentText().strip()
+        return ''
+
+    def _apply_quick_detect(self, provider, result):
+        """GUI thread: turn a _quick_detect_job result into the SET half
+        of the fast lane — pick the model (a menu when several), switch
+        provider + URL + model, update every live Settings widget, then
+        MERGE-save so the next batch uses it immediately."""
+        provider = str(provider or 'ollama').lower()
+        is_ollama = provider == 'ollama'
+        label = 'Ollama' if is_ollama else 'llama.cpp'
+        icon = '🧠' if is_ollama else '🦙'
+        if not result.get('success'):
+            self.log_message(
+                f"❌ {icon} Detect & Set {label}: the probe crashed — "
+                f"{result.get('detail', '?')}", "error")
+            return
+        if not result.get('found'):
+            if is_ollama:
+                self.log_message(
+                    f"❌ {icon} Ollama is not running at "
+                    f"{result.get('base_url', '')} "
+                    f"({result.get('detail', '')}). Start the Ollama app, "
+                    "or Settings → 🧠 LLM → 🚀 Start Server, then click "
+                    "Detect & Set Ollama again.", "error")
+            else:
+                self.log_message(
+                    f"❌ {icon} No llama.cpp server found "
+                    f"({result.get('detail', '')}). Start it with:\n   "
+                    "llama-server -m <model>.gguf --port 8080\n"
+                    "   then click Detect & Set llama.cpp again.", "error")
+            return
+        base = str(result.get('base_url', '') or '')
+        models = [m for m in (result.get('models') or []) if m]
+        where = f"at {base}"
+        if not is_ollama and result.get('via') == 'process':
+            where += " (found via the running llama-server process)"
+        loading = " · model still LOADING…" \
+            if (not is_ollama and result.get('ready') is False) else ''
+        if not models:
+            if is_ollama:
+                self.log_message(
+                    f"⚠️ {icon} Ollama is up {where} but NO models are "
+                    "installed. Pull one with: ollama pull <model>, then "
+                    "click Detect & Set Ollama again.", "warning")
+            else:
+                self.log_message(
+                    f"⚠️ {icon} llama.cpp is up {where} but no model could "
+                    f"be read{loading}. Start llama-server with "
+                    "-m <model>.gguf (or wait for it to finish loading), "
+                    "then click Detect & Set llama.cpp again.", "warning")
+            return
+        # Pick the model: the ONLY one directly; a menu when several —
+        # "a menu like the current one should help user to select their
+        # desired model".
+        if is_ollama:
+            oll = self.config.get('ollama') or {}
+            current = str(oll.get('model', '') or '').strip() \
+                if isinstance(oll, dict) else ''
+        else:
+            current = str(self.config.get('llamacpp_model', '')
+                          or '').strip()
+        if len(models) == 1:
+            choice = models[0]
+            self.log_message(
+                f"✅ {icon} {label} detected {where} · model '{choice}'"
+                + loading, "success")
+        else:
+            self.log_message(
+                f"✅ {icon} {label} detected {where} · {len(models)} "
+                "models — pick one:", "success")
+            choice = self._quick_model_dialog(provider, base, models,
+                                              current)
+            if not choice:
+                self.log_message(
+                    "⏭️ Cancelled — the LLM provider was NOT changed "
+                    f"(still "
+                    f"{self.config.get('llm_provider', 'ollama')}).",
+                    "info")
+                return
+        # SET — provider + URL + model, every live widget, MERGE-save.
+        if is_ollama:
+            self.config['llm_provider'] = 'ollama'
+            if hasattr(self, 'llm_provider_ollama'):
+                self.llm_provider_ollama.setChecked(True)
+            oll = self.config.get('ollama')
+            if not isinstance(oll, dict):
+                oll = {}
+                self.config['ollama'] = oll
+            oll['base_url'] = base
+            oll['model'] = choice
+            if hasattr(self, 'ollama_url'):
+                self.ollama_url.setText(base)
+            if hasattr(self, 'ollama_model'):
+                self.ollama_model.clear()
+                for n in models:
+                    self.ollama_model.addItem(n)
+                self.ollama_model.setCurrentText(choice)
+        else:
+            self.config['llm_provider'] = 'llamacpp'
+            if hasattr(self, 'llm_provider_llamacpp'):
+                self.llm_provider_llamacpp.setChecked(True)
+            url = base.rstrip('/') + '/v1'
+            self.config['llamacpp_api_url'] = url
+            self._fill_llamacpp_models(models,
+                                       result.get('props_model'),
+                                       pick=choice)
+            if hasattr(self, 'llamacpp_api_url'):
+                self.llamacpp_api_url.setText(url)
+        self.save_config()
+        shown_url = base if is_ollama \
+            else self.config.get('llamacpp_api_url', url)
+        self.log_message(
+            f"✅ {icon} LLM provider SET to {label} — {shown_url} · model "
+            f"'{choice}' — saved. The next batch uses it immediately.",
+            "success")
 
     def test_all(self):
         """🔌 Test Connection — the owner's four-subsystem readiness check,

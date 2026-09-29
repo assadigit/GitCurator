@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.16.0 (now 0.17.0 on the branch below)
+- **Version at start of this build:** 0.17.0 (now 0.18.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** all six SPEC phases are DONE and merged (0 — groundwork → 6 — Linking). Latest: the owner-requested **Test Connection** feature (v0.17.0) — one button / one CLI flag that checks vaults, Telegram, LLM and GitHub and shows it all in the log.
+- **Current phase:** all six SPEC phases are DONE and merged (0 — groundwork → 6 — Linking). Latest owner-requested features: **Test Connection** (v0.17.0 — vaults/Telegram/LLM/GitHub in the log) and **Detect & Set** (v0.18.0 — the two one-click LLM quick-switch buttons + `--detect-llm`).
 
 ## Phases
 
@@ -22,6 +22,7 @@ Keep it short, factual, and in plain language.
 | — | The automatic llama.cpp catch (owner-directed fix, not a SPEC phase) | approved | `llamacpp-autodetect` (**merged into main 2026-09-29**, tag v0.15.1) | 0.15.1 | yes — owner 2026-09-29 after testing the v0.15.0 zip: "it still doesnt auto-detect llama cpp, the service is running on task manager, the app must automatically catch that!" (+ the Phase-6 go: "the app runs, you can continue for next phase") |
 | 6 | Linking | in review | `phase-6-linking` (merged into main 2026-09-29, tag v0.16.0) | 0.16.0 | go given 2026-09-29 ("the app runs, you can continue for next phase") — the SPEC's step-level approvals are RUNTIME gates: the 20-recall-sample approval and the Suggestions-note ticks |
 | — | Test Connection (owner-directed, not a SPEC phase) | in review | `test-connection` (branch, 2026-09-29) | 0.17.0 | requested 2026-09-29: "There is a button in the main GUI (we need same thing in cli as well), which is called Test Connection… THIS WAY USER IS ENSURED THAT EVERYTHING IS UP AND READY" |
+| — | Detect & Set — the LLM quick-switch (owner-directed, not a SPEC phase) | in review | `detect-set-llm` (branch, 2026-09-29) | 0.18.0 | requested 2026-09-29: "I want these two buttons: Detect and Set ollama, Detect and Set llama.cpp… if there were multiple models for each, a menu like the current one should help user to select their desired model… there is still not dedicated way to connect fast to llama.cpp" |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
 
@@ -94,6 +95,17 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Smoke-tested end-to-end in the sandbox: unzip → fresh venv → pip install → `--cli --status` clean; GUI module imports; 73 files / 585 KB.
 - Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
 - The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
+
+## Detect & Set — the LLM quick-switch (v0.18.0 — branch `detect-set-llm`)
+
+The owner's exact ask: two buttons — Detect and Set ollama, Detect and Set llama.cpp — because both engines run side by side ("sometimes I use llama.cpp model, sometimes ollama"); multiple models per engine → a menu like the current one; "there is still not dedicated way to connect fast to llama.cpp".
+
+- **Two buttons on the MAIN screen** — a compact `LLM:` row under the SYNC/Test Connection hero row: **🧠 Detect & Set Ollama** + **🦙 Detect & Set llama.cpp**; the same pair again as a `⚡ Quick switch:` row in Settings → 🧠 LLM under the provider radios. One click = probe → model menu when several → provider radio + URL + model set in every live widget → MERGE-save.
+- **`llm_client.detect_ollama`** — the Ollama twin of `probe_llamacpp`: ONE raw-HTTP `/api/tags` probe (no ollama SDK → thread-safe + testable), loopback bypasses the proxy (v0.15.1 rule), never raises; models = the server's own list (name/model keys, deduped, server order).
+- **`_quick_detect_job`** (module-level, the background half): ollama = one probe at the configured/live URL; llamacpp = the FULL catch (configured URL → the running llama-server PROCESS's ports → common-port scan), `/v1/models` + `/props` model merged, `via` recorded. Runs in a TestWorker — the GUI never blocks; crash-guarded end to end.
+- **`_apply_quick_detect`** (the SET half, GUI thread): not-found / no-models → one clear remedy each (the exact start command; "still LOADING…" from /health); single model → set directly; several → `_quick_model_dialog` (themed dropdown, configured model pre-selected, cancel = "the LLM provider was NOT changed"); then radio + widgets + in-place config + `save_config()`. Guards: a running batch refuses the switch; a second click while a detect runs is refused; the live LLM widgets are snapshotted (unsaved URL edits are probed).
+- **CLI twin**: `--cli --detect-llm ollama|llamacpp` — the same probe behind the StatusLine spinner, a numbered model menu when several (Enter = keep the current model; `--yes` skips the menu), the same keys through the same MERGE save; exit 0 = set + saved.
+- **Tests**: `tests/test_detectset.py` (47) — detect_ollama vs fake /api/tags servers (models/dedup/normalization/hostile), the background job (configured-hit, process-fallback, crash-guard), the SET half on a stubbed window (every branch), GUI wiring (both button rows, dialog contract, runner guards), CLI end-to-end (parse/dispatch/help, fake servers, patched input, --yes, dead engines, MERGE survival). Plus `gitcurator/tools/smoke_detectset.py` — the offscreen end-to-end click-through (real MainWindow + TestWorker + queued signals + widget updates). Suite **611**; CI **38 modules**.
 
 ## Test Connection (v0.17.0 — branch `test-connection`)
 

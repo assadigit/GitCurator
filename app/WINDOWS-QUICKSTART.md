@@ -94,6 +94,11 @@ the mirror tool yourself.
   (llama-server): the app detects it AUTOMATICALLY at launch (whatever
   port it runs on) and switches to it when Ollama isn't running —
   or pick any OpenAI-compatible endpoint in Settings → 🧠 LLM.
+  **Switching between the two?** The **🧠 Detect & Set Ollama** and
+  **🦙 Detect & Set llama.cpp** buttons (main screen, under SYNC) do it
+  in one click: probe the engine, pick the model when several are
+  installed, set + save. Terminal twin: `GitCurator-CLI.bat` style —
+  `python main.py --cli --detect-llm ollama` (or `llamacpp`).
 - Everything the app writes stays inside this folder (`config.json`,
   `cache.db`, `reports\`) or inside the vaults you point it at.
 - **Updating later:** unzip the new version and copy your old

@@ -1029,6 +1029,65 @@ def ollama_reachable(base_url='http://127.0.0.1:11434', timeout_s=1.5):
         return False
 
 
+def detect_ollama(base_url='http://127.0.0.1:11434', timeout_s=4.0):
+    """v0.18.0 — the Ollama twin of :func:`probe_llamacpp`: ONE ``/api/tags``
+    probe that answers "is the Ollama server up, and which models are
+    installed?". Never raises — the "🧠 Detect & Set Ollama" fast lane.
+
+    Raw HTTP (no ollama SDK): thread-safe for background workers and
+    testable against a plain stdlib http.server. Loopback targets bypass
+    the system proxy (the v0.15.1 rule); a remote Ollama host honors it.
+
+    Returns a result dict shaped like probe_llamacpp's:
+
+      found     True when /api/tags answered with parsable JSON
+      base_url  the normalized base (scheme://host:port — no trailing slash)
+      models    the installed model names (``[]`` when none / unparsable)
+      detail    one human-readable line ('up · N model(s)' or the failure)
+    """
+    import urllib.request
+
+    raw = str(base_url or '').strip() or 'http://127.0.0.1:11434'
+    if '://' not in raw:
+        raw = 'http://' + raw
+    base = raw.rstrip('/')
+    req = urllib.request.Request(base + '/api/tags',
+                                 headers={'User-Agent': 'GitCurator-detect'})
+    try:
+        if _is_loopback_url(base):
+            resp = _urlopen_direct(req, timeout_s)
+        else:
+            resp = urllib.request.urlopen(req, timeout=timeout_s)
+        try:
+            body = resp.read().decode('utf-8', errors='replace') or '{}'
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError('response is not a JSON object')
+        models = []
+        for m in payload.get('models') or []:
+            if not isinstance(m, dict):
+                continue
+            name = str(m.get('name') or m.get('model') or '').strip()
+            if name:
+                models.append(name)
+        # de-duplicate, keep the server's order
+        seen = set()
+        ordered = [n for n in models
+                   if not (n in seen or seen.add(n))]
+        detail = f'up · {len(ordered)} model(s)' if ordered \
+            else 'up but NO models installed'
+        return {'found': True, 'base_url': base, 'models': ordered,
+                'detail': detail}
+    except Exception as e:
+        return {'found': False, 'base_url': base, 'models': [],
+                'detail': f'{type(e).__name__}: {e}'}
+
+
 def llamacpp_autodetect_decision(config, probe, ollama_up=None):
     """v0.15.1 — what the STARTUP auto-detect should do once a llama.cpp
     server has been found (the owner: "the app must automatically catch
