@@ -534,7 +534,12 @@ class WebsitePipeline:
         # addressed as rows in the _inbox platform tables; the pipeline
         # must never fetch, note, or retry them.
         self.blocked_domains = _links.blocked_domains_from_config(self.config)
-        if self.blocked_domains and fetch_fn is None:
+        # v0.21.0 — self domains (the app's own bot): the bot's auth links
+        # (…/auth/?token=<hex>) land in the same Telegram chat the curator
+        # reads; fetching them would hit the owner's own OAuth flow and
+        # store live tokens in _review notes. Same never-fetch treatment.
+        self.self_domains = _links.self_domains_from_config(self.config)
+        if (self.blocked_domains or self.self_domains) and fetch_fn is None:
             # Production only (an injected fetch_fn = the hermetic golden
             # run / tests). Purge queued retries + _review placeholders
             # ONCE so previously-queued blocked links stop coming back.
@@ -562,9 +567,11 @@ class WebsitePipeline:
     def _enforce_blocked_domains(self) -> None:
         """v0.20.0 — purge the state DB of blocked-domain links (retry
         queue rows + failed _review placeholder records, both marked
-        dismissed) and delete the placeholder FILES. Idempotent; every
-        failure is tolerated (bookkeeping never kills a batch). File
-        deletions are dry-run-aware (a rehearsal records, never deletes)."""
+        dismissed) and delete the placeholder FILES. v0.21.0 — the same
+        purge now covers SELF domains (the app's own bot auth links that
+        were queued before this release, complete with their live tokens).
+        Idempotent; every failure is tolerated (bookkeeping never kills a
+        batch). File deletions are dry-run-aware."""
         try:
             report = self.state.purge_blocked_domains(
                 lambda u: _links.domain_is_blocked(u, self.blocked_domains))
@@ -586,6 +593,29 @@ class WebsitePipeline:
                     "info")
         except Exception as e:
             self.log(f"⚠️ Blocked-domain purge skipped: {e}", "warning")
+        if not self.self_domains:
+            return
+        try:
+            report = self.state.purge_blocked_domains(
+                lambda u: _links.domain_is_self(u, self.self_domains))
+            deleted_files = 0
+            for _url, path in report.get('placeholders', []):
+                try:
+                    if os.path.exists(path):
+                        _dryrun.remove(path)
+                        deleted_files += 1
+                except Exception:
+                    pass
+            if report['retries'] or report['placeholders']:
+                self.log(
+                    f"🔒 Self domains ({', '.join(self.self_domains)} — the "
+                    f"app's own bot): purged {report['retries']} queued "
+                    f"retry(ies) + {len(report['placeholders'])} _review "
+                    f"placeholder(s) ({deleted_files} file(s) deleted, tokens "
+                    f"gone with them) — never fetched, the _inbox row is the "
+                    f"record", "info")
+        except Exception as e:
+            self.log(f"⚠️ Self-domain purge skipped: {e}", "warning")
 
     def _maybe_rearm_retries(self) -> None:
         """v0.19.0 — when the ACTIVE web proxy differs from the last one
@@ -870,7 +900,7 @@ class WebsitePipeline:
         canonical = normalize_website_url(url)
         result['canonical'] = canonical
 
-        # ---- 1b. blocked domains (v0.20.0 — the X fix) -------------------
+        # ---- 1b. never-fetch domains (v0.20.0 blocked + v0.21.0 self) ---
         # Already addressed as rows in the _inbox platform tables; never
         # fetched, never noted, never retried — whatever path brought the
         # link here (batch, retry, direct, import).
@@ -882,6 +912,16 @@ class WebsitePipeline:
             self.last_results.append(result)
             self.log(f"🚫 {url}: blocked domain — skipped (the _inbox "
                      f"table keeps the record)", "info")
+            return result
+        if self.self_domains and _links.domain_is_self(url, self.self_domains):
+            result['outcome'] = 'skipped'
+            result['error'] = ("self domain (the app's own bot) — recorded "
+                               "in _inbox only")
+            self.counters['skipped'] += 1
+            self.last_results.append(result)
+            self.log(f"🔒 {_links.scrub_url_token(url)}: self domain (the "
+                     f"app's own bot) — never fetched, the _inbox row is "
+                     f"the record", "info")
             return result
 
         # ---- 2. dedupe (SPEC §4.3 step 2) --------------------------------

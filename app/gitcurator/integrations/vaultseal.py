@@ -420,18 +420,132 @@ class VaultSeal:
 
         # One-time token URL: never written to .git/config, never logged.
         push_url = f"https://x-access-token:{self.token}@github.com/{self._repo_full}.git"
-        rc, out = self._git("push", push_url, "HEAD:refs/heads/main",
-                            timeout=PUSH_TIMEOUT)
-        if rc != 0:
-            result.error = f"push failed (local commit kept): {out[:300]}"
+        ok, err = self._push(push_url)
+        if not ok:
+            result.error = f"push failed (local commit kept): {err[:300]}"
             self._log(f"VaultSeal: {result.error}", "warning")
         else:
             result.pushed = True
+            # The reconciliation path may have rebased/merged — re-read the
+            # tip so the log line names the sha actually on the mirror.
+            _, sha = self._git("rev-parse", "--short=7", "HEAD")
+            result.commit_sha = sha or result.commit_sha
             self._log(
                 f"VaultSeal: sealed {len(dirty)} file(s) → {self._repo_full} ({sha})",
                 "success",
             )
         return result
+
+    # -- v0.21.0 push reconciliation -----------------------------------------
+
+    def _sanitize_fetch_head(self) -> None:
+        """Strip the access token out of ``.git/FETCH_HEAD`` after a fetch.
+
+        ``git fetch <token-url>`` writes the full URL (token included) into
+        FETCH_HEAD. The design rule is that the token is never persisted
+        anywhere — best effort, failure tolerated (next fetch overwrites
+        the file anyway)."""
+        if self.vault is None or not self.token:
+            return
+        try:
+            fh = self.vault / ".git" / "FETCH_HEAD"
+            if not fh.exists():
+                return
+            text = fh.read_text(encoding="utf-8", errors="replace")
+            if self.token in text:
+                fh.write_text(text.replace(self.token, "***"), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _rescue(self, push_url: str, original_err: str) -> Tuple[bool, str]:
+        """Last resort after an irreconcilable mirror: push the seal to a
+        ``seal-rescue/<timestamp>`` branch. The local commit is never lost,
+        the remote main is never force-pushed, and the error names the
+        branch so the owner can reconcile at their leisure."""
+        branch = f"seal-rescue/{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        rc, out = self._git("push", push_url, f"HEAD:refs/heads/{branch}",
+                            timeout=PUSH_TIMEOUT)
+        if rc == 0:
+            return False, (
+                f"mirror main rejected the seal and could not be reconciled "
+                f"automatically — the commit was pushed to branch '{branch}' "
+                f"instead (local commit kept). Reconcile on GitHub: open the "
+                f"mirror repo → Compare & pull request '{branch}' → main, or "
+                f"clone the mirror and merge locally. ({original_err[:150]})")
+        return False, (f"{original_err} (rescue push to '{branch}' also "
+                       f"failed: {out[:150]})")
+
+    def _push(self, push_url: str) -> Tuple[bool, str]:
+        """Push HEAD:refs/heads/main to the mirror (v0.21.0).
+
+        Plain push first. When GitHub rejects it because the remote has
+        commits we lack (a web-UI edit on the mirror, a second machine
+        sealing, or the mirror repo having been used for something else
+        mid-flight — exactly the v0.20.0 websites-mirror failure), the
+        seal RECONCILES instead of failing forever:
+
+          fetch → remote already inside HEAD → retry the plain push
+          fetch → shared history → rebase our commit(s) onto it → push
+          fetch → unrelated histories (fresh ``git init`` / repurposed
+                   mirror) → merge --allow-unrelated-histories → push
+
+        A reconciliation that cannot complete cleanly (conflicts) never
+        destroys anything: the seal lands on a rescue branch and the
+        error says exactly where. ``main`` is NEVER force-pushed — a
+        backup tool must never discard remote history it cannot see.
+        Returns (ok, error_detail). Never raises."""
+        rc, out = self._git("push", push_url, "HEAD:refs/heads/main",
+                            timeout=PUSH_TIMEOUT)
+        if rc == 0:
+            return True, ""
+        if "fetch first" not in out and "non-fast-forward" not in out.lower():
+            # Auth / network / permission failure — reconciliation does not
+            # apply; report the original error verbatim.
+            return False, out
+
+        # The remote is ahead: bring its main in (FETCH_HEAD) and reconcile.
+        frc, fout = self._git("fetch", push_url, "refs/heads/main",
+                              timeout=PUSH_TIMEOUT)
+        self._sanitize_fetch_head()
+        if frc != 0:
+            return False, (f"{out} — and fetching the mirror to reconcile "
+                           f"failed: {fout[:150]}")
+
+        # Remote already contained in HEAD (stale rejection) → plain retry.
+        rc_anc, _ = self._git("merge-base", "--is-ancestor",
+                              "FETCH_HEAD", "HEAD")
+        if rc_anc == 0:
+            rc2, out2 = self._git("push", push_url, "HEAD:refs/heads/main",
+                                  timeout=PUSH_TIMEOUT)
+            return (rc2 == 0), out2
+
+        rc_base, _ = self._git("merge-base", "HEAD", "FETCH_HEAD")
+        if rc_base == 0:
+            # Shared history: replay our seal commit(s) on top of the remote.
+            rrc, _rout = self._git("rebase", "FETCH_HEAD")
+            if rrc == 0:
+                rc3, out3 = self._git("push", push_url,
+                                      "HEAD:refs/heads/main",
+                                      timeout=PUSH_TIMEOUT)
+                if rc3 == 0:
+                    return True, ""
+                return self._rescue(push_url, out3)
+            self._git("rebase", "--abort")
+            return self._rescue(push_url, out)
+
+        # Unrelated histories: keep BOTH (merge) when the trees do not
+        # collide; a collision (same path, different content) → rescue.
+        mrc, _mout = self._git(
+            "merge", "FETCH_HEAD", "--allow-unrelated-histories", "-m",
+            "seal: reconcile mirror histories (v0.21.0)")
+        if mrc == 0:
+            rc4, out4 = self._git("push", push_url, "HEAD:refs/heads/main",
+                                  timeout=PUSH_TIMEOUT)
+            if rc4 == 0:
+                return True, ""
+            return self._rescue(push_url, out4)
+        self._git("merge", "--abort")
+        return self._rescue(push_url, out)
 
     def seal(self, run_summary: Optional[Dict[str, Any]] = None) -> SealResult:
         """Commit + best-effort push of the whole vault. NEVER raises."""

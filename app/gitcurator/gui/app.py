@@ -391,6 +391,24 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
                 try:
                     with open(table_path, 'r', encoding='utf-8') as f:
                         existing_content = f.read()
+                    # v0.21.0 — scrub live tokens out of rows written
+                    # before this release (the bot's auth links carried
+                    # ?token=<hex> into the tables). Rewritten in place,
+                    # atomically, only when something actually changes.
+                    _clean = _links.scrub_urls_in_text(existing_content)
+                    if _clean != existing_content:
+                        tmp_path = table_path + ".tmp"
+                        with open(tmp_path, 'w', encoding='utf-8') as f:
+                            f.write(_clean)
+                        os.replace(tmp_path, table_path)
+                        existing_content = _clean
+                        if log_callback:
+                            try:
+                                log_callback(
+                                    f"🔒 {filename}: scrubbed secret token(s) "
+                                    f"out of stored URL(s)", "info")
+                            except Exception:
+                                pass
                     for line in existing_content.split('\n'):
                         if line.startswith('| ') and 'http' in line:
                             parts = line.split('|')
@@ -415,7 +433,10 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
                 except Exception:
                     domain = "unknown"
                 date_str = datetime.now().strftime("%Y-%m-%d")
-                new_rows.append(f"| - | {date_str} | {url} | {domain} | {source} | unreviewed | |")
+                # v0.21.0 — never store secret query values (the bot's
+                # auth links: ?token=<64 hex>). The row keeps the URL with
+                # the parameter name and a … placeholder.
+                new_rows.append(f"| - | {date_str} | {_links.scrub_url_token(url)} | {domain} | {source} | unreviewed | |")
 
             if not new_rows:
                 continue
@@ -1214,19 +1235,83 @@ class LinkTracker:
             link["error"] = reason
             self._save()
 
-    def verify(self, log_signal=None) -> dict:
+    def mark_blocked(self, url: str, reason: str):
+        """v0.21.0 — Mark a link as blocked/self-domain (never fetched;
+        the _inbox platform table row is the record). A distinct terminal
+        status so the verification report can account for it explicitly
+        instead of hiding it inside 'skipped'."""
+        link = self._find_link(url)
+        if link:
+            link["status"] = "blocked"
+            link["error"] = reason
+            self._save()
+
+    def verify(self, log_signal=None, extra_inbox_dirs=None) -> dict:
         """Phase 3: Verify all links have their expected output.
-        Returns a verification report dict."""
+        Returns a verification report dict.
+
+        v0.21.0 — FULL ACCOUNTING: the report now buckets every link the
+        batch actually touched. The v0.20.0 websites-pipeline runs showed
+        "GitHub processed: 0 / Non-GitHub recorded: 0 / ALL LINKS
+        VERIFIED" while 16 links went through the Websites pipeline and
+        247 were blocked — every link accounted for, but the REPORT
+        couldn't say so. New buckets: websites notes / _review / skipped,
+        blocked+self (_inbox rows), pending (pipeline off/not set), and
+        github-pending; ``accounted``/``unaccounted`` reconcile the sum
+        against ``total`` and the verdict requires BOTH no failures and a
+        clean reconciliation. ``extra_inbox_dirs`` adds places to look
+        for _inbox rows (the Websites vault's _inbox — where the tables
+        live since v0.20.0)."""
         report = {
             "total": len(self.manifest["links"]),
             "github_processed": 0,
             "github_failed": 0,
             "github_skipped": 0,
+            "github_pending": 0,
             "non_github_recorded": 0,
             "non_github_failed": 0,
+            "websites_processed": 0,
+            "websites_review": 0,
+            "websites_skipped": 0,
+            "blocked_recorded": 0,
+            "non_github_pending": 0,
             "verification_passed": True,
             "failed_links": []
         }
+        inbox_dirs = [os.path.join(self.vault_path, "_inbox")]
+        for d in (extra_inbox_dirs or []):
+            if d and d not in inbox_dirs:
+                inbox_dirs.append(d)
+
+        def _url_in_inbox(url: str) -> Optional[bool]:
+            """True/False when the answer is known; None when the tables
+            could not be read (tolerant — never false-fail on I/O)."""
+            found = False
+            read_any = False
+            for inbox_dir in inbox_dirs:
+                if not os.path.isdir(inbox_dir):
+                    continue
+                try:
+                    for fname in os.listdir(inbox_dir):
+                        if not fname.endswith('.md'):
+                            continue
+                        fpath = os.path.join(inbox_dir, fname)
+                        try:
+                            with open(fpath, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            read_any = True
+                        except Exception:
+                            continue
+                        if url in content or normalize_url(url) in content:
+                            found = True
+                            break
+                except Exception:
+                    continue
+                if found:
+                    break
+            if found:
+                return True
+            return None if not read_any else False
 
         for link in self.manifest["links"]:
             if link["type"] == "github":
@@ -1261,9 +1346,13 @@ class LinkTracker:
                     report["github_failed"] += 1
                     report["failed_links"].append(link)
                     report["verification_passed"] = False
-                # "pending" / "processing" statuses are left alone here;
-                # they will be flagged by get_all_clear() so the bot-queue
-                # is not marked as read.
+                elif link["status"] in ("pending", "processing"):
+                    # A GitHub link that was never processed nor skipped is
+                    # REAL unfinished work (get_all_clear blocks the bot-queue
+                    # mark-read for exactly this reason) — the report must
+                    # say so instead of being silently absent from the sum.
+                    report["github_pending"] += 1
+                    report["verification_passed"] = False
             elif link["type"] == "non-github":
                 if link["status"] == "recorded":
                     # v25 pre-flight: non-GitHub links are now spread across
@@ -1273,38 +1362,74 @@ class LinkTracker:
                     # is verified. We also still check the legacy
                     # non_github_links.md for backward compatibility with
                     # batches that ran on v24 or earlier.
-                    inbox_dir = os.path.join(self.vault_path, "_inbox")
-                    found_in_inbox = False
-                    if os.path.isdir(inbox_dir):
-                        try:
-                            for fname in os.listdir(inbox_dir):
-                                if not fname.endswith('.md'):
-                                    continue
-                                fpath = os.path.join(inbox_dir, fname)
-                                try:
-                                    with open(fpath, 'r', encoding='utf-8') as f:
-                                        content = f.read()
-                                except Exception:
-                                    continue
-                                if link["url"] in content or link["normalized"] in content:
-                                    found_in_inbox = True
-                                    break
-                        except Exception:
-                            # If we can't list the dir, fall back to
-                            # "recorded" so we don't false-fail the link.
-                            found_in_inbox = True
-                    if found_in_inbox:
-                        report["non_github_recorded"] += 1
-                    else:
+                    found = _url_in_inbox(link["url"])
+                    if found is False:
                         link["status"] = "failed"
                         link["error"] = "URL not found in any _inbox/*.md file"
                         report["non_github_failed"] += 1
                         report["failed_links"].append(link)
                         report["verification_passed"] = False
+                    else:
+                        # found, or the tables were unreadable — the intake
+                        # writer is best-effort; never false-fail on I/O.
+                        report["non_github_recorded"] += 1
+                elif link["status"] == "blocked":
+                    # v0.21.0 — blocked/self-domain links: the _inbox row is
+                    # the record (same lookup, same tolerance).
+                    found = _url_in_inbox(link["url"])
+                    if found is False:
+                        link["status"] = "failed"
+                        link["error"] = ("blocked/self domain but no "
+                                         "_inbox row found")
+                        report["non_github_failed"] += 1
+                        report["failed_links"].append(link)
+                        report["verification_passed"] = False
+                    else:
+                        report["blocked_recorded"] += 1
+                elif link["status"] == "processed":
+                    # v0.21.0 — the Websites pipeline wrote a note (a _review
+                    # placeholder counts: it IS a note, with a retry
+                    # scheduled). Verify the file is really on disk.
+                    note_path = link.get("note_path")
+                    ok_note = bool(note_path) and os.path.isfile(note_path) \
+                        and os.path.getsize(note_path) > 50
+                    if ok_note:
+                        if "_review" in (note_path or "").replace("\\", "/"):
+                            report["websites_review"] += 1
+                        else:
+                            report["websites_processed"] += 1
+                    else:
+                        link["status"] = "failed"
+                        link["error"] = "websites note file missing"
+                        report["non_github_failed"] += 1
+                        report["failed_links"].append(link)
+                        report["verification_passed"] = False
+                elif link["status"] == "skipped":
+                    # Websites pipeline dedupe / dismissed / retries
+                    # exhausted — a terminal, accounted outcome.
+                    report["websites_skipped"] += 1
                 elif link["status"] == "failed":
                     report["non_github_failed"] += 1
                     report["failed_links"].append(link)
                     report["verification_passed"] = False
+                elif link["status"] in ("pending", "processing"):
+                    # Non-GitHub pending = the Websites pipeline is off or
+                    # no vault is set (the manifest warning at intake says
+                    # so) — recorded as its own bucket, NOT a failure
+                    # (same semantics as get_all_clear).
+                    report["non_github_pending"] += 1
+
+        # Reconciliation: every bucket sums to the total, or something
+        # escaped every path (a bug — loud, never silent).
+        report["accounted"] = sum(
+            report[k] for k in (
+                "github_processed", "github_failed", "github_skipped",
+                "github_pending", "non_github_recorded",
+                "non_github_failed", "websites_processed",
+                "websites_review", "websites_skipped", "blocked_recorded",
+                "non_github_pending"))
+        report["unaccounted"] = report["total"] - report["accounted"]
+        report["accounting_ok"] = report["unaccounted"] == 0
 
         self._save()
 
@@ -1315,10 +1440,26 @@ class LinkTracker:
             log_signal.emit(f"   Total links: {report['total']}", "info")
             log_signal.emit(f"   GitHub processed: {report['github_processed']}", "success" if report['github_processed'] > 0 else "info")
             log_signal.emit(f"   GitHub skipped (dedup): {report['github_skipped']}", "info")
+            if report['github_pending']:
+                log_signal.emit(f"   GitHub pending (unfinished!): {report['github_pending']}", "warning")
             log_signal.emit(f"   GitHub failed: {report['github_failed']}", "error" if report['github_failed'] > 0 else "info")
-            log_signal.emit(f"   Non-GitHub recorded: {report['non_github_recorded']}", "success" if report['non_github_recorded'] > 0 else "info")
-            log_signal.emit(f"   Non-GitHub failed: {report['non_github_failed']}", "error" if report['non_github_failed'] > 0 else "info")
-            if report["verification_passed"]:
+            if report['non_github_recorded']:
+                log_signal.emit(f"   Non-GitHub recorded (inbox): {report['non_github_recorded']}", "info")
+            if report['websites_processed'] or report['websites_review'] or report['websites_skipped']:
+                log_signal.emit(f"   Websites notes: {report['websites_processed']}", "success" if report['websites_processed'] > 0 else "info")
+                log_signal.emit(f"   Websites in _review (retry scheduled): {report['websites_review']}", "info")
+                log_signal.emit(f"   Websites skipped (dedup): {report['websites_skipped']}", "info")
+            if report['blocked_recorded']:
+                log_signal.emit(f"   Blocked/self domains (recorded in _inbox): {report['blocked_recorded']}", "info")
+            if report['non_github_pending']:
+                log_signal.emit(f"   Non-GitHub pending (websites pipeline off / no vault): {report['non_github_pending']}", "warning")
+            if report['non_github_failed']:
+                log_signal.emit(f"   Non-GitHub failed: {report['non_github_failed']}", "error")
+            if report['accounting_ok']:
+                log_signal.emit(f"   🧮 Accounting: {report['accounted']}/{report['total']} links accounted for ✓", "info")
+            else:
+                log_signal.emit(f"   🧮 Accounting: only {report['accounted']}/{report['total']} accounted for — {report['unaccounted']} escaped every bucket!", "error")
+            if report["verification_passed"] and report["accounting_ok"]:
                 log_signal.emit("✅ ALL LINKS VERIFIED — no data loss!", "success")
             else:
                 log_signal.emit(f"❌ {len(report['failed_links'])} links need retry!", "error")
@@ -3090,7 +3231,15 @@ class ProcessingWorker(QThread):
         report = None  # v25: capture for the final report
         if self.link_tracker:
             try:
-                report = self.link_tracker.verify(log_signal=self.log_message)
+                # v0.21.0 — the _inbox tables live in the WEBSITES vault
+                # when one is set (v0.20.0 vault separation); verify looks
+                # for blocked/recorded rows there too.
+                _extra = []
+                _wv = (self.config.get('website_vault_path') or '').strip()
+                if _wv:
+                    _extra.append(os.path.join(_wv, "_inbox"))
+                report = self.link_tracker.verify(
+                    log_signal=self.log_message, extra_inbox_dirs=_extra)
                 if not report["verification_passed"]:
                     self.log_message.emit(
                         f"⚠️ {len(report['failed_links'])} links failed verification — will retry on next run",
@@ -3324,25 +3473,48 @@ class ProcessingWorker(QThread):
             # are already addressed as rows in the _inbox platform tables
             # and never reach the fetcher. The pipeline's own guard is the
             # second layer (due-retries, any other entry path).
+            # v0.21.0 — SELF domains (the app's own bot) get the same
+            # intake treatment: its auth links (…/auth/?token=…) are never
+            # fetched and never noted; the _inbox row (token scrubbed) is
+            # the record. Both marked 'blocked' in the manifest so the
+            # verification report accounts for them explicitly.
             _blocked = _links.blocked_domains_from_config(self.config)
-            if _blocked and links:
-                _kept, _dropped = [], []
+            _self = _links.self_domains_from_config(self.config)
+            if (_blocked or _self) and links:
+                _kept, _drop_blocked, _drop_self = [], [], []
                 for _u in links:
-                    (_dropped if _links.domain_is_blocked(_u, _blocked)
-                     else _kept).append(_u)
-                if _dropped:
+                    if _blocked and _links.domain_is_blocked(_u, _blocked):
+                        _drop_blocked.append(_u)
+                    elif _self and _links.domain_is_self(_u, _self):
+                        _drop_self.append(_u)
+                    else:
+                        _kept.append(_u)
+                if _drop_blocked:
                     self.log_message.emit(
-                        f"🚫 {len(_dropped)} link(s) on blocked domains "
+                        f"🚫 {len(_drop_blocked)} link(s) on blocked domains "
                         f"({', '.join(_blocked)}) — never fetched; the "
                         f"_inbox table keeps the record", "info")
                     if self.link_tracker:
-                        for _u in _dropped:
+                        for _u in _drop_blocked:
                             try:
-                                self.link_tracker.mark_skipped(
+                                self.link_tracker.mark_blocked(
                                     _u, "blocked domain")
                             except Exception:
                                 pass
-                    links = _kept
+                if _drop_self:
+                    self.log_message.emit(
+                        f"🔒 {len(_drop_self)} link(s) on self domains "
+                        f"({', '.join(_self)} — the app's own bot) — never "
+                        f"fetched; the _inbox row keeps the record (tokens "
+                        f"scrubbed)", "info")
+                    if self.link_tracker:
+                        for _u in _drop_self:
+                            try:
+                                self.link_tracker.mark_blocked(
+                                    _u, "self domain (the app's own bot)")
+                            except Exception:
+                                pass
+                links = _kept
             if not website_vault:
                 if links:
                     self.log_message.emit(
@@ -3743,10 +3915,24 @@ class ProcessingWorker(QThread):
                 lines.append(f"| ✅ GitHub processed | {link_tracker_report.get('github_processed', 0)} |")
                 lines.append(f"| ⏭️ GitHub skipped (dedup) | {link_tracker_report.get('github_skipped', 0)} |")
                 lines.append(f"| ❌ GitHub failed | {link_tracker_report.get('github_failed', 0)} |")
-                lines.append(f"| ✅ Non-GitHub recorded | {link_tracker_report.get('non_github_recorded', 0)} |")
-                lines.append(f"| ❌ Non-GitHub failed | {link_tracker_report.get('non_github_failed', 0)} |")
+                if link_tracker_report.get('github_pending'):
+                    lines.append(f"| ⏳ GitHub pending (unfinished) | {link_tracker_report.get('github_pending', 0)} |")
+                if link_tracker_report.get('non_github_recorded'):
+                    lines.append(f"| ✅ Non-GitHub recorded (inbox) | {link_tracker_report.get('non_github_recorded', 0)} |")
+                if link_tracker_report.get('websites_processed') or link_tracker_report.get('websites_review') or link_tracker_report.get('websites_skipped'):
+                    lines.append(f"| 🌐 Websites notes | {link_tracker_report.get('websites_processed', 0)} |")
+                    lines.append(f"| 🗂️ Websites in _review (retry scheduled) | {link_tracker_report.get('websites_review', 0)} |")
+                    lines.append(f"| ⏭️ Websites skipped (dedup) | {link_tracker_report.get('websites_skipped', 0)} |")
+                if link_tracker_report.get('blocked_recorded'):
+                    lines.append(f"| 🚫 Blocked/self domains (recorded in _inbox) | {link_tracker_report.get('blocked_recorded', 0)} |")
+                if link_tracker_report.get('non_github_pending'):
+                    lines.append(f"| ⏳ Non-GitHub pending (websites pipeline off / no vault) | {link_tracker_report.get('non_github_pending', 0)} |")
+                if link_tracker_report.get('non_github_failed'):
+                    lines.append(f"| ❌ Non-GitHub failed | {link_tracker_report.get('non_github_failed', 0)} |")
+                lines.append(f"| 🧮 Accounting | {link_tracker_report.get('accounted', 0)}/{link_tracker_report.get('total', 0)} accounted for" + (" ✓" if link_tracker_report.get('accounting_ok') else f" — {link_tracker_report.get('unaccounted', 0)} unaccounted!") + " |")
                 verdict = ("✅ ALL LINKS VERIFIED — NO DATA LOSS!"
-                           if link_tracker_report.get('verification_passed')
+                           if (link_tracker_report.get('verification_passed')
+                               and link_tracker_report.get('accounting_ok'))
                            else "❌ SOME LINKS NEED RETRY")
                 lines.append(f"| 🎯 Overall verdict | {verdict} |")
                 lines.append("")
@@ -4830,7 +5016,7 @@ def _telegram_keyword_job(api_id, api_hash, phone, proxy, keyword_start, keyword
     return _run_telegram_worker(config, log_signal, code_callback=code_callback)
 
 
-def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None):
+def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None, self_domains=None):
     """Fetch unread GitHub URLs from the user's dedicated bot chat.
     Uses the user's Telethon session (through proxy) to read messages sent
     TO the bot. Resolves the bot by username (no Bot API call needed —
@@ -4853,6 +5039,10 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     links into their OWN bucket (``blocked_count``): they are already
     addressed as rows in the _inbox platform tables and must never show
     as pending nor reach the Websites pipeline.
+
+    v0.21.0 — ``self_domains`` does the same for the app's OWN hosts
+    (the bot's auth links): their own bucket (``self_count``), never
+    pending, never fetched.
     """
     config = {
         'api_id': int(api_id),
@@ -4881,12 +5071,15 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 cache.close()
             except Exception:
                 decommissioned_urls = set()
-            pending, in_vault, decomm, blocked = [], 0, 0, 0
+            pending, in_vault, decomm, blocked, selfc = [], 0, 0, 0, 0
             for url in result.get('urls', []):
                 norm = normalize_url(url)
                 if blocked_domains and _links.domain_is_blocked(
                         url, blocked_domains):
                     blocked += 1
+                elif self_domains and _links.domain_is_self(
+                        url, self_domains):
+                    selfc += 1
                 elif vi.has_url(url):
                     in_vault += 1
                 elif norm in decommissioned_urls:
@@ -4897,6 +5090,7 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             result['in_vault_count'] = in_vault
             result['decommissioned_count'] = decomm
             result['blocked_count'] = blocked
+            result['self_count'] = selfc
         except Exception as vi_err:
             log_signal.emit(f"⚠️ Vault filter failed in worker ({vi_err}); showing all URLs.", "warning")
             result['pending_urls'] = list(result.get('urls', []))
@@ -5775,6 +5969,25 @@ class MainWindow(QMainWindow):
             "field = no blocked domains.")
         web_blocked_row.addWidget(self.web_blocked_input, 1)
         web_layout.addLayout(web_blocked_row)
+        # v0.21.0 — self domains: hosts that belong to THIS deployment
+        # (the Telegram bot's own worker). Its auth links (…/auth/?token=…)
+        # land in the same chat the curator reads; they are never fetched,
+        # never noted — the _inbox row (token scrubbed) is the record.
+        web_self_row = QHBoxLayout()
+        web_self_row.addWidget(QLabel("Self domains:"))
+        self.web_self_input = QLineEdit(
+            ', '.join(_links.self_domains_from_config(self.config)))
+        self.web_self_input.setPlaceholderText(
+            "the app's OWN hosts — never fetched (default: the bot's "
+            "workers.dev URL) — empty = none")
+        self.web_self_input.setToolTip(
+            "Links on these domains belong to this deployment (the bot's "
+            "auth/OAuth handoff links) — never fetched, never turned into "
+            "notes; the _inbox row keeps the record with secret query "
+            "values scrubbed. Subdomains count. Empty field = no self "
+            "domains.")
+        web_self_row.addWidget(self.web_self_input, 1)
+        web_layout.addLayout(web_self_row)
         vault_layout.addWidget(web_group)
 
         # --- Manual Notes vault (owner-owned; the app writes only the
@@ -5835,6 +6048,7 @@ class MainWindow(QMainWindow):
         self.website_vault_input.editingFinished.connect(self._save_vault_page)
         self.website_repo_input.editingFinished.connect(self._save_vault_page)
         self.web_blocked_input.editingFinished.connect(self._save_vault_page)
+        self.web_self_input.editingFinished.connect(self._save_vault_page)
         self.manual_vault_input.textEdited.connect(self._refresh_vault_page_status)
         self.manual_vault_input.editingFinished.connect(self._save_vault_page)
         self.pipeline_github_check.toggled.connect(self._save_vault_page)
@@ -9365,6 +9579,14 @@ class MainWindow(QMainWindow):
                 if hasattr(self, 'web_blocked_input')
                 else self.config.get('web_blocked_domains',
                                      list(_links.DEFAULT_BLOCKED_DOMAINS))),
+            # v0.21.0 — self domains (the app's own bot): same text→list
+            # contract as the blocked list; empty field = deliberate opt-out.
+            "web_self_domains": (
+                [d.strip().lower() for d in
+                 self.web_self_input.text().split(',') if d.strip()]
+                if hasattr(self, 'web_self_input')
+                else self.config.get('web_self_domains',
+                                     list(_links.DEFAULT_SELF_DOMAINS))),
             "taxonomy_path": self.config.get('taxonomy_path', ''),
             "pipelines": {
                 "github": (self.pipeline_github_check.isChecked()
@@ -10560,7 +10782,13 @@ class MainWindow(QMainWindow):
             tracker.manifest = prev
             # v29 fix: log_signal must be a Qt signal (with .emit()), not a method.
             # self.log_message is a method in MainWindow, so pass None.
-            report = tracker.verify(log_signal=None)
+            # v0.21.0 — look for _inbox rows in the Websites vault too
+            # (the tables live there since v0.20.0 vault separation).
+            _extra_dirs = []
+            _wv = ((self.config or {}).get('website_vault_path') or '').strip()
+            if _wv:
+                _extra_dirs.append(os.path.join(_wv, "_inbox"))
+            report = tracker.verify(log_signal=None, extra_inbox_dirs=_extra_dirs)
 
             # Log the summary manually
             self.log_message(f"🔍 Verify: {report.get('github_processed', 0)} processed, {report.get('github_failed', 0)} failed", "info")
@@ -10577,12 +10805,29 @@ class MainWindow(QMainWindow):
             lines.append("")
             lines.append(f"✅ GitHub processed:    {report['github_processed']}")
             lines.append(f"⏭️ GitHub skipped:      {report['github_skipped']}  (dedup — already in vault)")
+            if report.get('github_pending'):
+                lines.append(f"⏳ GitHub pending:      {report['github_pending']}  (unfinished — will retry)")
             lines.append(f"❌ GitHub failed:       {report['github_failed']}")
-            lines.append(f"✅ Non-GitHub recorded: {report['non_github_recorded']}")
-            lines.append(f"❌ Non-GitHub failed:   {report['non_github_failed']}")
+            if report.get('non_github_recorded'):
+                lines.append(f"✅ Non-GitHub recorded: {report['non_github_recorded']}  (inbox tables)")
+            if report.get('websites_processed') or report.get('websites_review') or report.get('websites_skipped'):
+                lines.append(f"🌐 Websites notes:      {report.get('websites_processed', 0)}")
+                lines.append(f"🗂️ Websites in _review: {report.get('websites_review', 0)}  (retry scheduled)")
+                lines.append(f"⏭️ Websites skipped:    {report.get('websites_skipped', 0)}  (dedup)")
+            if report.get('blocked_recorded'):
+                lines.append(f"🚫 Blocked/self domains: {report.get('blocked_recorded')}  (recorded in _inbox)")
+            if report.get('non_github_pending'):
+                lines.append(f"⏳ Non-GitHub pending:  {report.get('non_github_pending')}  (websites pipeline off / no vault)")
+            if report.get('non_github_failed'):
+                lines.append(f"❌ Non-GitHub failed:   {report.get('non_github_failed', 0)}")
+            acc = report.get('accounted', 0)
+            if report.get('accounting_ok'):
+                lines.append(f"🧮 Accounting:          {acc}/{report['total']} accounted for ✓")
+            else:
+                lines.append(f"🧮 Accounting:          only {acc}/{report['total']} accounted for — {report.get('unaccounted', 0)} escaped every bucket!")
             lines.append("")
 
-            if report["verification_passed"]:
+            if report["verification_passed"] and report.get('accounting_ok'):
                 lines.append("🎉 ALL LINKS VERIFIED — NO DATA LOSS!")
             else:
                 lines.append(f"⚠️ {len(report['failed_links'])} link(s) need retry:")
@@ -10930,7 +11175,8 @@ class MainWindow(QMainWindow):
             return _bot_queue_job(aid, ahash, ph, px, bu, worker.log_message,
                                   worker.request_code,
                                   vault_path=(_vault_for_filter or None),
-                                  blocked_domains=_links.blocked_domains_from_config(self.config))
+                                  blocked_domains=_links.blocked_domains_from_config(self.config),
+                                  self_domains=_links.self_domains_from_config(self.config))
         worker._fn = _job
 
         worker.log_message.connect(self.log_message)
@@ -10970,6 +11216,7 @@ class MainWindow(QMainWindow):
                     in_vault_count = result.get('in_vault_count', 0)
                     decommissioned_count = result.get('decommissioned_count', 0)
                     blocked_count = result.get('blocked_count', 0)
+                    self_count = result.get('self_count', 0)
                     if result.get('vault_index_count'):
                         self.log_message(
                             f"📚 Vault index: {result['vault_index_count']} notes indexed", "info")
@@ -10977,10 +11224,13 @@ class MainWindow(QMainWindow):
                     in_vault_count = 0
                     decommissioned_count = 0
                     blocked_count = 0
+                    self_count = 0
                     pending_urls = []
                     # v0.20.0 — the legacy GUI-side filter applies the
-                    # same blocked-domain bucket as the worker-side one.
+                    # same blocked-domain bucket as the worker-side one
+                    # (v0.21.0: + the self-domain bucket).
                     _blocked_list = _links.blocked_domains_from_config(self.config)
+                    _self_list = _links.self_domains_from_config(self.config)
                     vault_path = self.vault_combo.currentText()
                     if vault_path and os.path.isdir(vault_path):
                         try:
@@ -11002,6 +11252,8 @@ class MainWindow(QMainWindow):
                                 norm = normalize_url(url)
                                 if _links.domain_is_blocked(url, _blocked_list):
                                     blocked_count += 1
+                                elif _links.domain_is_self(url, _self_list):
+                                    self_count += 1
                                 elif vi.has_url(url):
                                     in_vault_count += 1
                                 elif norm in decommissioned_urls:
@@ -11042,6 +11294,8 @@ class MainWindow(QMainWindow):
                 display += f"🗑️ Decommissioned (404):    {decommissioned_count}\n"
                 if blocked_count:
                     display += f"🚫 Blocked domains:         {blocked_count}\n"
+                if self_count:
+                    display += f"🔒 Self domains (own bot):  {self_count}\n"
                 display += f"⏳ Pending (not in vault):  {len(pending_urls)}\n"
                 display += f"🔗 Non-GitHub links:        {len(non_github)}\n"
                 if getattr(self, '_bot_queue_duplicates', 0) > 0:

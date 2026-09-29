@@ -400,7 +400,8 @@ def fetch_url(url: str,
               max_bytes: int = DEFAULT_MAX_BYTES,
               rate_limiter: Optional[DomainRateLimiter] = None,
               user_agent: str = USER_AGENT,
-              proxy: Optional[Dict] = None) -> FetchResult:
+              proxy: Optional[Dict] = None,
+              direct_fallback: bool = True) -> FetchResult:
     """Fetch one URL politely. Never raises — every failure is a
     FetchResult(status='failed', reason=...).
 
@@ -409,7 +410,18 @@ def fetch_url(url: str,
     v0.15.1 rule — enforced here, ahead of the opener). A proxy-specific
     failure (PySocks missing, proxy down) is a normal failed FetchResult
     whose reason names the proxy, so the batch keeps going and the
-    _review note tells the owner exactly what to fix."""
+    _review note tells the owner exactly what to fix.
+
+    v0.21.0 ``direct_fallback``: when a PROXIED fetch fails without ever
+    getting an HTTP answer (TLS reset at the exit — the owner's
+    gist.github.com / huggingface.co class of failures, where the proxy
+    exit IP is blocked by the site's CDN — or a timeout, or the proxy
+    dying mid-batch), the SAME URL is retried once DIRECT. Sites the exit
+    cannot reach but the local line can (gist.github.com) succeed; sites
+    blocked on both lines fail with BOTH reasons in the result. HTTP
+    errors (4xx/5xx) mean the site ANSWERED — no fallback, the response
+    is the truth. Loopback is never proxied, so it never falls back
+    either."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -427,6 +439,30 @@ def fetch_url(url: str,
                            reason='not an http(s) URL',
                            elapsed_s=time.monotonic() - started)
 
+    first = _fetch_once(url, timeout_s, max_bytes, user_agent, proxy,
+                        started)
+    if first.ok or first.http_status is not None:
+        # Success, or the site itself answered (HTTP error) — done.
+        return first
+    if not proxy or not direct_fallback or _is_loopback_url(url):
+        return first
+
+    # Connection-class failure through the proxy: one DIRECT attempt.
+    second = _fetch_once(url, timeout_s, max_bytes, user_agent, None,
+                         started)
+    if second.ok:
+        second.reason = (f"via direct fallback (proxy path failed: "
+                         f"{first.reason})")
+        return second
+    second.reason = (f"proxy: {first.reason} | direct: {second.reason}")
+    return second
+
+
+def _fetch_once(url: str, timeout_s: float, max_bytes: int,
+                user_agent: str, proxy: Optional[Dict],
+                started: float) -> FetchResult:
+    """One fetch attempt (the pre-v0.21.0 fetch_url body). Never raises;
+    ``started`` is the outer monotonic clock so elapsed covers fallbacks."""
     headers = {'User-Agent': user_agent,
                'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
                'Accept-Language': 'en'}

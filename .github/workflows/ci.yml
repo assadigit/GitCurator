@@ -1,10 +1,11 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 38 audited
-# Python modules and runs the full 704-case suite (34 core + 11 e2e +
+# Python modules and runs the full 742-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
-# llamacpp + 45 phase6 + 60 connection + 47 detectset — v0.18.0 Detect &
+# llamacpp + 45 phase6 + 60 connection + 47 detectset + 44 webproxy +
+# 49 intakefix + 38 sealfix — v0.18.0 Detect &
 # Set: the LLM quick-switch fast lane — 🧠 Detect & Set Ollama / 🦙 Detect
 # & Set llama.cpp buttons on the main screen + Settings, the model menu
 # when several models are installed, and the CLI twin --detect-llm.
@@ -17,6 +18,13 @@
 # notes for 404 repos (+ backfill; they stop counting as pending), and
 # the _inbox platform tables routed to the Websites vault;
 # tests/test_intakefix.py joins the suite.
+# v0.21.0: the seal truth — VaultSeal push reconciliation (fetch →
+# rebase/merge-unrelated → push; irreconcilable → seal-rescue branch,
+# main never force-pushed), self domains (the bot's own auth links
+# never fetched; tokens scrubbed out of _inbox rows), the verification
+# report's full accounting (websites/blocked/pending buckets +
+# reconciliation against the total), and the web-fetch direct fallback
+# for proxy connection failures; tests/test_sealfix.py joins the suite.
 # Prior: v0.17.0 Test Connection; v0.16.0 Phase 6 Linking; v0.15.1 the
 # automatic llama.cpp catch; v0.14.1 the first Windows zip.
 # test_quarantine, test_phase0, test_phase1 and test_phase2 import
@@ -36,7 +44,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 704 tests + websites pipeline)
+    name: Python gate (compile + 742 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -101,12 +109,12 @@ jobs:
           gitcurator/tools/build_links.py
           gitcurator/tools/smoke_detectset.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 38 compiles + 704 tests + offline golden run (v0.20.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 38 compiles + 742 tests + offline golden run (v0.21.0)."

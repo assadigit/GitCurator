@@ -136,6 +136,11 @@ CONFIG_EXAMPLE = {
     # already recorded as rows in the _inbox platform tables). Settings →
     # 📁 Vault → "Blocked domains"; an empty list = allow all.
     "web_blocked_domains": ["x.com", "twitter.com", "t.co"],
+    # v0.21.0 — hosts that belong to THIS deployment (the Telegram bot's
+    # own worker): its auth links (…/auth/?token=…) are never fetched and
+    # never noted; the _inbox row (secret query values scrubbed) is the
+    # record. Settings → 📁 Vault → "Self domains"; empty list = none.
+    "web_self_domains": ["github-to-obsidian-bot.aliassadi-plus.workers.dev"],
     "ollama": {
         "base_url": "http://localhost:11434",
         "model": "qwythos-9b"
