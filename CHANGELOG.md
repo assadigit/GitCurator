@@ -10,6 +10,106 @@ Versioning: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`, tagged `vMAJO
 > Both branches are preserved below, as-is. **v0.09 is the merge**: one
 > tree, one CLI, one dead-link system, going forward.
 
+## [0.11.0] — Phase 2: the Websites pipeline — 2026-09-29
+
+Phase 2 of the phased build (SPEC.md): **the website pipeline**. Non-GitHub
+links no longer dead-end in `_inbox/` review tables — when you flip the
+Websites switch ON (Settings → 📁 Vault), every non-GitHub link from the bot
+queue, imports and Telegram fetches is fetched politely, read, classified
+into your category taxonomy, analyzed, and written as a real note into the
+Websites vault. With the switch OFF (the default), nothing changes — links
+still go to `_inbox/` exactly as before (verified by test).
+
+### What you get
+
+1. **A real second pipeline (SPEC §4.3).** Per link: canonicalize the URL
+   (tracking parameters like `utm_*`/`fbclid`/`gclid`/`ref` are ignored;
+   meaningful ones like a YouTube `?v=` are kept), dedupe against the
+   Websites vault index + `cache.db` + the dismissed list, fetch politely
+   (timeout, 2 MB cap, per-domain rate limit, a clear User-Agent), extract
+   title / description / main text, classify in two passes, analyze, then
+   write the note atomically to `<Websites vault>/<Category>/<Subcategory>/
+   <Name>.md`. GitHub Pages links (`owner.github.io/repo`) now route to the
+   GitHub pipeline as their repo; gists go to the Websites pipeline with a
+   `#snippet` tag.
+2. **Your taxonomy file is the source of truth (SPEC §4.6).**
+   `app/taxonomy/website-library-categories.md` is parsed — 14 categories,
+   16 subcategories, the judgment-call rules passed verbatim to the
+   classifier. Every model answer must exactly match a parsed name;
+   invalid answers are retried twice with a corrective nudge, then the
+   note lands in `_review/` instead of a wrong folder. Low-confidence
+   answers also go to `_review`. Nothing is ever filed under a name you
+   didn't write.
+3. **Notes in the SPEC §4.5 shape**: Name, one-line description (≤25
+   words), 3–6 core offerings, standout feature, **Best used for** ("Use
+   when you need to…"), pricing (`free|freemium|paid|unknown`), login
+   required, similar tools (only when confident), source link — plus the
+   Phase 1 ownership stamps and `fetch_status: full|partial|failed`.
+   `partial` covers JavaScript-only shells, paywall stubs, PDFs and
+   size-capped pages (the model then works from title + description only).
+4. **Nothing is silently dropped (SPEC §4.3 failure handling).** A link
+   that cannot be fetched still gets a minimal note in `_review/` with
+   `fetch_status: failed`, and is retried automatically up to 3 times over
+   several days (state in `cache.db`). When a retry finally succeeds, the
+   `_review` placeholder is upgraded to a full note — and the placeholder
+   is only removed when it is still byte-identical to what the app wrote;
+   if you edited it by hand, it is kept and flagged instead.
+5. **The golden set (SPEC §6).** Your 30 bookmark candidates are finalized
+   as `app/tests/golden/websites.json` with proposed expected categories
+   (the one unresolved t.co short link resolves to phosphoricons.com —
+   verified). `gitcurator/tools/run_golden_websites.py` has two modes:
+   `--offline` (fake LLM, canned pages — runs in CI on every push, zero
+   network) and `--live` (real fetches + your configured LLM), both
+   writing a side-by-side expected-vs-actual Markdown report. The live
+   report for this release: `docs/reports/golden-websites-report.md` —
+   0 invalid category names (the pipeline's validation held).
+6. **Wiring**: the Websites pipeline runs after the GitHub loop in every
+   batch (GUI and CLI/headless alike), the run report and summary log
+   gained a Websites section, `--cli --status` shows websites counters
+   (processed / retry queue / dismissed), and Stop works mid-phase. New
+   optional config keys with safe defaults: `web_fetch_timeout_s`,
+   `web_fetch_max_bytes`, `web_domain_delay_s`.
+
+### Diagnosis / notes
+- GitHub pipeline OFF + Websites ON now works: the batch still fetches,
+  GitHub links are logged and skipped, websites process normally. Both
+  OFF = the old early return.
+- The Cloudflare API tokens on file carry no Workers AI permission
+  (verified — both fail the AI endpoints while being valid tokens), so
+  the live golden run used a temporary OpenAI-compatible endpoint in the
+  build sandbox. Phase 4 runs the golden set on your real backends
+  (Ollama / llama.cpp) per the spec.
+- GitHub Actions on github.com has been unable to start runners since
+  2026-09-24 ("recent account payments have failed or your spending
+  limit needs to be increased" — Settings → Billing & plans). The local
+  gate mirrors CI exactly (same compile list, same test command) and is
+  fully green; the workflow itself triggers correctly.
+- Dedupe identity for websites is the canonical URL *with meaningful
+   query parameters* — a separate normalizer from GitHub's, which is
+   untouched (SPEC §4.3.1).
+
+### Verification
+- 71 new tests (`tests/test_phase2.py`): taxonomy parsed against the
+  REAL file (counts, tricky names, emoji/italic/em-dash stripping, the
+  (no subcategories) marker, judgment rules, definitions, tag hints,
+  safe folder paths); routing (github.io mapping, gist flag,
+  canonicalization); fetch on a local HTTP server (redirect, 404,
+  timeout, size cap, PDF, windows-1252, redirect loop, rate limiter);
+  extraction on saved fixtures (article, landing, JS shell, paywall,
+  non-UTF-8, huge); prompt-slot discipline (unfilled / empty / smuggled
+  markers refused); state DB (backoff, cap, resolve, dismiss); the
+  pipeline end-to-end with a fake LLM (note format, 4-layer dedupe,
+  _review + retry + upgrade + hand-edit protection, classification
+  validation + corrective retries, hostile-output sanitization, dry-run
+  writes nothing, Stop); REAL ProcessingWorker batches (websites ON in
+  a full batch, OFF keeps writing `_inbox/` unchanged, github-off +
+  websites-on, both-off); golden set integrity + the offline runner.
+- Full suite: **239 tests, all passing** (168 existing + 71 new). CI now
+  compiles 27 modules, runs eight test modules and the offline golden
+  run.
+- Live golden run: 30 links, real fetches, real model — report committed
+  at `docs/reports/golden-websites-report.md`.
+
 ## [0.10.0] — Phase 1: the app learns there is more than one vault — 2026-09-29
 
 Phase 1 of the phased build (SPEC.md): **vault settings and ownership**.
