@@ -121,6 +121,12 @@ CONFIG_EXAMPLE = {
     "llamacpp_api_url": "http://127.0.0.1:8080/v1",
     "llamacpp_api_key": "",
     "llamacpp_model": "",
+    # v0.16.0 — Phase 6 (Linking). The embedding model for the linking
+    # layer (recall field + one-line + tags, never full text). Empty =
+    # the provider default: Ollama 'nomic-embed-text'; llama.cpp uses
+    # the served model (llama-server needs --embeddings); a cloud
+    # endpoint falls back to cloud_model when this is empty.
+    "embedding_model": "",
     "github_token": "",
     "vault_path": "",
     "vaults_history": [],

@@ -1,3 +1,91 @@
+## [0.16.0] — Phase 6: Linking — 2026-09-29
+
+The owner's go: "the app runs, you can continue for next phase." SPEC
+§4.8 / §6 Phase 6 — the last phase, built exactly in its four steps:
+
+### 1. Recall hooks (`core/recall.py` + `prompts/r01_recall.txt` + `tools/add_recall_hooks.py`)
+
+- Every existing GitHub note gets ONE delimited, app-managed block
+  (`<!-- gitcurator:recall:start --> … end -->` — the markers
+  `note_state` has owned since Phase 1) with a NEUTRAL "Best used for"
+  sentence. Website notes already carry the field in their body.
+- The prompt does NOT use `about_me.md` (only the GitHub repo prompts
+  personalize). The sentence must start "Use when you need to" and name
+  a problem; anything else (marketingese, a bare prefix, multi-line)
+  falls back to the explicit "not captured" placeholder — omit rather
+  than guess.
+- Fingerprint-invisible: `note_state.compute_fingerprint` strips the
+  block, so an app-added hook NEVER reads as a human edit (tested).
+  Idempotent, replace-in-place, CRLF-preserving.
+- The tool is DRY-RUN BY DEFAULT with a diff report under
+  `reports/recall/`; `--sample 20` implements the SPEC's "the owner
+  approves 20 before any bulk run", `--apply` writes.
+
+### 2. Embeddings (`core/embeddings.py`)
+
+- "Embed only the recall field, the one-line description and the tags.
+  Never full text" — `embed_text_for` builds exactly that.
+- Providers: local Ollama (`/api/embed`, with the legacy
+  `/api/embeddings` fallback auto-detected for older servers) and ANY
+  OpenAI-compatible `/v1/embeddings` endpoint — llama-server with
+  `--embeddings`, LM Studio, vLLM, cloud. Every loopback call bypasses
+  the system proxy (the v0.15.1 rule).
+- Vectors live in SQLite (own `embeddings` table in cache.db, the
+  NoteStateDB pattern), keyed by (vault, source URL, model) with a
+  text-hash for stale-only refresh. Pure-Python cosine — no numpy.
+
+### 3. Candidates + LLM confirmation (`core/linking.py` + `prompts/l01_confirm.txt`)
+
+- Cosine neighbors across BOTH machine vaults ("across domains and
+  within a domain"), `--top-k` per note above a cosine floor.
+- One LLM call per candidate pair: related? yes/no + a short reason
+  (neutral prompt, no `about_me.md`). A NO is recorded as rejected — it
+  is never asked again.
+
+### 4. The link store + the two surfaces
+
+- `link_suggestions` table in cache.db: pending / approved / rejected.
+  A pair is suggested AT MOST ONCE (rejected pairs never reappear —
+  SPEC acceptance, tested end-to-end). Cap: 7 approved links per note
+  (strongest first).
+- **The Suggestions note** (`<manual>/Library/Suggestions.md`): every
+  pending pair as an Obsidian checkbox with its two source URLs on the
+  line below. Tick to approve, strike the line through to reject —
+  `build_links.py --collect` reads the ticks back, and only lines
+  carrying the URL pair are ever parsed (free text cannot be misread).
+- **Related (auto) blocks**: written ONLY into the `Library/` MIRROR
+  copies (found by their `mirror_of` marker) — never the machine vaults,
+  never unmarked files, never outside `Library/` (all tested). The
+  Phase-5 mirror itself now carries approved blocks across re-syncs
+  (`preserve_related_block` in `_plan_tree` — the rebuild no longer
+  wipes them; tested with a full re-apply).
+- Silent otherwise: no Telegram messages about links.
+
+### Also
+
+- GUI: More menu → "🪝 Recall hooks (dry-run)" and "🔗 Build link
+  suggestions" (the SAFE defaults, streamed to the log; the
+  apply/collect steps stay on the command line where the owner-approval
+  flow lives).
+- Config: `embedding_model` (both constants modules; empty = provider
+  default — `nomic-embed-text` on Ollama, the served model on
+  llama.cpp).
+- Suite: **504** (45 new in `tests/test_phase6.py`: block ops +
+  fingerprint invisibility, sanitizers, field extraction, prompts
+  filled + neutral, plan/run dry-run/apply/unchanged, cosine + embed
+  text, fake `/v1/embeddings` + `/api/embed` + legacy fallback servers,
+  provider routing, store roundtrip + stale refresh, candidate pairs,
+  confirm parsing, the link store lifecycle + never-resuggest + cap,
+  the Suggestions note roundtrip (tick/strike/free-text), Related
+  blocks mirror-only + removal, the mirror carry-over, and both tools
+  end-to-end over synthetic vaults). CI: **36 modules** compiled +
+  offline golden 30/30.
+- Test-caught en route: `ollama_embed` treated an HTTP 404 on
+  `/api/embed` as fatal instead of falling back to the legacy route;
+  `recall_fields_for` broke its own uniform contract for website notes
+  (`recall` vs `best_used_for`); a bare "Use when you need to" prefix
+  (a refusal in disguise) passed the sanitizer.
+
 ## [0.15.1] — the automatic llama.cpp catch — 2026-09-29
 
 Owner report after testing the v0.15.0 zip: "it still doesnt auto-detect

@@ -1,15 +1,15 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 31 audited
-# Python modules and runs the full 459-case suite (34 core + 11 e2e +
+# Every push to main, every tag, and every PR compiles the 36 audited
+# Python modules and runs the full 504-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
-# llamacpp — v0.15.1 the automatic catch: startup auto-detect with
-# auto-switch, process-based port discovery (tasklist+netstat / ss),
-# proxy-safe loopback, /v1/models fingerprints for /props-less builds
-# (on top of v0.15.0: /props positive ID, port scan, automatic model
-# detection, provider 'llamacpp' through GUI/CLI/worker/backfill/golden).
-# Prior: v0.14.1 the first Windows zip.
+# llamacpp + 45 phase6 — v0.16.0 Phase 6 Linking: recall hooks (the
+# delimited fingerprint-invisible block), local embeddings (Ollama
+# /api/embed + any OpenAI-compatible /v1/embeddings) in SQLite,
+# cosine candidates + LLM confirm, the link store + Suggestions note +
+# Related (auto) blocks in the Library mirror only. Prior: v0.15.1
+# the automatic llama.cpp catch; v0.14.1 the first Windows zip.
 # test_quarantine, test_phase0, test_phase1 and test_phase2 import
 # gitcurator/gui/app.py (CacheDB and ProcessingWorker live there), so the
 # app requirements are installed first; the suite runs headless on the
@@ -27,7 +27,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 459 tests + websites pipeline)
+    name: Python gate (compile + 504 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,7 +50,7 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 31 audited modules
+      - name: Compile the 36 audited modules
         run: >
           python -m py_compile
           main.py
@@ -69,6 +69,9 @@ jobs:
           gitcurator/core/web_extract.py
           gitcurator/core/website_pipeline.py
           gitcurator/core/mirror.py
+          gitcurator/core/recall.py
+          gitcurator/core/embeddings.py
+          gitcurator/core/linking.py
           gitcurator/integrations/vaultseal.py
           gitcurator/integrations/goodrepos.py
           gitcurator/integrations/telegram_fetch_worker.py
@@ -84,13 +87,15 @@ jobs:
           gitcurator/tools/backfill_websites.py
           gitcurator/tools/mirror_manual.py
           gitcurator/tools/build_zip.py
+          gitcurator/tools/add_recall_hooks.py
+          gitcurator/tools/build_links.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 31 compiles + 459 tests + offline golden run (v0.15.1)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 36 compiles + 504 tests + offline golden run (v0.16.0)."

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import dryrun
+from .linking import preserve_related_block   # v0.16.0 — Phase 6 carry-over
 from .storage import atomic_write_text
 
 # ---------------------------------------------------------------------------
@@ -526,6 +527,11 @@ def _plan_tree(label: str, vault_path: str, tree_root: str) -> TreePlan:
             except OSError:
                 plan.scan_errors += 1
                 continue
+            # v0.16.0 — Phase 6: the rebuilt copy must carry over the
+            # owner-approved Related (auto) block (a rebuild would
+            # otherwise silently wipe it); with the block carried over,
+            # an unchanged note still compares equal (a KEEP).
+            text = preserve_related_block(on_disk, text)
             if on_disk == text:
                 plan.keeps += 1
             else:
@@ -542,6 +548,16 @@ def _plan_tree(label: str, vault_path: str, tree_root: str) -> TreePlan:
         moved_from = [r for r in mirrors.get(note.source, []) if r != note.rel]
         if moved_from:
             move_olds.add(moved_from[0])
+            # v0.16.0 — Phase 6: a MOVED mirror copy keeps its approved
+            # Related (auto) block too (read from the old spot).
+            old_abs = _safe_join(tree_root, moved_from[0])
+            try:
+                with open(old_abs, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    old_text = f.read()
+                text = preserve_related_block(old_text, text)
+            except (OSError, MirrorError):
+                pass
             plan.moves.append((moved_from[0], note.rel, text, note.source))
         else:
             plan.creates.append((note.rel, text, note.source))
