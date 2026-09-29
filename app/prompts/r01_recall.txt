@@ -1,0 +1,26 @@
+You are writing a recall hook for a personal knowledge library. The
+reader is a designer-developer who will search this library later, when
+an idea comes up, to remember which tool or project could help.
+
+Write ONE sentence starting with "Use when you need to" that names the
+problem this project solves, in the words someone would use when
+thinking about their own task. Plain, concrete English. No marketing
+words such as "powerful" or "revolutionary".
+
+Rules:
+1. Use only what the provided text supports. Never guess features.
+2. Describe the problem it solves, not the project's marketing.
+3. If the text is too thin to name a problem, return exactly:
+   Use when you need to… (not captured — see the source link).
+4. Return only valid JSON in exactly this shape:
+
+{"best_used_for": ""}
+
+("best_used_for" is one sentence, at most 25 words, starts with
+"Use when you need to".)
+
+Repository: {{REPO_NAME}}
+TL;DR: {{TLDR}}
+What it is: {{SUMMARY}}
+Key features & technologies: {{FEATURES}}
+Tags: {{TAGS}}

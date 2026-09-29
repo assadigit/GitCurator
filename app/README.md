@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.15.1 (Phased Build — llama.cpp auto-detect)
+# GitHub-to-Obsidian v0.16.0 (Phased Build — Phase 6: Linking)
 
 ## Quick Start
 
@@ -265,6 +265,52 @@ warning) — llama-server speaks the protocol natively.
 
 ```cmd
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
+```
+
+### The Linking layer (v0.16.0 — Phase 6, the last phase)
+
+Notes now link to each other, with every suggestion waiting for your
+approval (SPEC §4.8):
+
+- **Recall hooks**: every GitHub note gets one delimited
+  fingerprint-invisible block with a NEUTRAL "Use when you need to…"
+  sentence (prompt without `about_me.md` — website notes already carry
+  the field). Dry-run first; the SPEC flow is approve-a-sample first::
+
+      python gitcurator/tools/add_recall_hooks.py --sample 20        # dry-run
+      python gitcurator/tools/add_recall_hooks.py --sample 20 --apply
+      python gitcurator/tools/add_recall_hooks.py --apply            # the rest
+
+- **Embeddings** (local, your provider): only the recall field + the
+  one-line description + the tags are embedded — never full text.
+  Ollama (`/api/embed`, legacy servers auto-detected) or any
+  OpenAI-compatible `/v1/embeddings` (llama-server `--embeddings`,
+  LM Studio, vLLM). Vectors live in SQLite; refreshes are stale-only.
+  Optional `embedding_model` in config.json (Ollama default:
+  `nomic-embed-text`).
+- **Candidates + confirmation**: cosine neighbors across BOTH
+  libraries; one LLM call per pair (yes/no + a short reason). A "no"
+  is remembered forever.
+- **The Suggestions note** — the suggest step's ONLY write::
+
+      python gitcurator/tools/build_links.py
+
+  lands `<manual vault>/Library/Suggestions.md` with every pending pair
+  as an Obsidian checkbox. **Tick to approve, strike a line through to
+  reject**, then::
+
+      python gitcurator/tools/build_links.py --collect
+
+  writes the approved **Related (auto)** blocks into the `Library/`
+  mirror copies ONLY (never the machine vaults, never your own notes;
+  the mirror carries the blocks across re-syncs). Cap: 7 links per
+  note; rejected pairs never come back. Silent otherwise — no Telegram
+  messages about links.
+- GUI: More menu → **🪝 Recall hooks (dry-run)** and **🔗 Build link
+  suggestions** run the safe defaults from the app.
+
+```cmd
+python gitcurator/tools/build_links.py
 ```
 
 ### The Manual Notes Library mirror (v0.14.0)

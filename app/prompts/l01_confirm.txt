@@ -1,0 +1,30 @@
+You curate a personal knowledge library. Two entries from it are below.
+Would a reader who is interested in entry A plausibly also want entry B
+(and the other way around)? Answer with a yes/no and a short reason.
+
+Rules:
+1. "Related" means they serve overlapping problems or workflows — not
+   merely sharing a broad technology, and not merely both being popular.
+2. Two entries from the same area can still be unrelated (two unrelated
+   design tools). Two entries from different areas can be related (a
+   color palette generator and a color contrast checker).
+3. When unsure, answer no — a wrong link costs the reader more than a
+   missing one.
+4. Return only valid JSON in exactly this shape:
+
+{"related": true, "reason": ""}
+
+("reason" is at most 20 words, plain English. "related" is true or
+false.)
+
+Entry A:
+Name: {{A_NAME}}
+Description: {{A_LINE}}
+Best used for: {{A_RECALL}}
+Tags: {{A_TAGS}}
+
+Entry B:
+Name: {{B_NAME}}
+Description: {{B_LINE}}
+Best used for: {{B_RECALL}}
+Tags: {{B_TAGS}}
