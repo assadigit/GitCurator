@@ -1,3 +1,65 @@
+## [0.15.0] — llama.cpp engine detection — 2026-09-29
+
+The owner asked for it directly: "the app must have llama.cpp engine
+detection. for example it currently sees ollama, or custom api, but it
+must detect llama.cpp service and it's model detected automatically."
+The app saw two providers (🧠 Local Ollama, ☁️ OpenAI-compatible
+endpoint); a local **llama.cpp `llama-server`** is now the third — and
+it is DETECTED like Ollama, not hand-configured like the cloud option.
+
+### What you get
+
+1. **Positive server identification** (`core/llm_client.py`): llama.cpp
+    is identified through `/props` — a llama.cpp-ONLY route whose JSON
+    shape (model_path / model_alias / default_generation_settings /
+    total_slots) no other server produces. A vLLM/LM Studio/dev server
+    answering on the scanned ports is skipped, never misreported.
+    `/health` reports ready vs still-loading (503 = loading, handled).
+2. **Automatic model detection**: the model id comes from `/v1/models`
+    (the `/props` alias/basename is the fallback for builds that hide
+    the route). An empty `llamacpp_model` in config.json means "ask the
+    server" — the GUI Detect button, every batch pre-flight, the CLI
+    wizard/status/preflight, the backfill tool and the golden runner
+    all auto-fill AND persist what the server actually serves.
+3. **GUI** (Settings → 🧠 LLM): a third radio 🦙 llama.cpp (local) with
+    its own group — Server URL (llama-server default
+    http://127.0.0.1:8080/v1), optional API key (--api-key only), a
+    model combo, **🔍 Detect** (port scan 8080→8081→8082→8083→8000,
+    positive /props ID, fills URL + model, /health state) and
+    **🔄 Refresh**; "🦙 Test llama.cpp" joins the More menu; the
+    LLM-failure dialog lists the llama-server's own models.
+4. **Batch pre-flight** (worker): probe the configured URL → when dead,
+    scan the common ports once and SWITCH to what is found (saved to
+    Settings, like the Ollama single-model auto-switch) → auto-fill the
+    model → a definitively absent server aborts the batch with the
+    exact `llama-server -m <model>.gguf --port 8080` command (same
+    policy as "Ollama not available" — no 100 per-link failures).
+5. **Chat rides the hardened OpenAI-compatible path**: llama-server
+    speaks the protocol natively, so the wall-clock timeout, JSON mode
+    with memoized fallback and the `llm_num_ctx` over-budget warning
+    all apply unchanged. `normalize_llamacpp_api_url` accepts every
+    user spelling (`127.0.0.1:8080`, `http://host:8080/`, full `/v1`).
+6. **CLI + tools**: `--cli --init` choice 3 (the wizard probes the
+    server and offers its model as the default), `--cli --status`
+    llama.cpp row + live detection line, the run card, the batch
+    pre-flight (auto-detect + persist + clear abort),
+    `backfill_websites.py --provider llamacpp`, and
+    `run_golden_websites.py --live --backend llamacpp`.
+7. **Config**: `llamacpp_api_url` / `llamacpp_api_key` /
+    `llamacpp_model` (empty = auto) + `llm_provider: "llamacpp"` —
+    old configs load unchanged (tested).
+8. **Test-caught en route** (fixed): the phase-4 router-test restore
+    assigned the unwrapped `_call_cloud_llm` back as a PLAIN function —
+    every later `self._call_cloud_llm(...)` in the same process would
+    have passed `self` as `api_url` (latent since v0.13.0, surfaced by
+    the new end-to-end router test); fake-server state was written to
+    the handler CLASS instead of the per-server dict; and a 503
+    `/health` answer raised HTTPError instead of reporting "loading".
+9. Tests: `tests/test_llamacpp.py` (49) against a fake llama-server
+    (stdlib http.server serving /props, /health, /v1/models,
+    /v1/chat/completions) — suite **429**.
+
+
 ## [0.14.1] — the first Windows zip — 2026-09-29
 
 The owner asked for "the first .zip version to test locally". This is

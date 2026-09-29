@@ -142,6 +142,16 @@ CONFIG_EXAMPLE = {
     "cloud_api_url": "https://api.openai.com/v1",
     "cloud_api_key": "",
     "cloud_model": "gpt-4o-mini",
+    # v0.15.0 — llama.cpp engine detection: llama-server as its OWN
+    # provider value ('llamacpp'), detected like Ollama instead of
+    # hand-configured like the cloud endpoint. llamacpp_api_url is the
+    # OpenAI-compatible base (the llama-server default http://127.0.0.1:8080
+    # with /v1); the key stays empty unless the server was started with
+    # --api-key; llamacpp_model empty = AUTO-DETECTED from the running
+    # server (/v1/models, /props alias).
+    "llamacpp_api_url": "http://127.0.0.1:8080/v1",
+    "llamacpp_api_key": "",
+    "llamacpp_model": "",
     # v0.13.0 — Phase 4 (LLM backends). The cloud option is any
     # OpenAI-compatible endpoint: llama.cpp server, vLLM, LM Studio or a
     # cloud API — the label in the GUI/CLI says exactly that.

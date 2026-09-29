@@ -474,12 +474,19 @@ def prompt_model_menu(configured: str, available: list, *,
 
 def apply_model_choice(cfg: dict, model: str, config_path: str | None) -> None:
     """Persist a model switch to the in-memory config AND config.json
-    (private keys filtered — one source of truth for GUI + CLI)."""
-    oll = cfg.get("ollama")
-    if not isinstance(oll, dict):
-        oll = {}
-        cfg["ollama"] = oll
-    oll["model"] = model
+    (private keys filtered — one source of truth for GUI + CLI).
+    v0.15.0 — provider-aware: 'llamacpp' writes llamacpp_model."""
+    provider = cfg.get("llm_provider", "ollama")
+    if provider == "cloud":
+        cfg["cloud_model"] = model
+    elif provider == "llamacpp":
+        cfg["llamacpp_model"] = model
+    else:
+        oll = cfg.get("ollama")
+        if not isinstance(oll, dict):
+            oll = {}
+            cfg["ollama"] = oll
+        oll["model"] = model
     if config_path:
         save_config(config_path, _clean_config_for_save(cfg))
 
@@ -524,11 +531,21 @@ def cmd_init(args) -> int:
     # v0.13.0 — Phase 4 relabel: the option is any OpenAI-compatible
     # endpoint (llama.cpp server, vLLM, LM Studio, cloud). The CONFIG
     # VALUE stays 'cloud' — old configs load unchanged.
+    # v0.15.0 — llama.cpp engine detection: llama-server is its OWN option
+    # (3 / 'llamacpp') — detected like Ollama (server + model found
+    # automatically) instead of hand-configured.
+    _saved_prov = cfg.get("llm_provider", "ollama")
     prov = _ask("Provider: 1) ollama  2) OpenAI-compatible endpoint "
-                "(llama.cpp, vLLM, LM Studio, cloud)",
-                "ollama" if cfg.get("llm_provider", "ollama") == "ollama" else "cloud")
-    prov = ("cloud" if "2" in prov or "cloud" in prov.lower()
-            or "openai" in prov.lower() else "ollama")
+                "(llama.cpp, vLLM, LM Studio, cloud)  3) llama.cpp "
+                "(local, auto-detected)",
+                "llamacpp" if _saved_prov == "llamacpp"
+                else ("ollama" if _saved_prov == "ollama" else "cloud"))
+    if "3" in prov or "llama" in prov.lower():
+        prov = "llamacpp"
+    elif "2" in prov or "cloud" in prov.lower() or "openai" in prov.lower():
+        prov = "cloud"
+    else:
+        prov = "ollama"
     cfg["llm_provider"] = prov
     if prov == "ollama":
         oll = cfg.get("ollama", {}) or {}
@@ -536,6 +553,29 @@ def cmd_init(args) -> int:
             "base_url": _ask("Ollama base URL", oll.get("base_url", "http://127.0.0.1:11434")),
             "model": _ask("Ollama model", oll.get("model", "qwen2.5-coder:7b")),
         }
+    elif prov == "llamacpp":
+        from gitcurator.core import llm_client as _llm
+        cfg["llamacpp_api_url"] = _ask(
+            "llama.cpp server URL (llama-server default http://127.0.0.1:8080)",
+            cfg.get("llamacpp_api_url", "http://127.0.0.1:8080/v1"))
+        cfg["llamacpp_api_key"] = _ask(
+            "API key (empty unless llama-server was started with --api-key)",
+            cfg.get("llamacpp_api_key", ""))
+        # "its model detected automatically": when the server is running,
+        # its loaded model is offered as the default right here.
+        _probe = _llm.probe_llamacpp(cfg["llamacpp_api_url"],
+                                     cfg["llamacpp_api_key"])
+        _default_model = ""
+        if _probe.get("found"):
+            cli_print(f"llama.cpp detected: {_probe['detail']}", "success")
+            _default_model = _probe.get("model") or ""
+        else:
+            cli_print(f"llama.cpp not detected yet ({_probe.get('detail')}) "
+                      "— the model is auto-detected when the server runs.",
+                      "warning")
+        cfg["llamacpp_model"] = _ask(
+            "Model" + (f" (detected: {_default_model})" if _default_model else " (empty = auto-detect)"),
+            cfg.get("llamacpp_model", "") or _default_model)
     else:
         cfg["cloud_api_url"] = _ask("Endpoint base URL (e.g. http://localhost:8080/v1 for llama.cpp)", cfg.get("cloud_api_url", "https://api.openai.com/v1"))
         cfg["cloud_api_key"] = _ask("API key (empty for local servers)", cfg.get("cloud_api_key", ""))
@@ -768,7 +808,8 @@ def cmd_status(args) -> int:
         ("GitHub token", mask(str(cfg.get("github_token", "")))),
         ("LLM", cfg.get("llm_provider", "ollama") + (
             f" · {cfg.get('ollama', {}).get('model', '?')}" if cfg.get("llm_provider", "ollama") == "ollama"
-            else f" · {cfg.get('cloud_model', '?')}")
+            else (f" · {cfg.get('llamacpp_model', '') or '(auto-detect)'}" if cfg.get("llm_provider", "ollama") == "llamacpp"
+                  else f" · {cfg.get('cloud_model', '?')}"))
          + C.DIM + f" · num_ctx={cfg.get('llm_num_ctx', 8192)}"
          + (f" · classify='{_m.get('classify')}'" if (_m := (cfg.get('models') or {})).get('classify') else "")
          + (f" · analyze='{_m.get('analyze')}'" if _m.get('analyze') else "") + C.RESET),
@@ -808,6 +849,28 @@ def cmd_status(args) -> int:
                       f"{len(models)} model(s) installed · '{model}' ready")
         except Exception:
             pass  # server down — the batch pre-flight reports it in detail
+    elif cfg.get("llm_provider", "ollama") == "llamacpp":
+        # v0.15.0 — llama.cpp engine detection: probe + (when the
+        # configured URL is dead) scan the common ports, then report the
+        # server + its model. Never fails the status command.
+        try:
+            from gitcurator.core import llm_client as _llm
+            url = cfg.get("llamacpp_api_url", "") or _llm.LLAMACPP_DEFAULT_BASE
+            key = cfg.get("llamacpp_api_key", "") or ""
+            probe = _llm.probe_llamacpp(url, key)
+            if not probe.get("found"):
+                probe = _llm.detect_llamacpp(key) or probe
+            if probe.get("found"):
+                model = (cfg.get("llamacpp_model", "")
+                         or probe.get("model") or "(none loaded)")
+                print(f"  {paint('llama.cpp'.ljust(22), C.BOLD)} "
+                      f"{probe['detail']} · configured '{model}'")
+            else:
+                cli_print(f"llama.cpp server not detected ({probe.get('detail')}) — "
+                          "start it with: llama-server -m <model>.gguf --port 8080",
+                          "warning")
+        except Exception:
+            pass  # never let a status command fail on this
     print()
 
     # CacheDB stats (pulls in the GUI module — needs the same requirements.txt
@@ -1411,6 +1474,10 @@ def run_config_card(cfg: dict) -> None:
     px = cfg.get("proxy") or {}
     if cfg.get("llm_provider", "ollama") == "ollama":
         llm_txt = "Ollama · " + ((cfg.get("ollama") or {}).get("model") or "?")
+    elif cfg.get("llm_provider", "ollama") == "llamacpp":
+        llm_txt = ("llama.cpp · " + (cfg.get("llamacpp_model") or "(auto-detect)")
+                   + " @ " + (cfg.get("llamacpp_api_url")
+                              or "http://127.0.0.1:8080/v1"))
     else:
         llm_txt = f"OpenAI-compatible · {cfg.get('cloud_model', '?')}"
     tok = str(cfg.get("github_token", "") or "")
@@ -1487,7 +1554,49 @@ def _preflight_llm(cfg: dict, config_path: str | None) -> bool:
     """Ollama server + installed-model check. THE v0.07.2 fix: a missing
     configured model opens the interactive picker here — BEFORE the batch —
     and the choice is persisted. Returns False only when the run cannot
-    proceed (no models at all / user declined)."""
+    proceed (no models at all / user declined).
+    v0.15.0 — llama.cpp engine detection: the llamacpp provider probes the
+    configured URL (then scans the common ports), AUTO-FILLS the model from
+    the running server and persists it — "its model detected
+    automatically". False only when no server / no model at all."""
+    if cfg.get("llm_provider", "ollama") == "llamacpp":
+        from gitcurator.core import llm_client as _llm
+        url = cfg.get("llamacpp_api_url", "") or _llm.LLAMACPP_DEFAULT_BASE
+        key = cfg.get("llamacpp_api_key", "") or ""
+        probe = _llm.probe_llamacpp(url, key)
+        if not probe.get("found"):
+            probe = _llm.detect_llamacpp(key) or probe
+        if not probe.get("found"):
+            _check_line("error", "LLM provider",
+                        f"llama.cpp server not detected ({probe.get('detail')}) — "
+                        "start it with: llama-server -m <model>.gguf --port 8080")
+            return False
+        if probe.get("base_url") and url != probe["base_url"] + "/v1":
+            # The configured URL was stale — the scan found the server
+            # elsewhere; persist the working URL.
+            cfg["llamacpp_api_url"] = probe["base_url"] + "/v1"
+            url = cfg["llamacpp_api_url"]
+        model = _llm.resolve_llamacpp_model(
+            cfg, probe.get("models"), probe.get("props_model"))
+        if not model:
+            _check_line("error", "LLM provider",
+                        "llama.cpp up but no model loaded — start llama-server "
+                        "with -m <model>.gguf")
+            return False
+        if not str(cfg.get("llamacpp_model", "") or "").strip():
+            apply_model_choice(cfg, model, config_path)
+            _check_line("success", "LLM provider",
+                        f"llama.cpp up @ {probe['base_url']} · model '{model}' "
+                        "(auto-detected — saved to config.json)"
+                        + (" · still loading" if probe.get("ready") is False else ""))
+            return True
+        listed = (not probe.get("models")) or \
+            cfg["llamacpp_model"].lower() in {n.lower() for n in probe["models"]}
+        _check_line("success" if listed else "warning", "LLM provider",
+                    f"llama.cpp up @ {probe['base_url']} · model '{cfg['llamacpp_model']}'"
+                    + ("" if listed else " (NOT in the /v1/models list — trying anyway)")
+                    + (" · still loading" if probe.get("ready") is False else ""))
+        return True
     if cfg.get("llm_provider", "ollama") != "ollama":
         _check_line("success", "LLM provider",
                     f"OpenAI-compatible endpoint {cfg.get('cloud_api_url', '?')} · model '{cfg.get('cloud_model', '?')}'")

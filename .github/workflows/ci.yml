@@ -1,14 +1,12 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 31 audited
-# Python modules and runs the full 380-case suite (34 core + 11 e2e +
+# Python modules and runs the full 429-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging — v0.14.1
-# the first Windows zip: the deterministic build_zip tool (tracked-files
-# only, secret-refusal, ASCII+CRLF bat enforcement, byte-identical
-# rebuilds), six double-click launchers and the quickstart. Prior:
-# v0.14.0 the Manual Notes Library mirror: one-way sync into
-# <manual>/Library/, marker-only deletes, outside-Library guarantee).
+# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 49
+# llamacpp — v0.15.0 llama.cpp engine detection: /props positive server
+# ID, port scan, automatic model detection, provider 'llamacpp' through
+# GUI/CLI/worker/backfill/golden. Prior: v0.14.1 the first Windows zip.
 # test_quarantine, test_phase0, test_phase1 and test_phase2 import
 # gitcurator/gui/app.py (CacheDB and ProcessingWorker live there), so the
 # app requirements are installed first; the suite runs headless on the
@@ -26,7 +24,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 380 tests + websites pipeline)
+    name: Python gate (compile + 429 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -84,12 +82,12 @@ jobs:
           gitcurator/tools/mirror_manual.py
           gitcurator/tools/build_zip.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 31 compiles + 380 tests + offline golden run (v0.14.1)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 31 compiles + 429 tests + offline golden run (v0.15.0)."

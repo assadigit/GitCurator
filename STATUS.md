@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.13.0 (now 0.14.0 on the branch below)
+- **Version at start of this build:** 0.14.1 (now 0.15.0 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 5 — in review (agent finished, waiting for the owner). Phases 0–4 approved & merged.
+- **Current phase:** 6 (Linking) not started — awaits the owner's go. Phases 0–5 + the first-zip packaging approved & merged. The llama.cpp engine detection (v0.15.0, owner-directed like the zip) is in review on its branch.
 
 ## Phases
 
@@ -18,6 +18,7 @@ Keep it short, factual, and in plain language.
 | 4 | LLM backends | approved | `phase-4-llm-backends` (**merged into main 2026-09-29**, tag v0.13.0) | 0.13.0 | yes — owner said "Proceed" 2026-09-29 |
 | 5 | Mirror into Manual Notes | approved | `phase-5-manual-mirror` (**merged into main 2026-09-29**, tag v0.14.0) | 0.14.0 | yes — owner said "proceed and merge" 2026-09-29 |
 | — | First Windows zip (owner-directed, not a SPEC phase) | approved | `packaging-first-zip` (**merged into main 2026-09-29**, tag v0.14.1) | 0.14.1 | yes — owner: "proceed until the first .zip version is ready for me to test locally" 2026-09-29 |
+| — | llama.cpp engine detection (owner-directed, not a SPEC phase) | in review | `llamacpp-detection` | 0.15.0 | requested 2026-09-29 — "the app must have llama.cpp engine detection… its model detected automatically" |
 | 6 | Linking | not started | | | |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
@@ -91,6 +92,16 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Smoke-tested end-to-end in the sandbox: unzip → fresh venv → pip install → `--cli --status` clean; GUI module imports; 73 files / 585 KB.
 - Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
 - The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
+
+## llama.cpp engine detection (v0.15.0 — what exists on `llamacpp-detection`)
+
+- Owner request 2026-09-29 (verbatim): "add this option, the app must have llama.cpp engine detection. for example it currently sees ollama, or custom api, but it must detec llama.cpp service and it's model detected automatically".
+- `core/llm_client.py` — the detection core: `/props` POSITIVE identification (llama.cpp-only route; model_path/model_alias/default_generation_settings/total_slots markers — vLLM/LM Studio/dev servers are skipped, never misreported), `/health` ready-vs-loading (503 handled), `/v1/models` for the model id (/props alias/basename fallback), `probe_llamacpp` (never raises), `detect_llamacpp` (port scan 8080→8081→8082→8083→8000), `normalize_llamacpp_api_url` (every user spelling → the /v1 base), `resolve_llamacpp_model` (configured wins → /v1/models[0] → props → None).
+- Config: `llm_provider: "llamacpp"` + `llamacpp_api_url` (default http://127.0.0.1:8080/v1) + `llamacpp_api_key` (--api-key only) + `llamacpp_model` (**empty = auto-detected**); old configs load unchanged (tested).
+- GUI: third radio 🦙 llama.cpp (local) + its own group (URL / API key / model combo / 🔍 Detect / 🔄 Refresh); "🦙 Test llama.cpp" in the More menu; the LLM-failure dialog lists the llama-server's models; `_apply_model_choice`/`_on_model_changed`/`save_config` all provider-aware.
+- Worker: batch pre-flight probes the configured URL, SCANS when dead (switches + saves, like the Ollama auto-switch), auto-fills + persists the model, and aborts with the exact `llama-server -m <model>.gguf --port 8080` command when nothing is detected; both routers (_llm_analyze + websites) ride the hardened OpenAI-compatible path.
+- CLI: `--init` choice 3 (probes the server, offers its model as the default), `--status` row + live detection line, run card, `_preflight_llm` (auto-detect + persist + clear abort); `backfill_websites.py --provider llamacpp`; `run_golden_websites.py --live --backend llamacpp`.
+- Tests: `tests/test_llamacpp.py` (49, fake llama-server on stdlib http.server). CI: 31 compiled modules, **429 tests** + the offline golden run. Test-caught en route: the phase-4 router-test restore bug (unwrapped `_call_cloud_llm` reassigned as a plain function — every later self-call in the same process would pass `self` as `api_url`; latent since v0.13.0), fake-server state on the handler CLASS instead of the per-server dict, and 503 /health raising instead of reporting "loading".
 
 ## Inputs still needed from the owner
 

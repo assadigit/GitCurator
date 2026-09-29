@@ -469,3 +469,243 @@ def ollama_chat(client, model, messages, timeout_s, *, json_mode=True,
         kwargs['format'] = 'json'
     response = call_with_timeout(client.chat, timeout_s, **kwargs)
     return response_content(response)
+
+
+# ===========================================================================
+# v0.15.0 — llama.cpp engine detection (owner request 2026-09-29: "the app
+# must have llama.cpp engine detection… it must detect llama.cpp service
+# and its model detected automatically"). llama.cpp's llama-server is its
+# own first-class provider (config value 'llamacpp') DETECTED like Ollama
+# instead of hand-configured like the cloud endpoint:
+#
+#   * /props  — a llama.cpp-ONLY route; its JSON shape positively
+#     identifies the server (vLLM/LM Studio/other OpenAI-compatible
+#     servers 404 here — that is the whole point of the check).
+#   * /health — 200 = model ready, 503 = still loading.
+#   * /v1/models — the loaded model's id (alias or file name).
+#
+# Chat itself rides the OpenAI-compatible path (openai_chat) — llama.cpp
+# speaks that protocol natively — so the timeout wrapper, JSON mode with
+# memoized fallback and the over-budget warning all apply unchanged.
+# Everything here is pure stdlib and unit-testable against a fake local
+# http.server.
+# ===========================================================================
+
+# The canonical label for the llama.cpp provider option (GUI radio +
+# settings group + CLI, mirroring CLOUD_PROVIDER_LABEL).
+LLAMACPP_PROVIDER_LABEL = "llama.cpp server (local)"
+
+# llama-server's default address (``llama-server -m model.gguf`` listens
+# here without any --host/--port flags).
+LLAMACPP_DEFAULT_BASE = "http://127.0.0.1:8080"
+
+# Ports the Detect button / auto-detect scan probes, in order. 8080 is
+# the llama-server default; the rest are common manual choices. The scan
+# positively identifies llama.cpp through /props, so anything else
+# answering on these ports (a dev server on 8080, vLLM on 8000…) is
+# skipped — never misreported.
+LLAMACPP_SCAN_PORTS = (8080, 8081, 8082, 8083, 8000)
+
+# Per-port probe budget. Dead local ports refuse instantly; only a
+# live-but-not-llama.cpp server ever costs the full budget.
+LLAMACPP_PROBE_TIMEOUT_S = 2.0
+
+# /props keys that fingerprint llama.cpp across server builds (very old
+# builds lack model_alias; none of these appear in other servers' /props
+# bodies).
+_LLAMACPP_PROPS_MARKERS = ('model_path', 'model_alias',
+                           'default_generation_settings', 'total_slots')
+
+
+def normalize_llamacpp_api_url(url):
+    """User input → the OpenAI-compatible base URL for a llama.cpp server.
+
+    Accepts every shape people actually type — ``127.0.0.1:8080``,
+    ``http://127.0.0.1:8080``, ``http://127.0.0.1:8080/``, a full base
+    ``http://127.0.0.1:8080/v1`` — and returns the ``…/v1`` base that
+    ``openai_chat`` expects. Empty input yields the llama-server default.
+    A URL that already carries a deeper path (reverse proxies) is kept
+    as-is; only the bare host[:port] gets ``/v1`` appended.
+    """
+    raw = str(url or '').strip()
+    if not raw:
+        raw = LLAMACPP_DEFAULT_BASE
+    if '://' not in raw:
+        raw = 'http://' + raw
+    base = raw.rstrip('/')
+    from urllib.parse import urlparse
+    try:
+        parts = urlparse(base)
+    except ValueError:
+        return LLAMACPP_DEFAULT_BASE + '/v1'
+    if parts.path in ('', '/'):
+        return base + '/v1'
+    return base
+
+
+def is_llamacpp_props(payload) -> bool:
+    """True when a JSON body has the llama.cpp ``/props`` shape.
+
+    /props is a llama.cpp-only route, so anything answering here is almost
+    certainly llama-server — but the marker keys (model_path /
+    model_alias / default_generation_settings / total_slots) still guard
+    against a reverse-proxied OTHER service that happens to expose /props.
+    OpenAI-style payloads, plain dicts and non-dicts are all rejected.
+    """
+    if not isinstance(payload, dict):
+        return False
+    return any(marker in payload for marker in _LLAMACPP_PROPS_MARKERS)
+
+
+def llamacpp_model_from_props(props):
+    """Best model name out of a /props payload: ``model_alias`` (the
+    ``--alias`` value or the file stem — what llama-server advertises on
+    /v1/models), else the basename of ``model_path``
+    (``models/foo.Q4_K_M.gguf`` → ``foo.Q4_K_M.gguf``). None when the
+    payload names nothing (the placeholder alias 'unknown' is skipped)."""
+    if not isinstance(props, dict):
+        return None
+    alias = str(props.get('model_alias') or '').strip()
+    if alias and alias.lower() != 'unknown':
+        return alias
+    path = str(props.get('model_path') or '').strip()
+    if path:
+        return path.replace('\\', '/').rstrip('/').rsplit('/', 1)[-1]
+    return None
+
+
+def probe_llamacpp(base_url, api_key='', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
+    """Probe ONE address for a llama.cpp server. NEVER raises — returns a
+    result dict:
+
+      found     True only when the server positively identifies as
+                llama.cpp (``GET /props`` answers with the llama.cpp shape)
+      ready     True/False from ``/health`` (False = model still loading),
+                None when /health is unavailable
+      models    model ids from ``GET /v1/models`` ([] when hidden/failed —
+                old builds and proxies legitimately hide the route)
+      model     the BEST model name — first /v1/models entry, else the
+                /props alias/basename; None when nothing names it
+      props_model  the /props-derived name (before the /v1/models override)
+      base_url  the normalized ROOT (no /v1) that was probed
+      detail    one human-readable summary line
+
+    ``base_url`` accepts every user spelling (``normalize_llamacpp_api_url``
+    runs first), so probing the raw Settings field is safe.
+    """
+    import urllib.error
+    import urllib.request
+
+    api = normalize_llamacpp_api_url(base_url)
+    root = api[:-3] if api.endswith('/v1') else api
+
+    def _get_json(url):
+        req = urllib.request.Request(url)
+        if api_key:
+            req.add_header('Authorization', f'Bearer {api_key}')
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            return resp.getcode(), resp.read().decode(
+                'utf-8', errors='replace')
+
+    result = {'found': False, 'ready': None, 'models': [], 'model': None,
+              'props_model': None, 'base_url': root, 'detail': ''}
+
+    # 1) /props — the positive llama.cpp identification.
+    props = None
+    try:
+        code, raw = _get_json(root + '/props')
+        if code == 200:
+            try:
+                props = json.loads(raw)
+            except json.JSONDecodeError:
+                props = None
+    except urllib.error.HTTPError as e:
+        result['detail'] = f"/props answered HTTP {e.code}"
+    except Exception as e:
+        result['detail'] = f"could not reach {root} ({type(e).__name__})"
+    if props is not None and is_llamacpp_props(props):
+        result['found'] = True
+        result['props_model'] = llamacpp_model_from_props(props)
+    elif props is not None:
+        result['detail'] = "/props answered but is not llama.cpp"
+
+    if not result['found']:
+        if not result['detail']:
+            result['detail'] = "no llama.cpp /props at this address"
+        return result
+
+    # 2) /health — ready vs still-loading. llama-server answers 503 while
+    # the model loads, and urllib raises on non-2xx — so the HTTPError
+    # itself carries the code (a 503 here IS the "loading" answer).
+    code = None
+    raw = ''
+    try:
+        code, raw = _get_json(root + '/health')
+    except urllib.error.HTTPError as e:
+        code = e.code
+        try:
+            raw = e.read().decode('utf-8', errors='replace')
+        except Exception:
+            raw = ''
+    except Exception:
+        code = None  # unreachable /health — not an error
+    if code is not None:
+        body = {}
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            body = {}
+        if code == 200 and str(body.get('status', 'ok')).lower() != 'loading':
+            result['ready'] = True
+        else:
+            result['ready'] = False
+
+    # 3) /v1/models — the model list (a missing route is tolerated).
+    try:
+        result['models'] = openai_list_models(api, api_key, int(timeout_s))
+    except CloudLLMError:
+        result['models'] = []
+
+    # Best name: what the server ADVERTISES (/v1/models) wins; the /props
+    # name is the fallback for builds that hide the route.
+    result['model'] = (result['models'][0] if result['models']
+                       else result['props_model'])
+
+    state = ('ready' if result['ready'] else
+             'still loading' if result['ready'] is False else
+             'state unknown')
+    result['detail'] = (
+        f"llama.cpp server at {root} ({state})"
+        + (f" · model '{result['model']}'" if result['model'] else ''))
+    return result
+
+
+def detect_llamacpp(api_key='', ports=LLAMACPP_SCAN_PORTS,
+                    host='127.0.0.1', timeout_s=LLAMACPP_PROBE_TIMEOUT_S):
+    """Scan the common llama-server ports and return the probe result of
+    the FIRST server that positively identifies as llama.cpp (its
+    ``base_url`` names where), or ``None`` when nothing matches. Dead
+    local ports refuse instantly, so the scan is fast when nothing is
+    running; live non-llama.cpp servers cost at most one probe timeout
+    each and are skipped, never misreported."""
+    for port in (ports or ()):
+        probe = probe_llamacpp(f'http://{host}:{int(port)}', api_key,
+                               timeout_s)
+        if probe.get('found'):
+            return probe
+    return None
+
+
+def resolve_llamacpp_model(config, models, props_model=None):
+    """v0.15.0 — "its model detected automatically": the model to use for
+    llama.cpp calls. Order: (1) the configured ``llamacpp_model`` when set
+    (a deliberate choice always wins — llama-server serves the loaded
+    model, and the caller warns when it is not in the advertised list);
+    (2) the first advertised ``/v1/models`` entry; (3) the ``/props``
+    alias/basename; (4) None (caller decides — usually a clear error)."""
+    configured = str((config or {}).get('llamacpp_model') or '').strip()
+    if configured:
+        return configured
+    if models:
+        return models[0]
+    return props_model or None
