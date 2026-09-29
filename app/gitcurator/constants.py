@@ -142,6 +142,21 @@ CONFIG_EXAMPLE = {
     "cloud_api_url": "https://api.openai.com/v1",
     "cloud_api_key": "",
     "cloud_model": "gpt-4o-mini",
+    # v0.13.0 — Phase 4 (LLM backends). The cloud option is any
+    # OpenAI-compatible endpoint: llama.cpp server, vLLM, LM Studio or a
+    # cloud API — the label in the GUI/CLI says exactly that.
+    # llm_num_ctx: the EXPLICIT context window (tokens). Sent as
+    # options.num_ctx on every Ollama call (Ollama's own default is small
+    # and truncates long prompts from the front silently); for
+    # OpenAI-compatible endpoints it powers the over-budget warning (the
+    # server's window is fixed at launch: llama.cpp -c / vLLM
+    # --max-model-len). 0 = leave the window to the server.
+    "llm_num_ctx": 8192,
+    # models: optional per-task model override. Empty string = the single
+    # configured model (ollama.model / cloud_model). 'classify' covers the
+    # website category+subcategory passes (w01/w02), 'analyze' covers the
+    # note-writing passes (w03 and the GitHub repo analysis).
+    "models": {"classify": "", "analyze": ""},
     "github_token": "",
     "vault_path": "",
     "vaults_history": [],

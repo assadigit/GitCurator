@@ -381,10 +381,14 @@ it is never lost; it will be retried automatically.
 class WebsitePipeline:
     """Runs the per-link flow. One instance per batch.
 
-    ``llm_call(messages) -> str`` is injected (the worker routes to
-    Ollama/cloud exactly like the GitHub pipeline; the golden runner
-    injects a fake). ``vault_index_has(url) -> bool | path`` probes the
-    websites VaultIndex (the ground-truth dedupe layer).
+    ``llm_call(messages, task=None) -> str`` is injected (the worker
+    routes to Ollama or an OpenAI-compatible endpoint exactly like the
+    GitHub pipeline; the golden runner injects a fake). ``task`` is
+    'classify' for the w01/w02 passes and 'analyze' for w03 — the router
+    uses it for the per-task model overrides (models.classify /
+    models.analyze, v0.13.0 Phase 4). ``vault_index_has(url) -> bool |
+    path`` probes the websites VaultIndex (the ground-truth dedupe
+    layer).
     """
 
     def __init__(self, config: dict, llm_call: Callable,
@@ -426,14 +430,62 @@ class WebsitePipeline:
 
     # -- helpers -----------------------------------------------------------
 
-    def _llm_json(self, messages: List[Dict]) -> Dict:
-        """One LLM call + robust JSON extraction. Raises ValueError on an
-        empty/unparseable answer (callers retry, then fall back to _review)."""
+    def _llm_json(self, messages: List[Dict], task: str = None) -> Dict:
+        """One LLM call + robust JSON extraction. ``task`` tags the pass
+        ('classify' / 'analyze') so the router can apply the per-task
+        model override. Raises ValueError on an empty/unparseable answer
+        (callers retry, then fall back to _review)."""
         from gitcurator.core.llm_client import extract_json
-        content = self.llm_call(messages)
+        content = self.llm_call(messages, task=task)
         if not content or not str(content).strip():
             raise ValueError("model returned an empty response")
         return extract_json(str(content))
+
+    def _correction_examples(self, url: str) -> str:
+        """v0.13.0 — the deferred Phase-3 few-shot hook: past corrections
+        as classifier examples (needs the Phase-4 models.classify override
+        to be safe on context budget — now shipped). This URL's own
+        correction history first (strongest signal: the owner already
+        moved THIS site once), then up to three of the owner's most
+        recent moves in the Websites vault. '(none)' when there is
+        nothing (the common case on a fresh install)."""
+        if self.note_state_db is None:
+            return "(none)"
+        from gitcurator.core import note_state as _note_state
+        lines: List[str] = []
+        try:
+            own = self.note_state_db.corrections_for(
+                _note_state.VAULT_WEBSITES, url)
+        except Exception as e:
+            self.log(f"⚠️ corrections lookup failed for {url}: {e}",
+                     "warning")
+            own = []
+        for c in own[:3]:
+            lines.append(
+                f"- this exact website: the owner moved it "
+                f"{c['from_category'] or '(none)'} -> "
+                f"{c['to_category'] or '(none)'}")
+        try:
+            recent = self.note_state_db.recent_corrections(
+                _note_state.VAULT_WEBSITES, limit=6)
+        except Exception as e:
+            self.log(f"⚠️ recent-corrections lookup failed: {e}", "warning")
+            recent = []
+        seen = set()
+        for c in recent:
+            if c['source_url'] == url:
+                continue
+            key = (c['from_category'], c['to_category'])
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(
+                f"- {c['source_url']}: the owner moved it "
+                f"{c['from_category'] or '(none)'} -> "
+                f"{c['to_category'] or '(none)'}")
+            if len(seen) >= 3:
+                break
+        return "\n".join(lines) if lines else "(none)"
 
     def _classify_category(self, url: str, title: str, description: str,
                            text: str) -> tuple:
@@ -445,6 +497,7 @@ class WebsitePipeline:
             CATEGORY_NAMES_WITH_ONE_LINE_DEFINITIONS=self.taxonomy
             .category_one_liner(),
             JUDGMENT_RULES=self.taxonomy.judgment_rules or "(none)",
+            PAST_CORRECTIONS=self._correction_examples(url),
             URL=url, TITLE=title or "(unknown)",
             META_DESCRIPTION=description or "(none)",
             TEXT_EXCERPT=text[:LLM_EXCERPT_CHARS] or "(no page text)")
@@ -452,7 +505,7 @@ class WebsitePipeline:
         last_bad = ""
         for attempt in range(1 + CLASSIFY_RETRIES):
             try:
-                answer = self._llm_json(messages)
+                answer = self._llm_json(messages, task='classify')
             except ValueError as e:
                 last_bad = f"unparseable answer: {e}"
                 continue
@@ -485,7 +538,7 @@ class WebsitePipeline:
         messages = [{"role": "user", "content": prompt}]
         for attempt in range(1 + CLASSIFY_RETRIES):
             try:
-                answer = self._llm_json(messages)
+                answer = self._llm_json(messages, task='classify')
             except ValueError:
                 continue
             sub = str(answer.get('subcategory') or '').strip()
@@ -516,7 +569,8 @@ class WebsitePipeline:
             URL=url, TITLE=title or "(unknown)",
             META_DESCRIPTION=description or "(none)",
             TEXT_EXCERPT=excerpt)
-        answer = self._llm_json([{"role": "user", "content": prompt}])
+        answer = self._llm_json([{"role": "user", "content": prompt}],
+                                task='analyze')
         if not isinstance(answer, dict):
             raise ValueError("analyze answer was not a JSON object")
         return answer

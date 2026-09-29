@@ -92,7 +92,7 @@ def offline_llm(entries):
     file, w03 with a canned (valid) analysis."""
     by_url = {normalize_website_url(e['url']): e for e in entries}
 
-    def llm(messages):
+    def llm(messages, task=None):
         text = messages[0]['content'] if messages else ''
         # Find which URL this prompt is about (the URL line is stable).
         url = ''
@@ -121,38 +121,45 @@ def offline_llm(entries):
     return llm
 
 
-def live_llm(api_url, api_key, model, timeout_s):
-    """One real call per prompt: POST <api_url>/chat/completions with the
-    same shape the app's cloud path uses (urllib, Bearer, JSON body).
-    Retries twice on server errors (a live run hammers the endpoint;
+def live_llm(api_url, api_key, model, timeout_s, num_ctx=None):
+    """One real call per prompt through llm_client.openai_chat — the
+    SAME hardened path the app uses (wall-clock timeout wrapper,
+    response_format JSON mode with a clean memoized fallback when the
+    server rejects it, clear errors on malformed bodies). Retries twice
+    on transient server errors (a live run hammers the endpoint;
     429/500 windows pass)."""
     import time as _time
-    import urllib.error
-    import urllib.request
+    from gitcurator.core import llm_client as _llm
 
-    def llm(messages):
-        data = json.dumps({'model': model, 'messages': messages,
-                           'temperature': 0.2}).encode('utf-8')
-        headers = {'Content-Type': 'application/json'}
-        if api_key:
-            headers['Authorization'] = f'Bearer {api_key}'
+    def llm(messages, task=None):
         last_err = None
         for attempt in range(3):
-            req = urllib.request.Request(
-                api_url.rstrip('/') + '/chat/completions', data=data,
-                headers=headers)
             try:
-                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                    result = json.loads(resp.read().decode('utf-8'))
-                return result.get('choices', [{}])[0].get(
-                    'message', {}).get('content', '')
-            except urllib.error.HTTPError as e:
+                return _llm.openai_chat(
+                    api_url, api_key, model, messages, timeout_s,
+                    json_mode=True, temperature=0.2, num_ctx=num_ctx)
+            except _llm.CloudLLMHTTPError as e:
                 last_err = e
                 if e.code in (429, 500, 502, 503, 504) and attempt < 2:
                     _time.sleep(45)
                     continue
                 raise
         raise last_err
+    return llm
+
+
+def live_llm_ollama(host, model, timeout_s, num_ctx=None):
+    """v0.13.0 — Phase 4: the golden set on a local Ollama server, through
+    llm_client.ollama_chat (explicit options.num_ctx + the shared timeout
+    wrapper). Raises with a clear message when the server is down."""
+    import ollama as _ol
+    from gitcurator.core import llm_client as _llm
+    client = _ol.Client(host=host)
+
+    def llm(messages, task=None):
+        return _llm.ollama_chat(
+            client, model, messages, timeout_s,
+            json_mode=True, num_ctx=num_ctx)
     return llm
 
 
@@ -262,10 +269,19 @@ def main(argv=None):
     ap.add_argument('--out', default='',
                     help='report path (default app/reports/golden/…)')
     ap.add_argument('--api-url', default='', help='live: OpenAI-compatible'
-                    ' base URL (overrides config)')
+                    ' base URL (overrides config; for --backend ollama this'
+                    ' is the Ollama host)')
     ap.add_argument('--api-key', default='', help='live: bearer token'
                     ' (overrides config; never printed)')
     ap.add_argument('--model', default='', help='live: model name')
+    ap.add_argument('--backend', choices=['openai', 'ollama'],
+                    default='openai',
+                    help='live: backend to run against (default openai ='
+                    ' any OpenAI-compatible endpoint: llama.cpp, vLLM, LM'
+                    ' Studio, cloud; ollama = local Ollama server)')
+    ap.add_argument('--num-ctx', type=int, default=0,
+                    help='live: explicit context window in tokens (0 ='
+                    ' config llm_num_ctx / the server default)')
     ap.add_argument('--timeout', type=float, default=60,
                     help='live: per-LLM-call timeout (s)')
     args = ap.parse_args(argv)
@@ -295,16 +311,66 @@ def main(argv=None):
                 cfg = {}
         api_url = args.api_url or cfg.get('cloud_api_url', '')
         api_key = args.api_key or cfg.get('cloud_api_key', '')
-        model = args.model or cfg.get('cloud_model', '')
-        if not api_url or not model:
-            print('live mode needs --api-url and --model (or a config.json '
-                  'with cloud_api_url/cloud_model)', file=sys.stderr)
-            return 2
-        llm = live_llm(api_url, api_key, model, args.timeout)
-        notes = (f'Live mode: real fetches + `{model}` via '
-                 f'`{api_url}`. Expected values are the agent\'s proposal —'
-                 ' the owner approves or edits them in'
-                 ' tests/golden/websites.json.')
+        num_ctx = (args.num_ctx or int(cfg.get(
+            'llm_num_ctx', 0) or 0)) or None
+        if args.backend == 'ollama':
+            host = args.api_url or (cfg.get('ollama') or {}).get(
+                'base_url', 'http://127.0.0.1:11434')
+            model = args.model or (cfg.get('ollama') or {}).get(
+                'model', '')
+            if not model:
+                print('live ollama mode needs --model (or a config.json '
+                      'with ollama.model)', file=sys.stderr)
+                return 2
+            try:
+                import ollama as _ol
+                from gitcurator.core import llm_client as _llm
+                _names = _llm.list_models_with_timeout(
+                    _ol.Client(host=host), 15)
+            except Exception as e:
+                print(f'Ollama pre-flight failed ({host}): {e}',
+                      file=sys.stderr)
+                return 2
+            if _names and model not in _names:
+                print(f"⚠️ model '{model}' not in the Ollama list "
+                      f"({', '.join(_names[:5])}…) — trying anyway",
+                      file=sys.stderr)
+            llm = live_llm_ollama(host, model, args.timeout,
+                                  num_ctx=num_ctx)
+            notes = (f'Live mode (Ollama): real fetches + `{model}` at '
+                     f'`{host}`'
+                     + (f' (num_ctx={num_ctx})' if num_ctx else '')
+                     + '. Expected values are the agent\'s proposal — '
+                       'the owner approves or edits them in '
+                       'tests/golden/websites.json.')
+        else:
+            model = args.model or cfg.get('cloud_model', '')
+            if not api_url or not model:
+                print('live mode needs --api-url and --model (or a '
+                      'config.json with cloud_api_url/cloud_model)',
+                      file=sys.stderr)
+                return 2
+            # /v1/models pre-flight — warn-never-block (llama.cpp builds
+            # and proxies may legitimately hide the route).
+            from gitcurator.core import llm_client as _llm
+            try:
+                _names = _llm.openai_list_models(api_url, api_key, 15)
+                if _names and model.lower() not in {n.lower()
+                                                    for n in _names}:
+                    print(f"⚠️ '{model}' is not in the /models list "
+                          f"({len(_names)} listed) — trying anyway",
+                          file=sys.stderr)
+            except _llm.CloudLLMError as e:
+                print(f'ℹ️ /models pre-flight unavailable: {e}',
+                      file=sys.stderr)
+            llm = live_llm(api_url, api_key, model, args.timeout,
+                           num_ctx=num_ctx)
+            notes = (f'Live mode ({args.backend}): real fetches + '
+                     f'`{model}` via `{api_url}`'
+                     + (f' (llm_num_ctx={num_ctx})' if num_ctx else '')
+                     + '. Expected values are the agent\'s proposal —'
+                       ' the owner approves or edits them in'
+                       ' tests/golden/websites.json.')
 
     config = {'website_vault_path': vault,
               'web_fetch_timeout_s': 20, 'web_domain_delay_s': 1.0}
@@ -324,8 +390,9 @@ def main(argv=None):
     finally:
         db.close()
 
-    report = render_report('offline' if args.offline else 'live',
-                           entries, results, taxonomy, notes=notes)
+    report = render_report(
+        'offline' if args.offline else f'live-{args.backend}',
+        entries, results, taxonomy, notes=notes)
 
     if args.out:
         out_path = args.out

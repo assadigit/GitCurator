@@ -54,7 +54,6 @@ from gitcurator.core import note_state as _note_state  # noqa: E402
 from gitcurator.core import website_pipeline as _wp  # noqa: E402
 from gitcurator.core.taxonomy import load_taxonomy_from_config  # noqa: E402
 from gitcurator.core.web_fetch import DomainRateLimiter  # noqa: E402
-from gitcurator.tools.run_golden_websites import live_llm  # noqa: E402
 
 DEFAULT_DELAY_S = 3.0
 DEFAULT_LIMIT = 30
@@ -209,41 +208,51 @@ def _vault_source_set(vault_path):
 
 
 def _build_llm_call(config, args):
-    """Same router as the worker's website phase: cloud (OpenAI-compatible
-    — llama.cpp / vLLM / Cloudflare Workers AI all speak it) or a local
-    Ollama."""
+    """Same router as the worker's website phase: an OpenAI-compatible
+    endpoint (llama.cpp / vLLM / LM Studio / Cloudflare Workers AI all
+    speak it) or a local Ollama. v0.13.0 — Phase 4: both paths go through
+    the shared llm_client helpers (timeout wrapper, JSON mode with clean
+    fallback, explicit num_ctx) and honor the per-task model overrides
+    (models.classify / models.analyze) — the llm closure takes the task
+    tag the pipeline now passes."""
+    from gitcurator.core import llm_client as _llm
     provider = (args.provider or config.get('llm_provider', 'ollama'))
+    num_ctx = int(config.get('llm_num_ctx', _llm.DEFAULT_NUM_CTX) or 0) or None
     if provider == 'cloud' or args.api_url:
         api_url = args.api_url or config.get('cloud_api_url', '')
         api_key = args.api_key or config.get('cloud_api_key', '')
-        model = args.model or config.get('cloud_model', '')
-        if not api_url or not model:
+        default_model = args.model or config.get('cloud_model', '')
+        if not api_url or not default_model:
             raise SystemExit(
                 "cloud provider needs --api-url and --model "
                 "(or config.json cloud_api_url/cloud_model)")
         timeout = float(args.timeout or config.get('llm_timeout_s', 300)
                         or 300)
-        print(f"  LLM: {model} via {api_url}")
-        return live_llm(api_url, api_key, model, timeout)
+
+        def llm(messages, task=None):
+            model = _llm.resolve_task_model(config, task, default_model)
+            return _llm.openai_chat(
+                api_url, api_key, model, messages, timeout,
+                json_mode=True, num_ctx=num_ctx)
+
+        print(f"  LLM: {default_model} via {api_url}"
+              + (f" (num_ctx={num_ctx})" if num_ctx else ""))
+        return llm
 
     import ollama
-    from gitcurator.core.llm_client import call_with_timeout
     host = config.get('ollama_url', 'http://127.0.0.1:11434')
-    model = args.model or config.get('ollama_model', '') or 'llama3'
+    default_model = args.model or config.get('ollama_model', '') or 'llama3'
     timeout = float(config.get('llm_timeout_s', 300) or 300)
     client = ollama.Client(host=host)
 
-    def llm(messages):
-        response = call_with_timeout(
-            client.chat, timeout, model=model, messages=messages,
-            format='json')
-        if hasattr(response, 'message'):
-            return response.message.content or ""
-        if isinstance(response, dict):
-            return response.get('message', {}).get('content', '')
-        return str(response)
+    def llm(messages, task=None):
+        model = _llm.resolve_task_model(config, task, default_model)
+        return _llm.ollama_chat(
+            client, model, messages, timeout,
+            json_mode=True, num_ctx=num_ctx)
 
-    print(f"  LLM: {model} via Ollama ({host})")
+    print(f"  LLM: {default_model} via Ollama ({host})"
+          + (f" (num_ctx={num_ctx})" if num_ctx else ""))
     return llm
 
 
