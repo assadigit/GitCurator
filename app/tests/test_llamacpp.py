@@ -34,6 +34,25 @@ network beyond 127.0.0.1:
   * the label: one LLAMACPP_PROVIDER_LABEL constant, used by the GUI radio
     + settings group; the CLI and README name llama.cpp
 
+v0.15.1 (owner report: "it still doesnt auto-detect llama cpp, the service
+is running on task manager") — the AUTOMATIC catch:
+  * proxy-safe loopback — probe/list/chat still work with HTTP(S)_PROXY
+    env vars pointing at a dead proxy (the owner runs a VPN/proxy client;
+    loopback must never ride it); _is_loopback_url table
+  * process-based discovery — _parse_tasklist_pids +
+    _parse_netstat_listening_ports (canned Windows output), the windows +
+    posix paths over a fake _run_cmd, detect_llamacpp probing the running
+    llama-server's ports FIRST (via='process') then the expanded scan list
+    (via='scan')
+  * secondary identification — /props-less llama.cpp builds fingerprint
+    on /v1/models: owned_by 'llama.cpp', .gguf ids, the Server header;
+    plain-OpenAI/vLLM shapes are still never misreported
+  * llamacpp_autodetect_decision — the startup switch policy (dead Ollama
+    / keyless cloud → switch; anything working → hint only)
+  * the GUI applies it — MainWindow._apply_llamacpp_autodetect exercised
+    unbound on a stub (provider switch, URL, model, save, log lines);
+    the startup hook's guard + wiring
+
 Headless-safe: QT_QPA_PLATFORM=offscreen, no GUI is ever shown.
 """
 
@@ -47,6 +66,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
+from unittest import mock
 
 import gitcurator.gui.app as gui_app
 from gitcurator.core import dryrun
@@ -87,6 +107,8 @@ class _FakeLlamaCppHandler(BaseHTTPRequestHandler):
       models           list for /v1/models (default ['qwen2.5-3b'])
       hide_models      404 for /v1/models (old builds / proxies)
       chat_content     the /v1/chat/completions answer
+      models_owned_by  owned_by value for every /v1/models entry (v0.15.1)
+      server_header    'Server' response header on /v1/models (v0.15.1)
     """
     behavior = {}
     state = {'requests': []}
@@ -94,10 +116,12 @@ class _FakeLlamaCppHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, code, payload):
+    def _send(self, code, payload, extra_headers=None):
         data = json.dumps(payload).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -128,9 +152,18 @@ class _FakeLlamaCppHandler(BaseHTTPRequestHandler):
                 self._send(404, {'error': 'not found'})
                 return
             names = b.get('models', ['qwen2.5-3b'])
-            self._send(200, {'object': 'list',
-                             'data': [{'id': n, 'object': 'model'}
-                                      for n in names]})
+            owned = b.get('models_owned_by')
+            data = []
+            for n in names:
+                entry = {'id': n, 'object': 'model'}
+                if owned is not None:
+                    entry['owned_by'] = owned
+                data.append(entry)
+            extra = {}
+            if b.get('server_header'):
+                extra['Server'] = str(b['server_header'])
+            self._send(200, {'object': 'list', 'data': data},
+                       extra_headers=extra or None)
             return
         self._send(404, {'error': 'no such route'})
 
@@ -370,6 +403,13 @@ class TestDetect(unittest.TestCase):
         self.openai_server = _start_plain_openai()
         self.addCleanup(_stop, self.llama_server)
         self.addCleanup(_stop, self.openai_server)
+        # Hermetic (v0.15.1): detect_llamacpp now probes the RUNNING
+        # process's ports too — pin them to [] so the host machine can
+        # never leak a real llama-server into these scan tests.
+        patcher = mock.patch.object(_llm, 'llamacpp_process_ports',
+                                    return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_finds_the_server(self):
         probe = _llm.detect_llamacpp(
@@ -738,6 +778,490 @@ class TestLabel(unittest.TestCase):
             src = f.read()
         self.assertIn('llama.cpp', src)
         self.assertIn('llamacpp', src)
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — proxy-safe loopback (the owner runs a VPN/proxy client; a
+# system proxy that doesn't bypass 127.0.0.1 must never swallow local
+# probes, model lists or chat calls)
+# ---------------------------------------------------------------------------
+
+_PROXY_ENV_KEYS = ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy',
+                   'ALL_PROXY', 'all_proxy')
+
+
+class _ProxyEnv:
+    """Context manager: point every proxy env var at a DEAD local port —
+    any code path that still consults the proxy fails loudly."""
+
+    def __enter__(self):
+        import socket
+        s = socket.socket()
+        s.bind(('127.0.0.1', 0))
+        self.dead = f'http://127.0.0.1:{s.getsockname()[1] + 1}'
+        s.close()
+        self.saved = {k: os.environ.get(k) for k in _PROXY_ENV_KEYS}
+        for k in _PROXY_ENV_KEYS:
+            os.environ[k] = self.dead
+        return self
+
+    def __exit__(self, *exc):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        return False
+
+
+class TestProxySafeLoopback(unittest.TestCase):
+
+    def setUp(self):
+        self.server, self.root = _start_llamacpp()
+        self.addCleanup(_stop, self.server)
+
+    def test_probe_ignores_proxy_env(self):
+        with _ProxyEnv():
+            probe = _llm.probe_llamacpp(self.root)
+        self.assertTrue(probe['found'], probe['detail'])
+        self.assertEqual(probe['model'], 'qwen2.5-3b')
+
+    def test_list_models_ignores_proxy_env(self):
+        with _ProxyEnv():
+            names = _llm.openai_list_models(self.root + '/v1', '', 5)
+        self.assertEqual(names, ['qwen2.5-3b'])
+
+    def test_chat_ignores_proxy_env(self):
+        with _ProxyEnv():
+            reply = _llm.openai_chat(self.root + '/v1', '', 'qwen2.5-3b',
+                                     [{'role': 'user', 'content': 'hi'}],
+                                     timeout_s=10)
+        self.assertEqual(json.loads(reply)['summary'], 'ok')
+
+    def test_is_loopback_url_table(self):
+        yes = ('http://127.0.0.1:8080/v1', '127.0.0.1:8080',
+               'http://localhost:11434', 'http://LOCALHOST:8080/v1',
+               'http://[::1]:8080/v1', 'http://127.8.8.8:9')
+        no = ('http://192.168.1.5:8080', 'http://api.openai.com/v1',
+              'http://[::ffff:192.168.1.5]:8080', '', None,
+              'http://example.com', 'not a url')
+        for u in yes:
+            self.assertTrue(_llm._is_loopback_url(u), u)
+        for u in no:
+            self.assertFalse(_llm._is_loopback_url(u), u)
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — process-based discovery ("the service is running on task
+# manager"): llama-server's ACTUAL listening ports from the OS process
+# table, whatever --port it was given
+# ---------------------------------------------------------------------------
+
+_TASKLIST = ('"llama-server.exe","4242","Console","1","123,456 K"\r\n'
+             '"ollama.exe","5150","Console","1","456,789 K"\r\n'
+             '"llamafile","7171","Console","1","111 K"\r\n'
+             '"chrome.exe","9999","Console","1","999,999 K"\r\n'
+             '"llama-server.exe","notapid","Console","1","1 K"\r\n')
+
+_NETSTAT = (
+    '  TCP    127.0.0.1:8080          0.0.0.0:0              LISTENING       4242\r\n'
+    '  TCP    [::]:8080               [::]:0                 LISTENING       4242\r\n'
+    '  TCP    0.0.0.0:51717           0.0.0.0:0              LISTENING       4242\r\n'
+    '  TCP    127.0.0.1:11434         0.0.0.0:0              LISTENING       5150\r\n'
+    '  TCP    127.0.0.1:9999          0.0.0.0:0              LISTENING       7171\r\n'
+    '  TCP    192.168.1.5:5177        44.3.2.1:443           ESTABLISHED     4242\r\n'
+    '  TCP    127.0.0.1:5188          127.0.0.1:5189         TIME_WAIT       0\r\n')
+
+_SS_OUT = (
+    'State   Recv-Q Send-Q Local Address:Port   Peer Address:Port  Process\n'
+    'LISTEN  0      4096   127.0.0.1:51717        0.0.0.0:*   '
+    'users:(("llama-server",pid=1234,fd=3))\n'
+    'LISTEN  0      5      127.0.0.1:3031         0.0.0.0:*   '
+    'users:(("python3",pid=555,fd=4))\n')
+
+
+class TestProcessDiscovery(unittest.TestCase):
+
+    def test_tasklist_parse(self):
+        pids = _llm._parse_tasklist_pids(_TASKLIST)
+        self.assertEqual(pids, {4242, 7171})  # llama-server + llamafile;
+        # NOT ollama/chrome; the non-numeric PID row is skipped
+
+    def test_tasklist_empty_and_garbage(self):
+        self.assertEqual(_llm._parse_tasklist_pids(''), set())
+        self.assertEqual(_llm._parse_tasklist_pids(None), set())
+        self.assertEqual(_llm._parse_tasklist_pids('随机 text\n"普通"'), set())
+
+    def test_netstat_parse_v4_v6_and_noise(self):
+        ports = _llm._parse_netstat_listening_ports(_NETSTAT, {4242, 7171})
+        # 8080 twice (v4+v6) deduped, 51717 (0.0.0.0 bind), 9999 (llamafile);
+        # ollama's 11434 (other pid) + ESTABLISHED/TIME_WAIT noise skipped
+        self.assertEqual(ports, [8080, 51717, 9999])
+
+    def test_windows_path_over_fake_commands(self):
+        def fake_run(argv, timeout_s=5.0):
+            return _TASKLIST if argv[0] == 'tasklist' else _NETSTAT
+        with mock.patch.object(_llm, '_run_cmd', side_effect=fake_run):
+            ports = _llm._llamacpp_ports_windows()
+        self.assertEqual(ports, [8080, 51717, 9999])
+        # tasklist dead → no netstat needed → []
+        with mock.patch.object(_llm, '_run_cmd', return_value=''):
+            self.assertEqual(_llm._llamacpp_ports_windows(), [])
+
+    def test_posix_path_over_fake_ss(self):
+        with mock.patch.object(_llm, '_run_cmd', return_value=_SS_OUT):
+            ports = _llm._llamacpp_ports_posix()
+        self.assertEqual(ports, [51717])
+
+    def test_detect_probes_process_ports_first(self):
+        # llama-server on a random port NO guess list contains — found via
+        # the RUNNING PROCESS's port (the owner's Task-Manager situation)
+        server, root = _start_llamacpp()
+        self.addCleanup(_stop, server)
+        with mock.patch.object(_llm, 'llamacpp_process_ports',
+                               return_value=[server.server_port]):
+            probe = _llm.detect_llamacpp(ports=())
+        self.assertIsNotNone(probe)
+        self.assertTrue(probe['found'])
+        self.assertEqual(probe['base_url'], root)
+        self.assertEqual(probe.get('via'), 'process')
+        self.assertEqual(probe['model'], 'qwen2.5-3b')
+
+    def test_detect_marks_scan_provenance(self):
+        server, root = _start_llamacpp()
+        self.addCleanup(_stop, server)
+        with mock.patch.object(_llm, 'llamacpp_process_ports',
+                               return_value=[]):
+            probe = _llm.detect_llamacpp(
+                ports=(server.server_port,))
+        self.assertIsNotNone(probe)
+        self.assertEqual(probe.get('via'), 'scan')
+
+    def test_scan_ports_cover_the_common_choices(self):
+        ports = _llm.LLAMACPP_SCAN_PORTS
+        self.assertEqual(ports[0], 8080)  # the llama-server default first
+        for expected in (8080, 8081, 8082, 8083, 8084, 8085, 8000, 5000,
+                         5001, 1234, 9000):
+            self.assertIn(expected, ports, expected)
+        self.assertEqual(len(ports), len(set(ports)))  # no duplicates
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — secondary identification: /props-less llama.cpp builds
+# fingerprint on /v1/models; other servers are still never misreported
+# ---------------------------------------------------------------------------
+
+class TestSecondaryIdentification(unittest.TestCase):
+
+    def setUp(self):
+        self.server, self.root = _start_llamacpp()
+        self.addCleanup(_stop, self.server)
+
+    def test_owned_by_fingerprint(self):
+        self.server.behavior.update(
+            {'hide_props': True, 'models': ['qwen2.5-3b'],
+             'models_owned_by': 'llama.cpp'})
+        probe = _llm.probe_llamacpp(self.root)
+        self.assertTrue(probe['found'])
+        self.assertEqual(probe['identified_by'], 'models:owned_by')
+        self.assertEqual(probe['model'], 'qwen2.5-3b')
+
+    def test_gguf_id_fingerprint(self):
+        # no --alias: llama-server advertises the loaded GGUF file itself
+        self.server.behavior.update(
+            {'hide_props': True,
+             'models': ['models/qwen2.5-3b-instruct-q4_k_m.gguf']})
+        probe = _llm.probe_llamacpp(self.root)
+        self.assertTrue(probe['found'])
+        self.assertEqual(probe['identified_by'], 'models:gguf-id')
+        self.assertEqual(probe['model'],
+                         'models/qwen2.5-3b-instruct-q4_k_m.gguf')
+
+    def test_server_header_fingerprint(self):
+        self.server.behavior.update(
+            {'hide_props': True, 'models': ['whatever'],
+             'server_header': 'llama.cpp'})
+        probe = _llm.probe_llamacpp(self.root)
+        self.assertTrue(probe['found'])
+        self.assertEqual(probe['identified_by'], 'models:server-header')
+
+    def test_plain_openai_not_misreported(self):
+        # an OpenAI-ish proxy: no /props, no fingerprints → NOT llama.cpp
+        self.server.behavior.update(
+            {'hide_props': True, 'models': ['gpt-4o-mini'],
+             'models_owned_by': 'organization'})
+        probe = _llm.probe_llamacpp(self.root)
+        self.assertFalse(probe['found'])
+        self.assertIn('404', probe['detail'])
+
+    def test_vllm_style_not_misreported(self):
+        # vLLM ids are path-like but not .gguf — must stay unrecognized
+        self.server.behavior.update(
+            {'hide_props': True,
+             'models': ['meta-llama/Meta-Llama-3-8B-Instruct']})
+        probe = _llm.probe_llamacpp(self.root)
+        self.assertFalse(probe['found'])
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — the startup switch policy (pure, Qt-free)
+# ---------------------------------------------------------------------------
+
+_FOUND = {'found': True, 'base_url': 'http://127.0.0.1:8080',
+          'model': 'qwen2.5-3b', 'models': ['qwen2.5-3b']}
+
+
+class TestAutodetectDecision(unittest.TestCase):
+
+    def test_switches_when_ollama_dead(self):
+        # the owner's exact situation: default provider ollama, no Ollama
+        # running, llama-server up → the app catches llama.cpp itself
+        cfg = {'llm_provider': 'ollama',
+               'llamacpp_api_url': 'http://127.0.0.1:8080/v1'}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND, False)
+        self.assertTrue(d['switch'])
+        self.assertEqual(d['model'], 'qwen2.5-3b')
+        self.assertIn('caught automatically', d['message'])
+        self.assertIn('Ollama is not running', d['message'])
+
+    def test_hints_when_ollama_alive(self):
+        # a WORKING Ollama is never overridden — hint only
+        cfg = {'llm_provider': 'ollama'}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND, True)
+        self.assertFalse(d['switch'])
+        self.assertIn('Settings', d['message'])
+        self.assertEqual(d['level'], 'info')
+
+    def test_switches_when_cloud_keyless(self):
+        cfg = {'llm_provider': 'cloud', 'cloud_api_key': ''}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND)
+        self.assertTrue(d['switch'])
+        self.assertIn('no cloud API key', d['message'])
+
+    def test_hints_when_cloud_keyed(self):
+        cfg = {'llm_provider': 'cloud', 'cloud_api_key': 'sk-live-xyz'}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND)
+        self.assertFalse(d['switch'])
+
+    def test_refresh_when_already_llamacpp(self):
+        # already selected: refresh the URL/model, never "switch"
+        cfg = {'llm_provider': 'llamacpp',
+               'llamacpp_api_url': 'http://127.0.0.1:8080/v1',
+               'llamacpp_model': 'qwen2.5-3b'}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND, None)
+        self.assertFalse(d['switch'])
+        self.assertIsNone(d['url'])       # unchanged → nothing to write
+        self.assertIsNone(d['model'])
+        # …but a MOVED server (different port) refreshes the URL
+        moved = dict(_FOUND, base_url='http://127.0.0.1:51717')
+        d2 = _llm.llamacpp_autodetect_decision(cfg, moved, None)
+        self.assertFalse(d2['switch'])
+        self.assertEqual(d2['url'], 'http://127.0.0.1:51717/v1')
+        # …and an empty URL field gets filled too
+        d3 = _llm.llamacpp_autodetect_decision(
+            {'llm_provider': 'llamacpp'}, _FOUND, None)
+        self.assertEqual(d3['url'], 'http://127.0.0.1:8080/v1')
+
+    def test_no_override_custom_provider(self):
+        cfg = {'llm_provider': 'cloud', 'cloud_api_key': 'sk-x',
+               'cloud_api_url': 'http://my-endpoint/v1'}
+        d = _llm.llamacpp_autodetect_decision(cfg, _FOUND)
+        self.assertFalse(d['switch'])
+        self.assertIsNone(d['url'])
+
+    def test_not_found_is_silent(self):
+        d = _llm.llamacpp_autodetect_decision(
+            {'llm_provider': 'ollama'}, {'found': False}, None)
+        self.assertFalse(d['switch'])
+        self.assertEqual(d['message'], '')
+
+
+# ---------------------------------------------------------------------------
+# v0.15.1 — the GUI applies the decision (unbound-method tests on a stub:
+# no MainWindow is ever instantiated — the wiring stays thin + tested)
+# ---------------------------------------------------------------------------
+
+class _FakeCombo:
+    def __init__(self, text=''):
+        self._items, self._text = [], text
+
+    def clear(self):
+        self._items = []
+
+    def addItem(self, n):
+        self._items.append(n)
+
+    def insertItem(self, i, n):
+        self._items.insert(i, n)
+
+    def setCurrentText(self, t):
+        self._text = t
+
+    def setCurrentIndex(self, i):
+        self._text = self._items[i]
+
+    def currentText(self):
+        return self._text
+
+    def findText(self, t):
+        return self._items.index(t) if t in self._items else -1
+
+
+class _FakeEdit:
+    def __init__(self, text=''):
+        self._text = text
+
+    def text(self):
+        return self._text
+
+    def setText(self, t):
+        self._text = t
+
+
+class _FakeRadio:
+    def __init__(self):
+        self.checked = False
+
+    def setChecked(self, v):
+        self.checked = bool(v)
+
+
+class _AutodetectStub:
+    """Just enough MainWindow surface for _apply_llamacpp_autodetect.
+    The model-combo filler is borrowed from the REAL MainWindow (as an
+    unbound function) so the apply path is exercised end-to-end."""
+
+    _closing = False
+    _fill_llamacpp_models = gui_app.MainWindow._fill_llamacpp_models
+
+    def __init__(self, config):
+        self.config = config
+        self.llamacpp_model = _FakeCombo(config.get('llamacpp_model', ''))
+        self.llamacpp_api_url = _FakeEdit(
+            config.get('llamacpp_api_url', ''))
+        self.llm_provider_llamacpp = _FakeRadio()
+        self.saved = 0
+        self.logs = []
+
+    def log_message(self, msg, level="info"):
+        self.logs.append((msg, level))
+
+    def save_config(self):
+        self.saved += 1
+
+
+class TestApplyAutodetect(unittest.TestCase):
+
+    def test_switch_applied_end_to_end(self):
+        # the owner's golden path: llama-server found (via the fake
+        # server), Ollama dead → provider switched, URL + model filled,
+        # config saved, success logged
+        server, root = _start_llamacpp()
+        self.addCleanup(_stop, server)
+        config = {'llm_provider': 'ollama',
+                  'ollama': {'base_url': 'http://127.0.0.1:11434'},
+                  'llamacpp_api_url': 'http://127.0.0.1:8080/v1',
+                  'llamacpp_model': ''}
+        probe = _llm.probe_llamacpp(root)
+        decision = _llm.llamacpp_autodetect_decision(config, probe, False)
+        stub = _AutodetectStub(config)
+        gui_app.MainWindow._apply_llamacpp_autodetect(
+            stub, {'probe': probe, 'decision': decision})
+        self.assertEqual(config['llm_provider'], 'llamacpp')
+        self.assertTrue(stub.llm_provider_llamacpp.checked)
+        self.assertEqual(config['llamacpp_api_url'], root + '/v1')
+        self.assertEqual(stub.llamacpp_api_url.text(), root + '/v1')
+        self.assertEqual(config['llamacpp_model'], 'qwen2.5-3b')
+        self.assertEqual(stub.llamacpp_model.currentText(), 'qwen2.5-3b')
+        self.assertEqual(stub.saved, 1)
+        self.assertTrue(any('caught automatically' in m for m, _ in stub.logs))
+        self.assertTrue(any('saved to Settings' in m for m, _ in stub.logs))
+
+    def test_hint_only_changes_nothing(self):
+        # working Ollama → hint line only; nothing switched, nothing saved
+        server, root = _start_llamacpp()
+        self.addCleanup(_stop, server)
+        config = {'llm_provider': 'ollama',
+                  'llamacpp_api_url': 'http://127.0.0.1:8080/v1',
+                  'llamacpp_model': 'old-choice'}
+        probe = _llm.probe_llamacpp(root)
+        decision = _llm.llamacpp_autodetect_decision(config, probe, True)
+        stub = _AutodetectStub(config)
+        gui_app.MainWindow._apply_llamacpp_autodetect(
+            stub, {'probe': probe, 'decision': decision})
+        self.assertEqual(config['llm_provider'], 'ollama')
+        self.assertFalse(stub.llm_provider_llamacpp.checked)
+        self.assertEqual(config['llamacpp_model'], 'old-choice')
+        self.assertEqual(stub.saved, 0)
+        self.assertEqual(len(stub.logs), 1)  # the hint, nothing else
+
+    def test_missing_server_warns_llamacpp_provider(self):
+        # provider IS llama.cpp but no server → one actionable warning
+        config = {'llm_provider': 'llamacpp'}
+        stub = _AutodetectStub(config)
+        gui_app.MainWindow._apply_llamacpp_autodetect(
+            stub, {'probe': {'found': False}, 'decision': None})
+        self.assertEqual(len(stub.logs), 1)
+        self.assertEqual(stub.logs[0][1], 'warning')
+        self.assertIn('llama-server', stub.logs[0][0])
+        self.assertEqual(stub.saved, 0)
+
+    def test_missing_server_silent_for_other_providers(self):
+        config = {'llm_provider': 'ollama'}
+        stub = _AutodetectStub(config)
+        gui_app.MainWindow._apply_llamacpp_autodetect(
+            stub, {'probe': {'found': False}, 'decision': None})
+        self.assertEqual(stub.logs, [])
+        self.assertEqual(stub.saved, 0)
+
+
+class TestStartupWiring(unittest.TestCase):
+
+    def test_signal_and_methods_wired(self):
+        import inspect
+        self.assertTrue(hasattr(gui_app.MainWindow,
+                                '_llamacpp_autodetect_signal'))
+        for name in ('_startup_llamacpp_autodetect',
+                     '_apply_llamacpp_autodetect'):
+            self.assertTrue(callable(getattr(gui_app.MainWindow, name)),
+                            name)
+        # __init__ schedules the startup probe
+        src = inspect.getsource(gui_app.MainWindow.__init__)
+        self.assertIn('_startup_llamacpp_autodetect', src)
+        # the detector actually probes: configured URL first, then detect
+        det = inspect.getsource(
+            gui_app.MainWindow._startup_llamacpp_autodetect)
+        self.assertIn('probe_llamacpp', det)
+        self.assertIn('detect_llamacpp', det)
+
+    def test_guard_done_flag_skips_detection(self):
+        # once per session: a second call must not even spawn the thread
+        started = []
+
+        class _RecThread:
+            def __init__(self, *a, **k):
+                started.append(k)
+
+            def start(self):
+                pass
+
+        class _Done:
+            _llamacpp_autodetect_done = True
+            _closing = False
+            # NOTE: no `config` — any detection attempt would need it
+
+        import types
+        orig = gui_app.threading
+        gui_app.threading = types.SimpleNamespace(Thread=_RecThread)
+        try:
+            gui_app.MainWindow._startup_llamacpp_autodetect(_Done())
+            done = _Done()
+            done._llamacpp_autodetect_done = False
+            done._closing = True   # closing guard: also no thread
+            gui_app.MainWindow._startup_llamacpp_autodetect(done)
+        finally:
+            gui_app.threading = orig
+        self.assertEqual(started, [])
 
 
 if __name__ == '__main__':

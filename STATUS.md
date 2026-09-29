@@ -3,9 +3,9 @@
 This file is the memory between sessions. Every session reads it first and updates it last.
 Keep it short, factual, and in plain language.
 
-- **Version at start of this build:** 0.14.1 (now 0.15.0 on the branch below)
+- **Version at start of this build:** 0.15.0 (now 0.15.1 on the branch below)
 - **Spec:** `SPEC.md` (root of the repo)
-- **Current phase:** 6 (Linking) not started — awaits the owner's go. Phases 0–5 + the first-zip packaging approved & merged. The llama.cpp engine detection (v0.15.0, owner-directed like the zip) is in review on its branch.
+- **Current phase:** 6 (Linking) — the owner gave the go 2026-09-29 ("the app runs, you can continue for next phase") after the v0.15.0 zip test; the automatic llama.cpp catch fix (v0.15.1, owner-directed) merges first.
 
 ## Phases
 
@@ -19,7 +19,8 @@ Keep it short, factual, and in plain language.
 | 5 | Mirror into Manual Notes | approved | `phase-5-manual-mirror` (**merged into main 2026-09-29**, tag v0.14.0) | 0.14.0 | yes — owner said "proceed and merge" 2026-09-29 |
 | — | First Windows zip (owner-directed, not a SPEC phase) | approved | `packaging-first-zip` (**merged into main 2026-09-29**, tag v0.14.1) | 0.14.1 | yes — owner: "proceed until the first .zip version is ready for me to test locally" 2026-09-29 |
 | — | llama.cpp engine detection (owner-directed, not a SPEC phase) | approved | `llamacpp-detection` (**merged into main 2026-09-29**, tag v0.15.0) | 0.15.0 | yes — requested 2026-09-29: "the app must have llama.cpp engine detection… its model detected automatically" (delivered as release v0.15.0 for the owner's Windows test) |
-| 6 | Linking | not started | | | |
+| — | The automatic llama.cpp catch (owner-directed fix, not a SPEC phase) | approved | `llamacpp-autodetect` (**merged into main 2026-09-29**, tag v0.15.1) | 0.15.1 | yes — owner 2026-09-29 after testing the v0.15.0 zip: "it still doesnt auto-detect llama cpp, the service is running on task manager, the app must automatically catch that!" (+ the Phase-6 go: "the app runs, you can continue for next phase") |
+| 6 | Linking | in progress | `phase-6-linking` | | go given 2026-09-29 ("the app runs, you can continue for next phase") |
 
 Status values: `not started`, `in progress`, `in review` (agent finished, waiting for the owner), `approved`.
 
@@ -93,7 +94,17 @@ Status values: `not started`, `in progress`, `in review` (agent finished, waitin
 - Tests: `tests/test_packaging.py` (13). CI: 31 compiled modules, 380 tests + the offline golden run.
 - The released zip: GitHub release **v0.14.1** on the private GitCurator repo (asset `GitCurator-v0.14.1-windows.zip`) — reproducible via `python gitcurator/tools/build_zip.py` from the tag.
 
-## llama.cpp engine detection (v0.15.0 — merged into main, tag v0.15.0)
+## llama.cpp engine detection (v0.15.0 — merged into main, tag v0.15.0) + the automatic catch (v0.15.1 — merged, tag v0.15.1)
+
+**v0.15.1 (the owner's retest fix)** — four root causes behind "it still doesnt auto-detect llama cpp, the service is running on task manager":
+
+- **Caught at launch**: `_startup_llamacpp_autodetect` (daemon thread, ~1.5s after launch) probes the configured URL → the running process's ports → the common ports, and `_apply_llamacpp_autodetect` applies the decision on the GUI thread via the queued `_llamacpp_autodetect_signal`: auto-SWITCH when the current provider is unusable (dead Ollama / keyless cloud), fill URL + model + save; a working provider is never overridden (hint line only). Policy = `llamacpp_autodetect_decision()` (pure, Qt-free).
+- **Proxy-safe loopback**: every llama.cpp probe uses `ProxyHandler({})` (the owner runs a proxy/VPN client — a system proxy that doesn't bypass 127.0.0.1 was swallowing the probes); `openai_chat`/`openai_list_models` bypass proxies for LOOPBACK targets only.
+- **Process-based discovery**: `llamacpp_process_ports()` reads llama-server's ACTUAL listening ports (tasklist+netstat on Windows, ss/netstat on POSIX) — ANY `--port` is caught; `LLAMACPP_SCAN_PORTS` grew to 11 ports as the fallback; `detect_llamacpp()` results carry `via` ('process'|'scan').
+- **Secondary identification**: `/props`-less builds fingerprint on `/v1/models` (`Server: llama.cpp` header, `owned_by: "llama.cpp"`, `.gguf` ids); probes carry `identified_by`. vLLM/LM Studio/plain-OpenAI still never misreported.
+- Tests: `tests/test_llamacpp.py` 49 → **79** (30 new: proxy-env, canned tasklist/netstat/ss parsers, process-first detect + provenance, all three fingerprints + two non-misreports, the decision table, the GUI apply on a stub, the startup wiring/guard). CI: 31 modules, **459 tests** + offline golden 30/30.
+
+**v0.15.0 (the original delivery)**:
 
 - Owner request 2026-09-29 (verbatim): "add this option, the app must have llama.cpp engine detection. for example it currently sees ollama, or custom api, but it must detec llama.cpp service and it's model detected automatically".
 - `core/llm_client.py` — the detection core: `/props` POSITIVE identification (llama.cpp-only route; model_path/model_alias/default_generation_settings/total_slots markers — vLLM/LM Studio/dev servers are skipped, never misreported), `/health` ready-vs-loading (503 handled), `/v1/models` for the model id (/props alias/basename fallback), `probe_llamacpp` (never raises), `detect_llamacpp` (port scan 8080→8081→8082→8083→8000), `normalize_llamacpp_api_url` (every user spelling → the /v1 base), `resolve_llamacpp_model` (configured wins → /v1/models[0] → props → None).
@@ -160,8 +171,8 @@ Note: the GitHub vault may currently back up to an older repo (`obsidian-vault`,
 
 - ~~Phase 4 review~~ — answered 2026-09-29 ("Proceed" — merged, v0.13.0).
 - ~~Phase 5 review~~ — merged 2026-09-29 (owner: "proceed and merge", v0.14.0). Still open for the owner afterwards: the 5-minute in-Obsidian verification on a COPY of Manual Notes (`docs/reports/PHASE-5-report.md` §3 — dry-run, `--apply`, `[[a library note]]` backlink check) and the 3 small questions in report §7 (auto-run at batch end? banner images in mirrors?).
-- **Phase 6 go**: Linking (recall hooks, embeddings, candidate search, link store) per SPEC §6 — starts on the owner's word, after the Phase 5 in-Obsidian verification.
-- **The zip test (owner, local Windows)**: download **`GitCurator-v0.15.0-windows.zip`** from the [v0.15.0 release](https://github.com/assadigit/GitCurator/releases) (includes the llama.cpp engine detection you asked for) → unzip → `1-INSTALL.bat` → `GitCurator.bat` → `GitCurator-DRY-RUN.bat` (writes nothing). With a local llama-server running: Settings → 🧠 LLM → 🦙 llama.cpp (local) → **🔍 Detect**. Report back: does it start, does the dry-run read well, any error in the console window (screenshot it).
+- ~~Phase 6 go~~ — given 2026-09-29 ("the app runs, you can continue for next phase"); Phase 6 (Linking: recall hooks, embeddings, candidate search, link store per SPEC §6) starts on branch `phase-6-linking` right after the v0.15.1 fix merge. The Phase 5 in-Obsidian verification (`docs/reports/PHASE-5-report.md` §3) + §7's 3 questions stay open for the owner in parallel.
+- **The zip test (owner, local Windows)**: download **`GitCurator-v0.15.1-windows.zip`** from the [v0.15.1 release](https://github.com/assadigit/GitCurator/releases) (the AUTOMATIC llama.cpp catch — v0.15.0 already starts/dry-runs fine per the owner's test) → unzip → `1-INSTALL.bat` → `GitCurator.bat`. With llama-server running (any port), the app should catch it ~2s after launch: the log says "🦙 llama.cpp caught automatically at … · model '…'" and the provider switches when Ollama isn't running — no clicks needed. `GitCurator-DRY-RUN.bat` writes nothing. Report back: does the automatic catch fire, what the log line says (screenshot it).
 - The backfill: first real batches run here into a test vault (readable notes before you touch your machine), or you run it yourself after merging? (Still open — also blocked on a Workers-AI-capable token or your local Ollama for the live LLM.)
 - After the first real v0.12.0 run: what did the "Note-state baseline recorded: N notes" log line say? (sanity check)
 

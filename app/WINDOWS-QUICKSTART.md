@@ -76,8 +76,10 @@ the mirror tool yourself.
 
 - **LLM:** the default is local Ollama (`http://localhost:11434`).
   Don't have it? Install from <https://ollama.com>, then run
-  `ollama pull llama3.1` — or skip local entirely and use any
-  OpenAI-compatible endpoint in Settings → 🧠 LLM.
+  `ollama pull llama3.1` — or use a local **llama.cpp** server
+  (llama-server): the app detects it AUTOMATICALLY at launch (whatever
+  port it runs on) and switches to it when Ollama isn't running —
+  or pick any OpenAI-compatible endpoint in Settings → 🧠 LLM.
 - Everything the app writes stays inside this folder (`config.json`,
   `cache.db`, `reports\`) or inside the vaults you point it at.
 - **Updating later:** unzip the new version and copy your old
