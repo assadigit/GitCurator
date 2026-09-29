@@ -6,6 +6,9 @@ Categories:
 Judgment rules:
 {{JUDGMENT_RULES}}
 
+Past corrections by the owner (the owner already re-filed these — a strong signal of their preferences; follow them when the site is similar):
+{{PAST_CORRECTIONS}}
+
 Website: {{URL}}
 Title: {{TITLE}}
 Description: {{META_DESCRIPTION}}

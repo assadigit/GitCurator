@@ -521,9 +521,14 @@ def cmd_init(args) -> int:
 
     # -- llm -----------------------------------------------------------------
     print(paint("\n— LLM provider —", C.BOLD))
-    prov = _ask("Provider: 1) ollama  2) cloud API",
+    # v0.13.0 — Phase 4 relabel: the option is any OpenAI-compatible
+    # endpoint (llama.cpp server, vLLM, LM Studio, cloud). The CONFIG
+    # VALUE stays 'cloud' — old configs load unchanged.
+    prov = _ask("Provider: 1) ollama  2) OpenAI-compatible endpoint "
+                "(llama.cpp, vLLM, LM Studio, cloud)",
                 "ollama" if cfg.get("llm_provider", "ollama") == "ollama" else "cloud")
-    prov = "cloud" if "2" in prov or "cloud" in prov.lower() else "ollama"
+    prov = ("cloud" if "2" in prov or "cloud" in prov.lower()
+            or "openai" in prov.lower() else "ollama")
     cfg["llm_provider"] = prov
     if prov == "ollama":
         oll = cfg.get("ollama", {}) or {}
@@ -532,9 +537,9 @@ def cmd_init(args) -> int:
             "model": _ask("Ollama model", oll.get("model", "qwen2.5-coder:7b")),
         }
     else:
-        cfg["cloud_api_url"] = _ask("Cloud API base URL", cfg.get("cloud_api_url", "https://api.openai.com/v1"))
-        cfg["cloud_api_key"] = _ask("Cloud API key", cfg.get("cloud_api_key", ""))
-        cfg["cloud_model"] = _ask("Cloud model", cfg.get("cloud_model", "gpt-4o-mini"))
+        cfg["cloud_api_url"] = _ask("Endpoint base URL (e.g. http://localhost:8080/v1 for llama.cpp)", cfg.get("cloud_api_url", "https://api.openai.com/v1"))
+        cfg["cloud_api_key"] = _ask("API key (empty for local servers)", cfg.get("cloud_api_key", ""))
+        cfg["cloud_model"] = _ask("Model name", cfg.get("cloud_model", "gpt-4o-mini"))
 
     # -- proxy ---------------------------------------------------------------
     print(paint("\n— Proxy (leave disabled if Telegram is reachable directly) —", C.BOLD))
@@ -760,7 +765,10 @@ def cmd_status(args) -> int:
         ("GitHub token", mask(str(cfg.get("github_token", "")))),
         ("LLM", cfg.get("llm_provider", "ollama") + (
             f" · {cfg.get('ollama', {}).get('model', '?')}" if cfg.get("llm_provider", "ollama") == "ollama"
-            else f" · {cfg.get('cloud_model', '?')}")),
+            else f" · {cfg.get('cloud_model', '?')}")
+         + C.DIM + f" · num_ctx={cfg.get('llm_num_ctx', 8192)}"
+         + (f" · classify='{_m.get('classify')}'" if (_m := (cfg.get('models') or {})).get('classify') else "")
+         + (f" · analyze='{_m.get('analyze')}'" if _m.get('analyze') else "") + C.RESET),
         ("Proxy", (f"{cfg['proxy'].get('type')}://{cfg['proxy'].get('host')}:{cfg['proxy'].get('port')}"
                    if (cfg.get("proxy") or {}).get("enabled") else C.DIM + "disabled" + C.RESET)),
         ("404 quarantine threshold", str(cfg.get("notfound_strike_threshold", 3)) + C.DIM + " (dead after N consecutive 404s)" + C.RESET),
@@ -1401,7 +1409,7 @@ def run_config_card(cfg: dict) -> None:
     if cfg.get("llm_provider", "ollama") == "ollama":
         llm_txt = "Ollama · " + ((cfg.get("ollama") or {}).get("model") or "?")
     else:
-        llm_txt = f"cloud · {cfg.get('cloud_model', '?')}"
+        llm_txt = f"OpenAI-compatible · {cfg.get('cloud_model', '?')}"
     tok = str(cfg.get("github_token", "") or "")
     if len(tok) > 10:
         tok_txt = tok[:4] + "•" * 8 + tok[-4:]
@@ -1479,7 +1487,7 @@ def _preflight_llm(cfg: dict, config_path: str | None) -> bool:
     proceed (no models at all / user declined)."""
     if cfg.get("llm_provider", "ollama") != "ollama":
         _check_line("success", "LLM provider",
-                    f"cloud API {cfg.get('cloud_api_url', '?')} · model '{cfg.get('cloud_model', '?')}'")
+                    f"OpenAI-compatible endpoint {cfg.get('cloud_api_url', '?')} · model '{cfg.get('cloud_model', '?')}'")
         return True
     oll = cfg.get("ollama") or {}
     base = oll.get("base_url", "http://127.0.0.1:11434")

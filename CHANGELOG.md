@@ -1,3 +1,76 @@
+## [0.13.0] — Phase 4: LLM backends — 2026-09-29
+
+Phase 4 of the phased build (SPEC.md §6): every OpenAI-compatible
+endpoint is now a first-class backend, and the LLM client is honest
+about timeouts, JSON mode and context.
+
+### What you get
+
+1. **The relabel**: "Cloud API" is now
+   **"OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, cloud)"**
+   — GUI radio + settings group, CLI wizard, README, status lines. The
+   config value stays `cloud`; old configs load unchanged.
+2. **The same timeout wrapper for both providers** (`core/llm_client.py`):
+   every endpoint call goes through the wall-clock `call_with_timeout`
+   that already protected Ollama (configurable `llm_timeout_s`) — a hung
+   llama.cpp server can no longer freeze a batch.
+3. **JSON mode with a clean fallback**: `response_format: json_object`
+   is sent on classification/analysis calls; a server that answers 400
+   to the parameter gets exactly one retry without it, and the rejection
+   is memoized per endpoint (one doomed attempt per process, never one
+   per call). Clear errors (`CloudLLMError` family) on malformed bodies,
+   error objects and empty-choices responses.
+4. **The context window is explicit** (`llm_num_ctx`, default 8192, new
+   Settings field): sent as `options.num_ctx` on EVERY Ollama call —
+   Ollama's own small default used to truncate long prompts from the
+   front **silently**; for OpenAI-compatible endpoints it powers an
+   over-budget warning (their window is fixed at launch: llama.cpp
+   `-c`, vLLM `--max-model-len`). Nothing is truncated silently on
+   either backend — an over-budget prompt is logged before the call.
+5. **/v1/models pre-flight**: every cloud batch (and the Test Connection
+   button) first asks the endpoint for its model list; a configured
+   model missing from it — including the optional per-task overrides —
+   is a warning, never a block (servers that hide /models are fine).
+6. **Per-task model overrides** (optional, `config.json`):
+   `"models": {"classify": "", "analyze": ""}` — e.g. a bigger-context
+   model for the w01/w02 classification passes and a fast one for note
+   writing. Empty (default) = the single configured model, exactly as
+   before. Applies to both providers, the GitHub analyze pass and the
+   websites pipeline; the backfill + golden runner honor it too.
+7. **Past corrections as classifier examples** (the deferred Phase-3
+   few-shot item): the w01 category prompt carries a PAST_CORRECTIONS
+   block built from the corrections log — this URL's own history first,
+   then your three most recent moves in the Websites vault — so the
+   model follows your filing taste instead of re-guessing.
+8. **The golden set runs on both backends**:
+   `tools/run_golden_websites.py --live --backend openai|ollama`
+   (model pre-flight, `--num-ctx`); comparison report in
+   `docs/reports/golden-backends-report.md`.
+
+### Compatibility
+
+- Ollama users: identical behavior plus an explicit `num_ctx=8192` on
+  every call (set `llm_num_ctx: 0` to leave the window to the server).
+- Cloud users: same URL/key/model keys; calls now carry
+  `response_format` (rejected servers fall back automatically) and a
+  configurable timeout instead of the old hardcoded 120s.
+- Old configs load unchanged; both new keys are optional with safe
+  defaults.
+
+### Tests
+
+- 45 new (`tests/test_phase4.py`): a stdlib fake OpenAI server (success,
+  response_format rejection + memoized fallback, wall-clock timeout,
+  malformed JSON, error objects, connection refused, /v1/models
+  pre-flight), ollama_chat (num_ctx on every call, over-budget warning,
+  both response shapes), the REAL ollama client library against a fake
+  Ollama server (options.num_ctx verified on the wire), per-task model
+  routing through the real ProcessingWorker routers, config
+  compatibility, the relabel, the golden-runner backends, and the
+  corrections-as-examples hook.
+- Full gate: 28 compiled modules, 320 tests (was 275), offline golden
+  30/30 with 0 invalid answers.
+
 ## [0.12.0] — Phase 3: moves are corrections + the backfill — 2026-09-29
 
 Phase 3 of the phased build (SPEC.md §4.4 + §6): **your folder moves are

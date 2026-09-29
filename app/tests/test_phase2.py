@@ -469,7 +469,8 @@ class TestPrompts(unittest.TestCase):
         for stem, slots in (
                 ('w01_category',
                  dict(CATEGORY_NAMES_WITH_ONE_LINE_DEFINITIONS='- A\n- B',
-                      JUDGMENT_RULES='rules', URL='https://x', TITLE='T',
+                      JUDGMENT_RULES='rules', PAST_CORRECTIONS='(none)',
+                      URL='https://x', TITLE='T',
                       META_DESCRIPTION='D', TEXT_EXCERPT='E')),
                 ('w02_subcategory',
                  dict(CATEGORY='A', SUBCATEGORIES_WITH_DEFINITIONS='- s1',
@@ -609,9 +610,11 @@ class _FakeLLM:
             'confidence': 'high'}
         self.calls = []
 
-    def __call__(self, messages):
+    def __call__(self, messages, task=None):
         text = messages[0]['content']
         self.calls.append(text)
+        self.tasks = getattr(self, 'tasks', [])
+        self.tasks.append(task)
         if 'filing a website into a personal library' in text:
             if self.bad_left > 0:
                 self.bad_left -= 1
@@ -833,7 +836,7 @@ class TestPipeline(_PipeCase):
         self.assertEqual(rel, os.path.join('Design', 'Test_Site.md'))
 
     def test_analysis_failure_writes_review(self):
-        def bad_analysis(messages):
+        def bad_analysis(messages, task=None):
             text = messages[0]['content']
             if 'filing a website' in text:
                 return json.dumps({'category': 'Design',
@@ -851,7 +854,7 @@ class TestPipeline(_PipeCase):
         """A hard LLM outage (exception, not a bad answer) mid-classification
         must not silently drop the link (SPEC 4.3) — a _review note is
         written by the catch-all."""
-        def exploding_llm(messages):
+        def exploding_llm(messages, task=None):
             raise RuntimeError("LLM connection refused")
         pipe = self.make_pipeline(exploding_llm)
         r = pipe.process_link('https://example.com/outage')
@@ -1006,7 +1009,9 @@ class TestWorkerWebsites(unittest.TestCase):
 
         fake = _FakeLLM()
 
-        def _fake_cloud(api_url, api_key, model, messages):
+        def _fake_cloud(api_url, api_key, model, messages,
+                        json_mode=False, timeout_s=300, num_ctx=None,
+                        on_warn=None):
             return fake(messages)
 
         gui_app.Github = _FastFailGithub

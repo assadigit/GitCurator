@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.12.0 (Phased Build — Websites Pipeline + Corrections)
+# GitHub-to-Obsidian v0.13.0 (Phased Build — Websites Pipeline + Corrections + LLM Backends)
 
 ## Quick Start
 
@@ -153,6 +153,53 @@ re-run and it continues exactly where it stopped), polite (fixed pause
 + per-domain pause), works with local Ollama or any OpenAI-compatible
 endpoint (`--api-url/--api-key/--model`), and can write a Markdown
 batch report (`--report`).
+
+### LLM backends (v0.13.0)
+
+The option previously called "Cloud API" is now labeled what it always
+was under the hood: an **OpenAI-compatible endpoint (llama.cpp, vLLM,
+LM Studio, cloud)** — Settings → 🧠 LLM in the GUI, or choice 2 in
+`--cli --init`. The config value stays `cloud`; old configs load
+unchanged.
+
+- **Same hardened client for both providers** (`core/llm_client.py`):
+  the wall-clock timeout (`llm_timeout_s`) that already protected
+  Ollama now also protects every endpoint call — a hung llama.cpp
+  server can no longer freeze a batch.
+- **JSON mode with a clean fallback**: `response_format: json_object`
+  is sent on classification/analysis calls; a server that rejects the
+  parameter gets one retry without it and the rejection is remembered
+  (one doomed attempt per run, never one per call).
+- **The context window is explicit** (`llm_num_ctx`, default 8192 —
+  Settings → 🧠 LLM → *Context window*): sent as `num_ctx` with every
+  Ollama call (Ollama's own default is small and truncates long prompts
+  from the front **silently** — that can no longer happen); for
+  OpenAI-compatible endpoints it powers an over-budget warning (the
+  window itself is fixed at server launch: llama.cpp `-c`, vLLM
+  `--max-model-len`). Nothing is ever truncated silently on either
+  backend.
+- **/v1/models pre-flight**: every cloud batch and the Test Connection
+  button first ask the endpoint for its model list; a configured model
+  missing from it is a *warning*, never a block (servers that hide
+  /models — single-model llama.cpp builds, some proxies — are fine).
+- **Per-task model overrides** (optional, `config.json` only):
+  `"models": {"classify": "", "analyze": ""}` — e.g. a bigger-context
+  model for the classification passes and a fast one for note writing.
+  Empty (the default) = the single configured model, exactly as before.
+- **Your past corrections are now classifier examples** (the deferred
+  Phase-3 few-shot item): when you have moved website notes by hand,
+  the category prompt carries those corrections, so the model follows
+  your filing taste instead of re-guessing.
+
+The golden set runs on **both** backends for comparison:
+
+```cmd
+python gitcurator/tools/run_golden_websites.py --live --backend ollama --model llama3
+python gitcurator/tools/run_golden_websites.py --live --backend openai --api-url http://localhost:8080/v1 --model my-model
+```
+Both run the same 30 links through the same pipeline; reports land in
+`app/reports/golden/` (…`live-ollama.md` / …`live-openai.md`) for a
+side-by-side check.
 
 ### Cloudflare Worker (deploy from cloudflare-bot/ folder) — OPTIONAL, see status below
 ```cmd
