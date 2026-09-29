@@ -96,6 +96,17 @@ the mirror tool yourself.
   before are re-armed and retried automatically (`🔁 Web proxy active
   — re-armed N queued retry(ies)`). Ollama / llama.cpp traffic on
   127.0.0.1 is NEVER proxied.
+- **X/Twitter links are never fetched** (they are already recorded in
+  the `_inbox/x_twitter_links.md` table): Settings → 📁 Vault →
+  "Blocked domains" (default x.com, twitter.com, t.co). The bot-queue
+  view shows them in their own 🚫 bucket; queued ones are purged
+  automatically.
+- **404 GitHub repos stop counting as pending**: they get a placeholder
+  note in `_missing/` (a batch also backfills past 404s
+  automatically). To re-check a repo: delete its note + reset it in
+  More ▸ View 404 Quarantine.
+- **The `_inbox` platform tables live in the WEBSITES vault now** (the
+  GitHub vault keeps only github.com links).
 - **LLM:** the default is local Ollama (`http://localhost:11434`).
   Don't have it? Install from <https://ollama.com>, then run
   `ollama pull llama3.1` — or use a local **llama.cpp** server
@@ -115,8 +126,9 @@ the mirror tool yourself.
 - The optional Cloudflare bot + web dashboard are **not** in this zip;
   they live in the repository.
 
-Version 0.19.0 — the phased build: vault settings & ownership stamps,
+Version 0.20.0 — the phased build: vault settings & ownership stamps,
 the websites pipeline, moves-as-corrections + the backfill, LLM
 backends, the Manual Notes Library mirror, Test Connection, the
-Detect & Set LLM quick-switch, and web fetches through your proxy.
-Full manual: `README.md` in this folder.
+Detect & Set LLM quick-switch, web fetches through your proxy, and
+the intake truth (blocked domains · missing-repo notes · vault
+separation). Full manual: `README.md` in this folder.

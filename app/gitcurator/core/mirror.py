@@ -71,10 +71,12 @@ MIRROR_BANNERS = {
     ),
 }
 
-# The same special folders VaultIndex / note_state skip. A note inside one
-# of these is not a library note and is never mirrored. (Substring match
-# on the walked path — identical semantics to the rest of the app.)
-SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', 'attachments', '.obsidian')
+# The same special folders note_state skips. A note inside one of these
+# is not a library note and is never mirrored. (Substring match on the
+# walked path.) v0.20.0: _missing placeholders are NOT library notes —
+# unlike VaultIndex, which DOES index them (they are the 404 dedupe key).
+SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', '_missing', 'attachments',
+                        '.obsidian')
 
 _SOURCE_RE = re.compile(r'^source:\s*(.+)$', re.MULTILINE)
 _MIRROR_RE = re.compile(r'^' + re.escape(MIRROR_KEY) + r':\s*(.+)$',

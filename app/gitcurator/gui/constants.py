@@ -104,6 +104,10 @@ CONFIG_EXAMPLE = {
         # fix: x.com / t.co / youtu.be are connection-refused direct).
         "use_for_web": True
     },
+    # v0.20.0 — domains the Websites pipeline NEVER fetches (they are
+    # already recorded as rows in the _inbox platform tables). Settings →
+    # 📁 Vault → "Blocked domains"; an empty list = allow all.
+    "web_blocked_domains": ["x.com", "twitter.com", "t.co"],
     "ollama": {
         "base_url": "http://localhost:11434",
         "model": "qwythos-9b"

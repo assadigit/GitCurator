@@ -45,6 +45,7 @@ from gitcurator.core import dryrun as _dryrun
 from gitcurator.core import prompts as _prompts
 from gitcurator.core import web_extract as _web_extract
 from gitcurator.core import web_fetch as _web_fetch
+from gitcurator.core import links as _links
 from gitcurator.core.links import (
     is_gist_url, normalize_website_url,
 )
@@ -214,6 +215,52 @@ class WebsiteStateDB:
                 " SET attempts=0, next_attempt_at=?", (now_iso,))
             self.conn.commit()
             return cur.rowcount or 0
+
+    def purge_blocked_domains(self, is_blocked) -> Dict:
+        """v0.20.0 — remove blocked-domain links from the retry queue and
+        the failed ``_review`` placeholder records, marking every purged
+        URL dismissed so it can never re-enter (the robust prevention the
+        owner asked for). ``is_blocked(url) -> bool`` is injected (links.
+        domain_is_blocked partial) so this stays stdlib-testable.
+
+        Only app-owned ``_review`` placeholders are deleted (a real note
+        for a blocked domain is the owner's — kept). File deletion is the
+        CALLER's job (dry-run aware); this method only touches the DB.
+        Returns ``{'retries': n, 'placeholders': [(url, path)],
+        'dismissed': n}`` (idempotent — a second run finds nothing)."""
+        with self._lock:
+            retry_rows = self.conn.execute(
+                "SELECT url FROM website_retry_queue").fetchall()
+            retry_gone = [r[0] for r in retry_rows if is_blocked(r[0])]
+            processed_rows = self.conn.execute(
+                "SELECT url, note_path, fetch_status FROM"
+                " websites_processed").fetchall()
+            placeholders = []
+            for url, path, status in processed_rows:
+                if status != 'failed' or not path:
+                    continue
+                if not is_blocked(url):
+                    continue
+                # ONLY app-owned _review placeholders — never a real note.
+                if '_review' not in str(path).replace('\\', '/'):
+                    continue
+                placeholders.append((url, path))
+            now_iso = datetime.now().isoformat(timespec='seconds')
+            purged = set(retry_gone) | {u for u, _ in placeholders}
+            for url in retry_gone:
+                self.conn.execute(
+                    "DELETE FROM website_retry_queue WHERE url=?", (url,))
+            for url, _path in placeholders:
+                self.conn.execute(
+                    "DELETE FROM websites_processed WHERE url=?", (url,))
+            for url in purged:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO dismissed_urls (url, reason,"
+                    " dismissed_at) VALUES (?,?,?)",
+                    (url, "blocked domain (v0.20.0 purge)", now_iso))
+            self.conn.commit()
+        return {'retries': len(retry_gone), 'placeholders': placeholders,
+                'dismissed': len(purged)}
 
     # -- reads ------------------------------------------------------------
 
@@ -483,6 +530,15 @@ class WebsitePipeline:
         self.taxonomy = taxonomy or load_taxonomy_from_config(self.config)
         self.vault_path = (self.config.get('website_vault_path') or '').strip()
         self.taxonomy_path = resolve_taxonomy_path(self.config)
+        # v0.20.0 — blocked domains (the X fix): these links are already
+        # addressed as rows in the _inbox platform tables; the pipeline
+        # must never fetch, note, or retry them.
+        self.blocked_domains = _links.blocked_domains_from_config(self.config)
+        if self.blocked_domains and fetch_fn is None:
+            # Production only (an injected fetch_fn = the hermetic golden
+            # run / tests). Purge queued retries + _review placeholders
+            # ONCE so previously-queued blocked links stop coming back.
+            self._enforce_blocked_domains()
         # Fetch politeness knobs are config-overridable (tests use small
         # timeouts; the owner can raise them for slow connections).
         self.fetch_timeout_s = float(
@@ -502,6 +558,34 @@ class WebsitePipeline:
     # -- helpers -----------------------------------------------------------
 
     PROXY_EPOCH_KEY = 'web_proxy_epoch'
+
+    def _enforce_blocked_domains(self) -> None:
+        """v0.20.0 — purge the state DB of blocked-domain links (retry
+        queue rows + failed _review placeholder records, both marked
+        dismissed) and delete the placeholder FILES. Idempotent; every
+        failure is tolerated (bookkeeping never kills a batch). File
+        deletions are dry-run-aware (a rehearsal records, never deletes)."""
+        try:
+            report = self.state.purge_blocked_domains(
+                lambda u: _links.domain_is_blocked(u, self.blocked_domains))
+            deleted_files = 0
+            for _url, path in report.get('placeholders', []):
+                try:
+                    if os.path.exists(path):
+                        _dryrun.remove(path)
+                        deleted_files += 1
+                except Exception:
+                    pass
+            if report['retries'] or report['placeholders']:
+                self.log(
+                    f"🚫 Blocked domains ({', '.join(self.blocked_domains)}): "
+                    f"purged {report['retries']} queued retry(ies) + "
+                    f"{len(report['placeholders'])} _review placeholder(s) "
+                    f"({deleted_files} file(s) deleted) — these links stay "
+                    f"in the _inbox table only (Settings → 📁 Vault)",
+                    "info")
+        except Exception as e:
+            self.log(f"⚠️ Blocked-domain purge skipped: {e}", "warning")
 
     def _maybe_rearm_retries(self) -> None:
         """v0.19.0 — when the ACTIVE web proxy differs from the last one
@@ -785,6 +869,20 @@ class WebsitePipeline:
     def _process_link_inner(self, url: str, result: Dict) -> Dict:
         canonical = normalize_website_url(url)
         result['canonical'] = canonical
+
+        # ---- 1b. blocked domains (v0.20.0 — the X fix) -------------------
+        # Already addressed as rows in the _inbox platform tables; never
+        # fetched, never noted, never retried — whatever path brought the
+        # link here (batch, retry, direct, import).
+        if self.blocked_domains and _links.domain_is_blocked(
+                url, self.blocked_domains):
+            result['outcome'] = 'skipped'
+            result['error'] = 'blocked domain — recorded in _inbox only'
+            self.counters['skipped'] += 1
+            self.last_results.append(result)
+            self.log(f"🚫 {url}: blocked domain — skipped (the _inbox "
+                     f"table keeps the record)", "info")
+            return result
 
         # ---- 2. dedupe (SPEC §4.3 step 2) --------------------------------
         if self.state.is_dismissed(canonical):

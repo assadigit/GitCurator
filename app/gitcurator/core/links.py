@@ -231,6 +231,68 @@ def domain_of(url: str) -> str:
         return ''
 
 
+# ---------------------------------------------------------------------------
+# v0.20.0 — Blocked domains (the X fix)
+# ---------------------------------------------------------------------------
+
+#: Domains the Websites pipeline NEVER fetches. The owner's words: "the X
+#: domains are already addressed" — x.com / twitter.com / t.co links are
+#: already recorded as rows in the ``_inbox/x_twitter_links.md`` table, so
+#: processing them into the Websites vault would be a duplicate effort
+#: (and they are JS shells anyway). Editable in Settings → 📁 Vault and in
+#: config.json (``web_blocked_domains``).
+DEFAULT_BLOCKED_DOMAINS = ('x.com', 'twitter.com', 't.co')
+
+
+def blocked_domains_from_config(config) -> list:
+    """The blocked-domain list from the app config (never raises).
+
+    Accepts a list/tuple of domains or a comma-separated string. Entries
+    are lowercased, stripped, deduped (order preserved). Missing key →
+    the DEFAULT list (the owner's fix works on an existing config.json
+    with no Settings visit). Empty string / empty list → [] (opt-out).
+    """
+    try:
+        raw = (config or {}).get('web_blocked_domains')
+        if raw is None:
+            return list(DEFAULT_BLOCKED_DOMAINS)
+        if isinstance(raw, str):
+            items = raw.split(',')
+        elif isinstance(raw, (list, tuple)):
+            items = list(raw)
+        else:
+            return list(DEFAULT_BLOCKED_DOMAINS)
+        out, seen = [], set()
+        for item in items:
+            d = str(item or '').strip().lower().lstrip('.')
+            if d and d not in seen:
+                seen.add(d)
+                out.append(d)
+        return out
+    except Exception:
+        return list(DEFAULT_BLOCKED_DOMAINS)
+
+
+def domain_is_blocked(url: str, blocked_domains) -> bool:
+    """True when ``url``'s host is ``blocked_domains`` or a subdomain of
+    one. ``x.com`` matches ``x.com``, ``www.x.com``, ``mobile.x.com`` —
+    but never ``x.com.example.org`` (the suffix test is anchored on a
+    literal dot). Empty list → False for everything."""
+    if not blocked_domains:
+        return False
+    host = domain_of(url)
+    if not host:
+        return False
+    host = host.split(':')[0]  # strip a port if present
+    for entry in blocked_domains:
+        entry = str(entry or '').strip().lower().lstrip('.')
+        if not entry:
+            continue
+        if host == entry or host.endswith('.' + entry):
+            return True
+    return False
+
+
 # Tracking parameters that carry no identity for a website (SPEC §4.3.1:
 # "utm_*/fbclid/gclid/ref parameters … all ignored"). Everything else in
 # a query string is kept — a YouTube video id or a route path in ?p= is

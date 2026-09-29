@@ -301,6 +301,21 @@ PLATFORM_INFO = {
 }
 
 
+def _inbox_table_vault(config) -> str:
+    """v0.20.0 — WHICH vault receives the per-platform _inbox tables.
+
+    The owner's rule: "the github vault only manages its domains" — every
+    non-GitHub link's table row belongs to the WEBSITES vault when one is
+    configured (created on demand by the writer); without a Websites
+    vault the GitHub vault keeps the legacy fallback so links are never
+    silently lost."""
+    cfg = config or {}
+    web_vault = (cfg.get('website_vault_path') or '').strip()
+    if web_vault:
+        return web_vault
+    return cfg.get('vault_path', '') or ''
+
+
 def classify_platform(url: str) -> str:
     """Return the platform key for a non-GitHub URL.
 
@@ -919,6 +934,47 @@ class CacheDB:
         except Exception:
             return DEAD_LINK_THRESHOLD  # fail closed: on DB error treat as
                                         # confirmed so the batch still moves on
+
+    def confirm_dead(self, url: str, reason: str = "404 Not Found",
+                     threshold: int = None) -> None:
+        """v0.20.0 — immediately mark a URL CONFIRMED dead (fail_count set
+        to at least the configured threshold). Used when a missing-repo
+        note is written: a GitHub 404 on /repos/{owner}/{repo} is
+        definitive (deleted or private), and the note in the vault keeps
+        the link out of every pending count from now on."""
+        _thr = int(threshold or DEAD_LINK_THRESHOLD)
+        now = datetime.now().isoformat()
+        norm = normalize_url(url)
+        try:
+            with self._lock:
+                row = self.cursor.execute(
+                    "SELECT fail_count FROM decommissioned_repos WHERE url = ?",
+                    (norm,)).fetchone()
+                count = max(row[0] if row and row[0] else 0, _thr)
+                self.cursor.execute(
+                    "INSERT OR REPLACE INTO decommissioned_repos (url, reason, decommissioned_at, fail_count) VALUES (?, ?, ?, ?)",
+                    (norm, reason, now, count)
+                )
+                self.conn.commit()
+        except Exception:
+            pass
+
+    def get_unconfirmed_404s(self, threshold: int = None) -> list:
+        """v0.20.0 — [(url, fail_count)] for rows that 404'd at least once
+        but are not yet confirmed (1 <= fail_count < threshold) — the
+        missing-repo-note backfill set. With the note flow, new 404s are
+        confirmed immediately; this list is the LEGACY tail (repos that
+        struck out in earlier versions and never got a note)."""
+        _thr = int(threshold or DEAD_LINK_THRESHOLD)
+        try:
+            with self._lock:
+                rows = self.cursor.execute(
+                    "SELECT url, fail_count FROM decommissioned_repos "
+                    "WHERE fail_count >= 1 AND fail_count < ? "
+                    "ORDER BY fail_count DESC, url", (_thr,)).fetchall()
+            return [(r[0], r[1]) for r in rows]
+        except Exception:
+            return []
 
     def is_dead_link(self, url: str, threshold: int = None) -> bool:
         """v0.08 — True when the URL is CONFIRMED dead (fail_count >=
@@ -2212,6 +2268,20 @@ class ProcessingWorker(QThread):
             # Fix: rebuild() calls log_signal.emit(), so pass the signal directly
             self._vault_index.rebuild(log_signal=self.log_message)
 
+        # v0.20.0 — missing-repo backfill: repos that 404'd in earlier
+        # versions (strikes below the threshold) get their _missing note
+        # NOW, so they stop counting as pending in every queue view and
+        # never burn another GitHub API call (the owner's "8-9 github
+        # addresses that are 404 always count as remaining").
+        if ((self.config or {}).get('pipelines') or {}).get('github', True) \
+                and vault_path:
+            try:
+                self._backfill_missing_notes(cache, vault_path,
+                                             _dead_threshold)
+            except Exception as e:
+                self.log_message.emit(
+                    f"⚠️ Missing-repo backfill skipped: {e}", "warning")
+
         # v0.10.0 — Phase 1 (note state): ONE-TIME silent baseline of the
         # GitHub vault (SPEC §4.4: "the first run after this feature ships
         # records a baseline silently").
@@ -2429,16 +2499,19 @@ class ProcessingWorker(QThread):
                         except GithubException as e2:
                             if e2.status == 404:
                                 _n404 = cache.record_404(url, "404 Not Found")
-                                if _n404 >= _dead_threshold:
-                                    self.log_message.emit(
-                                        f"🗑️ Repo not found (404, attempt {_n404}/{_dead_threshold}) — "
-                                        f"QUARANTINED, skipped in all future runs: {url}", "warning")
-                                else:
-                                    self.log_message.emit(
-                                        f"🗑️ Repo not found (404, attempt {_n404}/{_dead_threshold}): {url}", "warning")
+                                # v0.20.0 — a GitHub 404 is definitive
+                                # (deleted/private): the _missing note +
+                                # immediate confirmation stop the link
+                                # from ever counting as pending again.
+                                self._record_missing_repo(
+                                    url, owner, repo_name, _n404, cache,
+                                    _dead_threshold)
+                                self.log_message.emit(
+                                    f"🗑️ Repo not found (404) — missing-repo "
+                                    f"note written, never counted again: {url}", "warning")
                                 if self.link_tracker:
                                     try:
-                                        self.link_tracker.mark_skipped(url, "404 Not Found — decommissioned")
+                                        self.link_tracker.mark_skipped(url, "404 Not Found — missing-repo note")
                                     except Exception:
                                         pass
                             else:
@@ -2486,39 +2559,43 @@ class ProcessingWorker(QThread):
                     elif e.status == 404:
                         # v0.08 — attempt-counted decommission: the counter
                         # lives in cache.db so it accumulates ACROSS SESSIONS.
-                        # Attempts below the threshold log normally (a
-                        # transient 404 deserves a retry); at the threshold
-                        # the link is confirmed dead and never processed
-                        # again. The permanent record in
-                        # _inbox/notfound-links/ is appended ONCE — when the
-                        # link is first confirmed — instead of a duplicate row
-                        # on every run (old behavior; the file grew forever).
-                        # v0.09 (merge): threshold is the CONFIGURED one.
+                        # v0.20.0 — the confirmation is now IMMEDIATE: a 404
+                        # from /repos/{owner}/{repo} means the repo is deleted
+                        # or private, so a _missing placeholder note is
+                        # written (its ``source:`` line is the VaultIndex
+                        # dedupe key — the link stops counting as pending in
+                        # every queue view) and the quarantine row is
+                        # confirmed on the spot. The owner's re-check path:
+                        # delete the note + reset in the quarantine manager.
+                        # The permanent record in _inbox/notfound-links/ is
+                        # appended once (the dead-set pre-filter + the note
+                        # keep this branch from ever firing twice for the
+                        # same URL).
                         _n404 = cache.record_404(url, "404 Not Found")
-                        if _n404 >= _dead_threshold:
-                            self.log_message.emit(
-                                f"🗑️ Repo not found (404, attempt {_n404}/{_dead_threshold}) — "
-                                f"QUARANTINED, skipped in all future runs: {url}", "warning")
-                        else:
-                            self.log_message.emit(
-                                f"🗑️ Repo not found (404, attempt {_n404}/{_dead_threshold}): {url}", "warning")
-                        # Write to _inbox/notfound-links/ ONCE — at confirmation
-                        if _n404 >= _dead_threshold:
-                            try:
-                                vault_path = self.config.get('vault_path', '')
-                                if vault_path:
-                                    nf_folder = os.path.join(vault_path, "_inbox", "notfound-links")
-                                    # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-                                    _dryrun.makedirs(nf_folder, exist_ok=True)
-                                    nf_path = os.path.join(nf_folder, "notfound_links.md")
-                                    # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-                                    _dryrun.append_text(nf_path, f"| {datetime.now().strftime('%Y-%m-%d')} | {url} | 404 Not Found (confirmed after {_n404} attempts) |\n")
-                            except Exception:
-                                pass
+                        _note_path = self._record_missing_repo(
+                            url, owner, repo_name, _n404, cache,
+                            _dead_threshold)
+                        self.log_message.emit(
+                            f"🗑️ Repo not found (404) — missing-repo note "
+                            f"written, never counted again: {url}"
+                            + (f" → {os.path.basename(_note_path)}"
+                               if _note_path else ""), "warning")
+                        # Write to _inbox/notfound-links/ ONCE
+                        try:
+                            vault_path = self.config.get('vault_path', '')
+                            if vault_path:
+                                nf_folder = os.path.join(vault_path, "_inbox", "notfound-links")
+                                # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
+                                _dryrun.makedirs(nf_folder, exist_ok=True)
+                                nf_path = os.path.join(nf_folder, "notfound_links.md")
+                                # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
+                                _dryrun.append_text(nf_path, f"| {datetime.now().strftime('%Y-%m-%d')} | {url} | 404 Not Found (missing-repo note) |\n")
+                        except Exception:
+                            pass
                         # Mark as skipped (not failed — it's deliberately excluded)
                         if self.link_tracker:
                             try:
-                                self.link_tracker.mark_skipped(url, "404 Not Found — decommissioned")
+                                self.link_tracker.mark_skipped(url, "404 Not Found — missing-repo note")
                             except Exception:
                                 pass
                         self.progress_updated.emit(self._current_position, self.total)
@@ -3243,6 +3320,29 @@ class ProcessingWorker(QThread):
                 return None
             website_vault = (self.config.get('website_vault_path') or '').strip()
             links = list(getattr(self, '_non_github_urls', []) or [])
+            # v0.20.0 — blocked domains at INTAKE (the X fix): these links
+            # are already addressed as rows in the _inbox platform tables
+            # and never reach the fetcher. The pipeline's own guard is the
+            # second layer (due-retries, any other entry path).
+            _blocked = _links.blocked_domains_from_config(self.config)
+            if _blocked and links:
+                _kept, _dropped = [], []
+                for _u in links:
+                    (_dropped if _links.domain_is_blocked(_u, _blocked)
+                     else _kept).append(_u)
+                if _dropped:
+                    self.log_message.emit(
+                        f"🚫 {len(_dropped)} link(s) on blocked domains "
+                        f"({', '.join(_blocked)}) — never fetched; the "
+                        f"_inbox table keeps the record", "info")
+                    if self.link_tracker:
+                        for _u in _dropped:
+                            try:
+                                self.link_tracker.mark_skipped(
+                                    _u, "blocked domain")
+                            except Exception:
+                                pass
+                    links = _kept
             if not website_vault:
                 if links:
                     self.log_message.emit(
@@ -3374,6 +3474,86 @@ class ProcessingWorker(QThread):
                 pass
             return None
 
+    def _record_missing_repo(self, url, owner, repo, strikes, cache,
+                             threshold):
+        """v0.20.0 — write the ``_missing/`` placeholder note for a 404
+        repo and immediately confirm-dead the quarantine row.
+
+        The note's ``source:`` frontmatter is the VaultIndex dedupe key —
+        with it in the vault the repo stops counting as pending in every
+        queue view and never reaches the GitHub API again. Idempotent
+        (an existing note is kept); crash-guarded; dry-run records only
+        (atomic_write_text gates itself, makedirs via _dryrun).
+        Returns the note path, or None when the vault is unset/failed."""
+        try:
+            if url in getattr(self, '_missing_notes_written', set()):
+                return None
+            vault_path = self.config.get('vault_path', '')
+            note_path = None
+            if vault_path:
+                from gitcurator.core import note_builder as _nb
+                folder = os.path.join(vault_path, '_missing')
+                # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
+                _dryrun.makedirs(folder, exist_ok=True)
+                fname = _storage.safe_filename(
+                    f"{owner}_{repo}_missing") + '.md'
+                note_path = os.path.join(folder, fname)
+                if not os.path.exists(note_path) or _dryrun.is_enabled():
+                    _storage.atomic_write_text(
+                        note_path,
+                        _nb.build_missing_repo_note(url, owner, repo,
+                                                    strikes))
+                if self._vault_index is not None:
+                    self._vault_index.add_url(url, note_path)
+            cache.confirm_dead(url, "404 Not Found (missing-repo note)",
+                               threshold)
+            if not hasattr(self, '_missing_notes_written'):
+                self._missing_notes_written = set()
+            self._missing_notes_written.add(url)
+            return note_path
+        except Exception:
+            return None
+
+    def _backfill_missing_notes(self, cache, vault_path, threshold):
+        """v0.20.0 — the legacy 404 tail: repos that struck out in earlier
+        versions (fail_count below the threshold, no note, no
+        confirmation) get their ``_missing`` note NOW, so they stop
+        counting as pending and stop burning API calls — the owner's
+        "8-9 github addresses that are 404 ... always count them as
+        remaining to be processed". Runs once per batch start; idempotent."""
+        rows = cache.get_unconfirmed_404s(threshold)
+        if not rows:
+            return
+        written = 0
+        for url, strikes in rows:
+            if 'github.com/' not in url:
+                continue  # defensive: decommissioned rows are github links
+            if self._vault_index is not None and self._vault_index.has_url(url):
+                # A note already covers it — just confirm the quarantine.
+                cache.confirm_dead(
+                    url, "404 Not Found (missing-repo note exists)",
+                    threshold)
+                continue
+            tail = url.split('github.com/', 1)[1]
+            parts = tail.split('/')
+            if len(parts) < 2 or not parts[0] or not parts[1]:
+                continue
+            owner, repo = parts[0], parts[1]
+            if repo.endswith('.git'):
+                repo = repo[:-len('.git')]
+            if self._record_missing_repo(url, owner, repo, strikes, cache,
+                                         threshold):
+                written += 1
+            else:
+                cache.confirm_dead(url, "404 Not Found (backfill)",
+                                   threshold)
+        if written:
+            self.log_message.emit(
+                f"🕳️ {written} missing-repo note(s) written (past 404s) — "
+                f"those repos no longer count as pending. To re-check one, "
+                f"delete its note in _missing/ and reset it in More ▸ View "
+                f"404 Quarantine.", "info")
+
     def _create_inbox_notes(self, non_github_urls, source="Saved"):
         """Classify non-GitHub links by platform and write to per-platform files.
 
@@ -3396,8 +3576,12 @@ class ProcessingWorker(QThread):
                 "will be processed as websites (not written to _inbox).",
                 "info")
             return
+        # v0.20.0 — the GitHub vault manages ONLY its own domains: the
+        # platform tables land in the WEBSITES vault when one is set
+        # (fallback: the GitHub vault, the pre-v0.20 behavior, so links
+        # are never lost on a vault-less setup).
         write_inbox_links_by_platform(
-            self.config.get('vault_path', ''),
+            _inbox_table_vault(self.config),
             non_github_urls,
             source=source,
             log_callback=self.log_message.emit,
@@ -4646,7 +4830,7 @@ def _telegram_keyword_job(api_id, api_hash, phone, proxy, keyword_start, keyword
     return _run_telegram_worker(config, log_signal, code_callback=code_callback)
 
 
-def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None):
+def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None):
     """Fetch unread GitHub URLs from the user's dedicated bot chat.
     Uses the user's Telethon session (through proxy) to read messages sent
     TO the bot. Resolves the bot by username (no Bot API call needed —
@@ -4664,6 +4848,11 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     in the worker thread, instead of freezing the GUI inside the
     finished-signal handler. The result dict gains:
       pending_urls, in_vault_count, decommissioned_count, vault_index_count
+
+    v0.20.0 — ``blocked_domains`` (from the app config) classifies those
+    links into their OWN bucket (``blocked_count``): they are already
+    addressed as rows in the _inbox platform tables and must never show
+    as pending nor reach the Websites pipeline.
     """
     config = {
         'api_id': int(api_id),
@@ -4692,10 +4881,13 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 cache.close()
             except Exception:
                 decommissioned_urls = set()
-            pending, in_vault, decomm = [], 0, 0
+            pending, in_vault, decomm, blocked = [], 0, 0, 0
             for url in result.get('urls', []):
                 norm = normalize_url(url)
-                if vi.has_url(url):
+                if blocked_domains and _links.domain_is_blocked(
+                        url, blocked_domains):
+                    blocked += 1
+                elif vi.has_url(url):
                     in_vault += 1
                 elif norm in decommissioned_urls:
                     decomm += 1
@@ -4704,6 +4896,7 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             result['pending_urls'] = pending
             result['in_vault_count'] = in_vault
             result['decommissioned_count'] = decomm
+            result['blocked_count'] = blocked
         except Exception as vi_err:
             log_signal.emit(f"⚠️ Vault filter failed in worker ({vi_err}); showing all URLs.", "warning")
             result['pending_urls'] = list(result.get('urls', []))
@@ -5565,6 +5758,23 @@ class MainWindow(QMainWindow):
             "private GitHub repo for the Websites vault backup")
         web_repo_row.addWidget(self.website_repo_input, 1)
         web_layout.addLayout(web_repo_row)
+        # v0.20.0 — blocked domains (the X fix): these links are already
+        # addressed as rows in the _inbox platform tables; the Websites
+        # pipeline never fetches them. Comma-separated; empty = allow all.
+        web_blocked_row = QHBoxLayout()
+        web_blocked_row.addWidget(QLabel("Blocked domains:"))
+        self.web_blocked_input = QLineEdit(
+            ', '.join(_links.blocked_domains_from_config(self.config)))
+        self.web_blocked_input.setPlaceholderText(
+            "never fetched by the Websites pipeline (default: x.com, "
+            "twitter.com, t.co) — empty = allow all")
+        self.web_blocked_input.setToolTip(
+            "Links on these domains are recorded in the _inbox platform "
+            "tables only — never fetched, never turned into notes, never "
+            "retried. Subdomains count (www.x.com matches x.com). Empty "
+            "field = no blocked domains.")
+        web_blocked_row.addWidget(self.web_blocked_input, 1)
+        web_layout.addLayout(web_blocked_row)
         vault_layout.addWidget(web_group)
 
         # --- Manual Notes vault (owner-owned; the app writes only the
@@ -5624,6 +5834,7 @@ class MainWindow(QMainWindow):
         self.website_vault_input.textEdited.connect(self._refresh_vault_page_status)
         self.website_vault_input.editingFinished.connect(self._save_vault_page)
         self.website_repo_input.editingFinished.connect(self._save_vault_page)
+        self.web_blocked_input.editingFinished.connect(self._save_vault_page)
         self.manual_vault_input.textEdited.connect(self._refresh_vault_page_status)
         self.manual_vault_input.editingFinished.connect(self._save_vault_page)
         self.pipeline_github_check.toggled.connect(self._save_vault_page)
@@ -9145,6 +9356,15 @@ class MainWindow(QMainWindow):
             "website_repo_name": (self.website_repo_input.text().strip()
                                   if hasattr(self, 'website_repo_input')
                                   else self.config.get('website_repo_name', '')),
+            # v0.20.0 — blocked domains for the Websites pipeline (the X
+            # fix). Comma-separated text → clean list; an EMPTY field is a
+            # deliberate opt-out (list []), a missing widget keeps config.
+            "web_blocked_domains": (
+                [d.strip().lower() for d in
+                 self.web_blocked_input.text().split(',') if d.strip()]
+                if hasattr(self, 'web_blocked_input')
+                else self.config.get('web_blocked_domains',
+                                     list(_links.DEFAULT_BLOCKED_DOMAINS))),
             "taxonomy_path": self.config.get('taxonomy_path', ''),
             "pipelines": {
                 "github": (self.pipeline_github_check.isChecked()
@@ -10709,7 +10929,8 @@ class MainWindow(QMainWindow):
         def _job(aid, ahash, ph, px, bu, _ignored_log, _ignored_code, _ignored_mark):
             return _bot_queue_job(aid, ahash, ph, px, bu, worker.log_message,
                                   worker.request_code,
-                                  vault_path=(_vault_for_filter or None))
+                                  vault_path=(_vault_for_filter or None),
+                                  blocked_domains=_links.blocked_domains_from_config(self.config))
         worker._fn = _job
 
         worker.log_message.connect(self.log_message)
@@ -10728,10 +10949,13 @@ class MainWindow(QMainWindow):
 
                 # Add non-GitHub links to inbox
                 if non_github:
-                    vault_path = self.vault_combo.currentText()
-                    if vault_path:
+                    # v0.20.0 — the tables land in the WEBSITES vault when
+                    # one is set ("the github vault only manages its
+                    # domains"); fallback = the GitHub vault.
+                    _table_vault = _inbox_table_vault(self.config)
+                    if _table_vault:
                         write_inbox_links_by_platform(
-                            vault_path, non_github, source="Bot",
+                            _table_vault, non_github, source="Bot",
                             log_callback=lambda msg, lvl: self.log_message(msg, lvl),
                         )
 
@@ -10745,13 +10969,18 @@ class MainWindow(QMainWindow):
                     pending_urls = result.get('pending_urls', [])
                     in_vault_count = result.get('in_vault_count', 0)
                     decommissioned_count = result.get('decommissioned_count', 0)
+                    blocked_count = result.get('blocked_count', 0)
                     if result.get('vault_index_count'):
                         self.log_message(
                             f"📚 Vault index: {result['vault_index_count']} notes indexed", "info")
                 else:
                     in_vault_count = 0
                     decommissioned_count = 0
+                    blocked_count = 0
                     pending_urls = []
+                    # v0.20.0 — the legacy GUI-side filter applies the
+                    # same blocked-domain bucket as the worker-side one.
+                    _blocked_list = _links.blocked_domains_from_config(self.config)
                     vault_path = self.vault_combo.currentText()
                     if vault_path and os.path.isdir(vault_path):
                         try:
@@ -10771,7 +11000,9 @@ class MainWindow(QMainWindow):
 
                             for url in all_urls:
                                 norm = normalize_url(url)
-                                if vi.has_url(url):
+                                if _links.domain_is_blocked(url, _blocked_list):
+                                    blocked_count += 1
+                                elif vi.has_url(url):
                                     in_vault_count += 1
                                 elif norm in decommissioned_urls:
                                     decommissioned_count += 1
@@ -10809,6 +11040,8 @@ class MainWindow(QMainWindow):
                 display += f"Total GitHub URLs in bot:  {len(all_urls)}\n"
                 display += f"✅ Already in vault:        {in_vault_count}\n"
                 display += f"🗑️ Decommissioned (404):    {decommissioned_count}\n"
+                if blocked_count:
+                    display += f"🚫 Blocked domains:         {blocked_count}\n"
                 display += f"⏳ Pending (not in vault):  {len(pending_urls)}\n"
                 display += f"🔗 Non-GitHub links:        {len(non_github)}\n"
                 if getattr(self, '_bot_queue_duplicates', 0) > 0:
@@ -10995,10 +11228,12 @@ class MainWindow(QMainWindow):
             # now means the links are safe even if the user cancels before
             # the worker's intake runs).
             if non_github:
-                vault_path = self.vault_combo.currentText()
-                if vault_path:
+                # v0.20.0 — the tables land in the WEBSITES vault when one
+                # is set ("the github vault only manages its domains").
+                _table_vault = _inbox_table_vault(self.config)
+                if _table_vault:
                     write_inbox_links_by_platform(
-                        vault_path, non_github, source="Bot",
+                        _table_vault, non_github, source="Bot",
                         log_callback=lambda msg, lvl: self.log_message(msg, lvl),
                     )
 

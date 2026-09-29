@@ -641,6 +641,10 @@ class TestPipelineProxy(_PipeProxyCase):
 
 
 class TestPipelineRearm(_PipeProxyCase):
+    # v0.20 note: fixtures use rearm.test — the DEFAULT blocked-domain
+    # list would purge x.com retry rows at construction (that purge is
+    # tested in test_intakefix.py).
+
 
     def _exhaust(self, *urls):
         for u in urls:
@@ -652,32 +656,32 @@ class TestPipelineRearm(_PipeProxyCase):
             self.db.conn.commit()
 
     def test_first_active_proxy_rearms_exhausted_queue(self):
-        self._exhaust('https://x.com/1', 'https://x.com/2')
+        self._exhaust('https://rearm.test/1', 'https://rearm.test/2')
         self._record_fetch()
         pipe = self._make(self._config())
         logs = self._all_logs()
         self.assertIn('re-armed 2 queued retry(ies)', logs)
-        for u in ('https://x.com/1', 'https://x.com/2'):
+        for u in ('https://rearm.test/1', 'https://rearm.test/2'):
             self.assertEqual(self.db.retry_row(u)['attempts'], 0)
         self.assertEqual(len(self.db.due_retries()), 2)
 
     def test_same_epoch_never_rearms_twice(self):
-        self._exhaust('https://x.com/1')
+        self._exhaust('https://rearm.test/1')
         self._record_fetch()
         self._make(self._config())                 # epoch stored, re-armed
-        self.db.enqueue_retry('https://x.com/2', 'refused')
+        self.db.enqueue_retry('https://rearm.test/2', 'refused')
         self.logs.clear()
         pipe = self._make(self._config())          # SAME proxy epoch
         self.assertNotIn('re-armed', self._all_logs())
         # the second link keeps its natural backoff attempts
-        self.assertEqual(self.db.retry_row('https://x.com/2')['attempts'], 1)
+        self.assertEqual(self.db.retry_row('https://rearm.test/2')['attempts'], 1)
 
     def test_changed_epoch_rearms_again(self):
-        self._exhaust('https://x.com/1')
+        self._exhaust('https://rearm.test/1')
         self._record_fetch()
         self._make(self._config())                 # SOCKS5 port A
         with _AliveSocket() as other_port:
-            self._exhaust('https://x.com/2')
+            self._exhaust('https://rearm.test/2')
             self.logs.clear()
             self._make(self._config(port=other_port))   # new epoch
         self.assertIn('re-armed', self._all_logs())
