@@ -40,6 +40,16 @@ sources), `test_v0230` (`CONFIG_FILE`). Full record:
 `REFACTOR_PLAN.md`, `REFACTOR_PROGRESS.md`, `REFACTOR_NOTICED_ISSUES.md`
 (repo root).
 
+### The release
+
+Tagged `v0.24.0` and released with the Windows test zip
+`GitCurator-v0.24.0-windows.zip` — 112 files / 721,543 bytes, sha256
+`c10bfe3b…292245e96686941` (deterministic build from the tag; download
+round-trip byte-identical; every `.bat` pure ASCII + CRLF). CI green on
+both `main` and the tag. Because this is a pure refactor, the owner's
+test is *sameness*: unzip → `1-INSTALL.bat` → `GitCurator.bat` →
+everything should look and behave exactly like v0.23.0.
+
 ## [0.23.0] — The five-request desktop overhaul: the Test Connection modal, the two-radio LLM tab with Claude, the split context budget, the wizard light-mode fix, Import txt file — 2026-09-30
 
 The owner's five requests, verbatim scope: (1) remove the Detect & Set
