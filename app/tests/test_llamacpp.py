@@ -1274,8 +1274,12 @@ class TestStartupWiring(unittest.TestCase):
             # NOTE: no `config` — any detection attempt would need it
 
         import types
-        orig = gui_app.threading
-        gui_app.threading = types.SimpleNamespace(Thread=_RecThread)
+        # refactor/gui-app-split: _startup_llamacpp_autodetect now lives in
+        # gitcurator.gui.main_window.llamacpp, so the Thread recorder must
+        # be swapped in on the owning module to actually intercept spawns.
+        import gitcurator.gui.main_window.llamacpp as gui_llamacpp
+        orig = gui_llamacpp.threading
+        gui_llamacpp.threading = types.SimpleNamespace(Thread=_RecThread)
         try:
             gui_app.MainWindow._startup_llamacpp_autodetect(_Done())
             done = _Done()
@@ -1283,7 +1287,7 @@ class TestStartupWiring(unittest.TestCase):
             done._closing = True   # closing guard: also no thread
             gui_app.MainWindow._startup_llamacpp_autodetect(done)
         finally:
-            gui_app.threading = orig
+            gui_llamacpp.threading = orig
         self.assertEqual(started, [])
 
 
