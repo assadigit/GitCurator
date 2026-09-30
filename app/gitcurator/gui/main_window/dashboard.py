@@ -710,5 +710,8 @@ class DashboardMixin:
         # as read even if they succeed this time (the user might want to
         # verify them first).
         self._bot_queue_urls = []
+        # v0.24.1 — same rule for the pending-websites list (a retry batch
+        # is not a bot-queue batch; PROCESS must not pick these up either).
+        self._bot_queue_pending_websites = []
         self._start_worker_with_urls(urls)
 

@@ -60,7 +60,12 @@ class HeroMixin:
         been fetched → STOP while a batch runs → back to SYNC when it
         finishes. Reads ONLY the existing enabled-state (owned by
         _start_worker / processing_finished) plus the GUI-only _hero_state
-        and writes ONLY widget visibility/text — zero pipeline coupling."""
+        and writes ONLY widget visibility/text — zero pipeline coupling.
+
+        v0.24.1 — the pending count covers BOTH pipelines: pending repos
+        AND pending website links (fix for "websites never sync" — with a
+        GitHub-only count the button said PROCESS/0 while website links
+        waited in the queue)."""
         try:
             state = getattr(self, '_hero_state', 'sync')
             if state == 'fetching':
@@ -85,7 +90,8 @@ class HeroMixin:
                 if state == 'process':
                     # Keep the pending count fresh — a Settings → Bot
                     # re-check updates self._bot_queue_urls in place.
-                    n = len(getattr(self, '_bot_queue_urls', None) or [])
+                    n = len(getattr(self, '_bot_queue_urls', None) or []) \
+                        + len(getattr(self, '_bot_queue_pending_websites', None) or [])
                     txt = f"PROCESS ({n})" if n else "PROCESS"
                     if self.start_btn.text() != txt:
                         self.start_btn.setText(txt)
@@ -144,21 +150,34 @@ class HeroMixin:
     def _after_sync_fetch(self, _name, result):
         """Fires when check_bot_queue's worker finishes (connected AFTER its
         own _on_finished handler, so self._bot_queue_urls is already updated
-        when this runs). Flips the hero button SYNC → PROCESS."""
+        when this runs). Flips the hero button SYNC → PROCESS.
+
+        v0.24.1 — the flip now fires when EITHER pipeline has pending work:
+        pending GitHub repos OR pending website links. Before the fix, a
+        caught-up GitHub vault masked unprocessed websites and the button
+        fell back to SYNC with "All caught up" — the Websites pipeline
+        then NEVER ran from the queue."""
         pending = getattr(self, '_bot_queue_urls', None) or []
+        pending_web = getattr(self, '_bot_queue_pending_websites', None) or []
+        n_total = len(pending) + len(pending_web)
         # v0.23.0 — the only input mode left is the Import txt file
         # (Settings → 📥 Input): PROCESS runs it when the queue is caught
         # up AND a file is picked.
         import_ready = bool(self.import_file.text().strip())
-        if result.get('success') and pending:
+        if result.get('success') and n_total:
             self._set_hero_state('process')
-            self.progress_bar.setFormat(f"{len(pending)} ready to process")
+            self.progress_bar.setFormat(f"{n_total} ready to process")
             # v0.07: the counter reflects the fetched queue immediately.
-            self.progress_count.setText(f"0 / {len(pending)}")
+            self.progress_count.setText(f"0 / {n_total}")
             self.progress_count.setToolTip(
-                f"{len(pending)} fetched item(s) ready to process")
+                f"{n_total} fetched item(s) ready to process")
+            _parts = []
+            if pending:
+                _parts.append(f"{len(pending)} repo(s)")
+            if pending_web:
+                _parts.append(f"{len(pending_web)} website link(s)")
             self.log_message(
-                f"🟢 Fetched {len(pending)} undone item(s) — click PROCESS to start.",
+                "🟢 Fetched " + " + ".join(_parts) + " — click PROCESS to start.",
                 "success"
             )
         elif result.get('success') and import_ready:
@@ -184,9 +203,14 @@ class HeroMixin:
         ALWAYS win (user spec: click PROCESS → it starts); the legacy
         input-mode path only runs when the fetch found nothing (note: the
         Markers radio is checked by default, so that's the marker
-        workflow's launcher)."""
+        workflow's launcher).
+
+        v0.24.1 — "fetched undone items" now includes pending WEBSITES:
+        process_bot_queue starts a websites-only batch when the GitHub
+        side is already caught up."""
         pending = getattr(self, '_bot_queue_urls', None) or []
-        if pending:
+        pending_web = getattr(self, '_bot_queue_pending_websites', None) or []
+        if pending or pending_web:
             self.process_bot_queue()   # existing: confirm gate + worker start
             return
         self.start_processing()        # legacy input-mode path (single /
@@ -204,14 +228,16 @@ class HeroMixin:
                 self.start_btn.setEnabled(False)
                 self.start_btn.setToolTip("Fetching undone items from the Telegram bot…")
             elif state == 'process':
-                n = len(getattr(self, '_bot_queue_urls', None) or [])
+                # v0.24.1 — the count includes pending WEBSITES links too.
+                n = len(getattr(self, '_bot_queue_urls', None) or []) \
+                    + len(getattr(self, '_bot_queue_pending_websites', None) or [])
                 self.start_btn.setText(f"PROCESS ({n})" if n else "PROCESS")
                 _icons.set_btn_icon(self.start_btn, 'play', COLORS['hero_text'], 18)
                 self.start_btn.setEnabled(True)
                 if n:
                     self.start_btn.setToolTip(
                         f"Stage 2 — start curating the {n} fetched undone item(s) "
-                        "into the Obsidian vault.\nA confirmation appears for large "
+                        "into the Obsidian vault(s).\nA confirmation appears for large "
                         "batches (more than 10 items)."
                     )
                 else:
@@ -225,7 +251,8 @@ class HeroMixin:
                 self.start_btn.setEnabled(True)
                 self.start_btn.setToolTip(
                     "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
-                    "(repos already in the vault and decommissioned ones are skipped).\n"
+                    "(repos already in the vault and decommissioned ones are skipped;\n"
+                    "website links already in the Websites vault are skipped too).\n"
                     "The button then becomes PROCESS — click it to start the batch.\n"
                     "While a batch runs this button becomes STOP — click to cancel."
                 )

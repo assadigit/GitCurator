@@ -1,3 +1,77 @@
+## [0.24.1] — the "websites never sync" queue fix: pending now covers BOTH vaults — 2026-09-30
+
+Owner report (the v0.24.0 Windows build log): "it doesn't sync and see new
+sites, for example I add new sites (not github projects), the app is
+supposed to detect them > process them > put them in the websites vault
+but in logs it says: … All 621 GitHub repos already in vault! 0 pending. …
+All caught up — nothing undone in the bot queue."
+
+**Root cause** — the bot-queue "pending" classification was GITHUB-ONLY:
+
+- `_bot_queue_job` classified the GitHub URLs against the GitHub vault and
+  returned `non_github_urls` **raw** — never classified against anything.
+- `check_bot_queue`/`process_bot_queue`/the hero SYNC→PROCESS flip all
+  keyed off that GitHub-only pending list, so a caught-up GitHub vault
+  (0 pending repos) meant "All caught up" **even with hundreds of
+  unprocessed website links in the queue** — and the Websites pipeline
+  never ran. The ProcessingWorker has supported websites-only batches
+  since v0.11.0 (`_run_impl`: "not urls and not (_websites_pipeline_on
+  and _website_links)"), but no caller ever started one from the queue
+  flow: `process_bot_queue` returned early at "No repos in queue".
+
+**The fix, layer by layer (all six call sites of the pending decision):**
+
+1. `worker_jobs._bot_queue_job` — new `website_vault_path` +
+   `websites_pipeline_on` params; the non-GitHub links are now classified
+   against the **Websites vault** (its own `VaultIndex` keyed by
+   `links.normalize_website_url`) + the `WebsiteStateDB` dedupe layers,
+   replicating `WebsitePipeline._process_link_inner`'s skip rules exactly
+   (blocked/self → `_inbox` rows; dismissed → never re-add; real note →
+   done; failed-fetch `_review` placeholder → still pending, the
+   upgrade/retry path). The result dict gains `pending_website_urls`,
+   `websites_in_vault_count`, `websites_processed_count`,
+   `websites_dismissed_count`, `websites_blocked_count`,
+   `websites_self_count`, `websites_vault_index_count` + the
+   `websites_pipeline_off` / `websites_no_vault` hint flags. A
+   configured-but-missing vault path is a loud warning + all-pending
+   (VaultIndex on a missing dir would silently index 0 notes).
+2. `bot_queue.check_bot_queue` — passes the websites vault + switch into
+   the job; `_on_finished` stores `_bot_queue_pending_websites` (with a
+   GUI-side fallback for unclassified legacy results); the pending badge,
+   the queue report and the log lines now show BOTH pipelines side by
+   side ("N repo(s) + M website link(s) pending"). "All caught up" only
+   prints when BOTH are done — and when the Websites pipeline is OFF (or
+   no vault is set) with non-GitHub links waiting, an actionable hint
+   says so instead of a silent caught-up.
+3. `bot_queue.process_bot_queue` — starts a **websites-only batch** when
+   the GitHub side is caught up (`urls=[]`, `non_github_urls=[…]` — the
+   pipeline's own dedupe skips the already-done links); the >10-item
+   confirm gate counts repos + websites.
+4. `hero` — `_after_sync_fetch` flips SYNC→PROCESS on EITHER pipeline's
+   pending count; `_begin_hero_processing` routes websites to the bot
+   queue; `_sync_run_button`/`_set_hero_state` label "PROCESS (repos +
+   websites)".
+5. `processing_control` — `start_processing` (the PROCESS dispatcher)
+   covers websites-only batches; `processing_finished`'s Phase 5 CLEAR
+   gate now keys on the batch's OWN `_bot_source` provenance + manifest
+   (a websites-only bot batch verifies and consumes the queue; an
+   import/retry batch never does — stale GUI lists can no longer mark
+   the bot queue read).
+6. `cli.py --auto` — `fetch_bot_queue` passes the same classification
+   params (plus blocked/self domains, matching the GUI), the queue
+   summary line shows both pipelines, and "All caught up — nothing to
+   process" only fires when both are done.
+
+**Tests** — `tests/test_websitesqueuefix.py` (22 cases, suite 796 → 818):
+the owner's exact scenario (all repos done + new sites → the sites ARE
+pending), every dedupe bucket (in-vault/processed/dismissed/blocked/
+self/failed-review-upgrade), www/utm/http equivalence against real vault
+notes, the pipeline-off / no-vault / broken-path hint paths, legacy
+old-signature callers, the mixin flow (websites-only batch starts; hero
+flips; mixed counts; nothing-pending bails) — worker-side cases run
+headless anywhere, plus an offscreen end-to-end replay on the REAL composed MainWindow (check_bot_queue → _on_finished renders the actual queue panel → hero flip → PROCESS starts the websites-only batch; only the Telethon subprocess and the batch launcher are stubbed). Full gate green:
+67-module compile, 818 tests, offline golden run 30/30.
+
 ## [0.24.0] — The app.py split: 13,815 lines become 28 focused modules, zero behavior change — 2026-09-30
 
 A pure structural refactor of `gitcurator/gui/app.py` (branch
