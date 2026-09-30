@@ -30,3 +30,10 @@ for the owner to triage later.
 5. **Sandbox resets wiped local clones twice** (previous sessions). This
    branch is being pushed at completion per owner instruction, so the work
    no longer lives only on a disposable sandbox disk.
+6. **`gitcurator/tools/smoke_detectset.py` still patches
+   `gui_app.CONFIG_FILE`** (L80). After the split the config consumers
+   read the constant from `gitcurator.gui.main_window.vaults_config`, so
+   a manual run of that dev tool would use the real config.json path
+   instead of its smoke config. It is NOT part of the CI test gate
+   (compiled only), so it was left untouched per the zero-change rule.
+   Fix idea for later: aim it at the owning module like the tests do.
