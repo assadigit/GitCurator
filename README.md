@@ -11,6 +11,9 @@
 **Status:** all six SPEC phases done and merged — see
 [STATUS.md](STATUS.md) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
 
+> Public repository (since 2026-09-30, after a full history scrub — see
+> [Security](#security)).
+
 ---
 
 ## Executive summary — what this app is
@@ -326,10 +329,11 @@ touch:
   backend for side-by-side comparison reports.
 - **CI** (`.github/workflows/ci.yml`) — requirements + Qt system libs,
   38 modules compiled, the full 772 suite and the offline golden run on
-  every push/tag/PR. *Note: GitHub Actions on this private repo is
-  currently blocked by an account-billing failure — gates run green through
-  the [gitcurator-gate](https://github.com/assadigit/gitcurator-gate)
-  mirror instead (latest: 772/772 + golden 30/30 on v0.23.0).*
+  every push/tag/PR. The repository is **public since 2026-09-30** (after a
+  full history scrub), so Actions minutes are free; before that, a billing
+  block on private-repo Actions was worked around with the
+  [gitcurator-gate](https://github.com/assadigit/gitcurator-gate) mirror
+  (latest mirror run: 772/772 + golden 30/30 on the v0.23.0 code).
 - **The dashboard** (`dashboard/`) is the human face of all of it — run
   history, pass-rate streaks, drift detection, release + seal status.
 
@@ -345,17 +349,25 @@ touch:
 - `CHANGELOG.md` holds the plain-language history; `STATUS.md` the phase
   table and session log.
 
-## Security — read before deploying anything
+## Security
 
-- **This repository is private and must stay that way.** Git history
-  predating v0.0.10 contains real credentials (session files, tokens). Run
-  `git filter-repo` + credential rotation BEFORE any visibility flip.
+- **History scrubbed before going public (2026-09-30).** The repository
+  was private through v0.23.0 and its early history (pre-v0.0.10) contained
+  real credentials. Before the public flip the entire history was rewritten
+  with `git filter-repo`: Telethon session files and the live
+  `config.json` / `installer.config.json` removed by path; the live bot
+  token, Telegram api_hash, GitHub PATs, phone number and Cloudflare token
+  prefixes replaced; commit author emails rewritten to the GitHub noreply
+  form. The v0.23.0 zip rebuilt from the scrubbed tag is **byte-identical**
+  to the published asset (sha256 `89e78290…d04d`) — no release content
+  changed.
 - Since v0.0.10 the tree ships credential-free: config templates, session
-  files gitignored, `YOUR_BOT_TOKEN` placeholders in docs.
-- **Credential rotation is the standing P0** — every secret has been exposed
+  files gitignored, `YOUR_BOT_TOKEN` placeholders in docs, and the local
+  wrangler account cache is untracked + gitignored.
+- **Credential rotation is still recommended** — every secret was exposed
   in chat during development. Rotate the Telegram bot token / API
-  credentials, the Cloudflare tokens, and the GitHub PAT; then update the
-  app (Settings → Credentials) and the Worker
+  credentials, the Cloudflare tokens, and the GitHub PAT when convenient;
+  then update the app (Settings → Credentials) and the Worker
   (`npx wrangler secret put BOT_TOKEN`).
 - The app's token hygiene: tokens are used for API calls and one-time push
   URLs only — never written to `.git/config`, never persisted, never
