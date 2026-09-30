@@ -504,7 +504,12 @@ class TestBotQueueBlockedBucket(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix='botq-')
         import gitcurator.gui.app as ga
+        # refactor/gui-app-split: _run_telegram_worker now lives in
+        # gitcurator.gui.worker_jobs (app.py re-exports it), so the mock
+        # must aim at the owning module for _bot_queue_job to see it.
+        import gitcurator.gui.worker_jobs as gwj
         self.ga = ga
+        self.gwj = gwj
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -513,7 +518,7 @@ class TestBotQueueBlockedBucket(unittest.TestCase):
         vault = os.path.join(self.tmp, 'gh')
         os.makedirs(vault, exist_ok=True)
         fake = {'success': True, 'urls': urls, 'non_github_urls': []}
-        with mock.patch.object(self.ga, '_run_telegram_worker',
+        with mock.patch.object(self.gwj, '_run_telegram_worker',
                                return_value=fake):
             result = self.ga._bot_queue_job(
                 '1', 'h', 'p', None, 'bot',
@@ -548,7 +553,7 @@ class TestBotQueueBlockedBucket(unittest.TestCase):
             f.write('---\nsource: https://x.com/in-vault\n---\n')
         fake = {'success': True,
                 'urls': ['https://x.com/in-vault'], 'non_github_urls': []}
-        with mock.patch.object(self.ga, '_run_telegram_worker',
+        with mock.patch.object(self.gwj, '_run_telegram_worker',
                                return_value=fake):
             result = self.ga._bot_queue_job(
                 '1', 'h', 'p', None, 'bot', log_signal=lambda *a: None,
@@ -688,7 +693,12 @@ class TestGuiRoundTrip(unittest.TestCase):
                        'vault_path': os.path.join(tmp, 'gh'),
                        'website_vault_path': os.path.join(tmp, 'web')},
                       f)
-        ga.CONFIG_FILE = cfg_path
+        # refactor/gui-app-split: load_config/save_config now live in
+        # gitcurator.gui.main_window.vaults_config — the temp config path
+        # must be swapped in on the owning module (otherwise the round trip
+        # silently reads/writes the repo's real config.json).
+        import gitcurator.gui.main_window.vaults_config as gui_vaults
+        gui_vaults.CONFIG_FILE = cfg_path
         from PyQt6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])
         w = ga.MainWindow()

@@ -533,6 +533,10 @@ class TestWorkerBaseline(unittest.TestCase):
 
     def _run_worker(self, dry_run):
         import gitcurator.gui.app as gui_app
+        # refactor/gui-app-split: ProcessingWorker (and its Github symbol)
+        # now lives in gitcurator.gui.processing_worker — the fast-fail
+        # stub must be swapped in on the owning module.
+        import gitcurator.gui.processing_worker as _gui_pw
         from gitcurator.core import dryrun
         from gitcurator.gui.app import ProcessingWorker
         tmp = tempfile.mkdtemp(prefix='curator-p1e-')
@@ -578,14 +582,14 @@ class TestWorkerBaseline(unittest.TestCase):
         # Baseline is recorded BEFORE any URL processing; point the app's
         # default cache at the temp db so the REAL cache.db is never touched.
         orig_init = note_state.NoteStateDB.__init__
-        orig_github = gui_app.Github
+        orig_github = _gui_pw.Github
 
         def _patched(self, db_path_arg="cache.db"):
             orig_init(self, db_path=db_path if db_path_arg == "cache.db"
                       else db_path_arg)
 
         note_state.NoteStateDB.__init__ = _patched
-        gui_app.Github = _FastFailGithub
+        _gui_pw.Github = _FastFailGithub
         try:
             if dry_run:
                 dryrun.enable()      # mirrors worker.run()'s try/finally
@@ -595,7 +599,7 @@ class TestWorkerBaseline(unittest.TestCase):
                 dryrun.disable()
         finally:
             note_state.NoteStateDB.__init__ = orig_init
-            gui_app.Github = orig_github
+            _gui_pw.Github = orig_github
         db = note_state.NoteStateDB(db_path)
         try:
             recorded = db.count('github')

@@ -703,8 +703,28 @@ class TestRelabel(unittest.TestCase):
         with open(inspect.getsourcefile(mod), encoding='utf-8') as f:
             return f.read()
 
+    def _gui_sources(self):
+        """app.py + dialogs.py + every main_window module, concatenated.
+
+        refactor/gui-app-split moved the GUI source out of the single
+        app.py; the same expectations now scan the code's new home(s)."""
+        import importlib
+        import inspect
+        parts = []
+        for name in ('gitcurator.gui.app', 'gitcurator.gui.dialogs'):
+            mod = importlib.import_module(name)
+            with open(inspect.getsourcefile(mod), encoding='utf-8') as f:
+                parts.append(f.read())
+        mw = importlib.import_module('gitcurator.gui.main_window')
+        mw_dir = os.path.dirname(inspect.getsourcefile(mw))
+        for name in sorted(os.listdir(mw_dir)):
+            if name.endswith('.py'):
+                with open(os.path.join(mw_dir, name), encoding='utf-8') as f:
+                    parts.append(f.read())
+        return "\n".join(parts)
+
     def test_gui_uses_the_constant(self):
-        src = self._source('gitcurator.gui.app')
+        src = self._gui_sources()
         # the radio button AND the settings group box
         self.assertGreaterEqual(
             src.count('_llm_client.CLOUD_PROVIDER_LABEL'), 2)

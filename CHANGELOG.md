@@ -1,3 +1,45 @@
+## [0.24.0] — The app.py split: 13,815 lines become 28 focused modules, zero behavior change — 2026-09-30
+
+A pure structural refactor of `gitcurator/gui/app.py` (branch
+`refactor/gui-app-split`, baseline tag `baseline-before-split`). Nothing
+was rewritten: every function and method was moved **verbatim**, and each
+of the 29 commits passed the full gate — 67-module compile, fresh-process
+import of every module, the 722-attribute import-surface check, an
+AST-fingerprint check proving every baseline function appears exactly
+once unedited, the 796-case suite (772 project tests + 24 new
+characterization tests, `tests/test_refactor_surface.py`), the offline
+golden run, and an offscreen smoke of the real composed MainWindow.
+
+### The new layout
+
+- `gui/app.py` (~470 ln) — the facade: the original import header (PyQt
+  star imports and all — the module's 722 public attributes are unchanged),
+  re-exports of every moved name, `setup_logging`, `main()`.
+- Leaves: `link_helpers` · `dead_links` · `telegram_lazy` ·
+  `platform_intake`.
+- Data layer: `vault_index` · `cache_db` · `link_tracker` · `log_bridge`.
+- Workers/UI: `worker_jobs` · `processing_worker` (the 3,386-ln
+  QThread worker) · `dialogs` · `headless`.
+- `gui/main_window/`: `window.py` (the composed `MainWindow` — bases list
+  the 15 mixins before `QMainWindow` so Qt virtual overrides stay
+  effective) plus domain mixins: `theme` · `ui` · `hero` ·
+  `connection_tests` · `llamacpp` · `phase6` · `test_connection_modal` ·
+  `vaults_config` · `input_proxy` · `telegram_ui` · `processing_control`
+  · `dashboard` · `bot_queue` · `backup_seal` · `lifecycle`.
+
+### The only deliberate test changes
+
+Five tests monkeypatched `gitcurator.gui.app.<name>` or scanned app.py
+source; the split re-aims them at the modules that now own the code
+(same expectations, new target): `test_intakefix`
+(`_run_telegram_worker`, `CONFIG_FILE`), `test_phase1`/`test_phase2`
+(`Github` — without the re-aim the worker silently hit the real GitHub
+API), `test_llamacpp` (the `threading` recorder + label scans),
+`test_phase4`/`test_phase5` (source scans now read the concatenated GUI
+sources), `test_v0230` (`CONFIG_FILE`). Full record:
+`REFACTOR_PLAN.md`, `REFACTOR_PROGRESS.md`, `REFACTOR_NOTICED_ISSUES.md`
+(repo root).
+
 ## [0.23.0] — The five-request desktop overhaul: the Test Connection modal, the two-radio LLM tab with Claude, the split context budget, the wizard light-mode fix, Import txt file — 2026-09-30
 
 The owner's five requests, verbatim scope: (1) remove the Detect & Set

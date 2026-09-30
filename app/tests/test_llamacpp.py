@@ -758,8 +758,28 @@ class TestLabel(unittest.TestCase):
         with open(inspect.getsourcefile(mod), encoding='utf-8') as f:
             return f.read()
 
+    def _gui_sources(self):
+        """app.py + dialogs.py + every main_window module, concatenated.
+
+        refactor/gui-app-split moved the GUI source out of the single
+        app.py; the same expectations now scan the code's new home(s)."""
+        import importlib
+        import inspect
+        parts = []
+        for name in ('gitcurator.gui.app', 'gitcurator.gui.dialogs'):
+            mod = importlib.import_module(name)
+            with open(inspect.getsourcefile(mod), encoding='utf-8') as f:
+                parts.append(f.read())
+        mw = importlib.import_module('gitcurator.gui.main_window')
+        mw_dir = os.path.dirname(inspect.getsourcefile(mw))
+        for name in sorted(os.listdir(mw_dir)):
+            if name.endswith('.py'):
+                with open(os.path.join(mw_dir, name), encoding='utf-8') as f:
+                    parts.append(f.read())
+        return "\n".join(parts)
+
     def test_gui_uses_the_constant(self):
-        src = self._source('gitcurator.gui.app')
+        src = self._gui_sources()
         # v0.23.0 — the two-level radios: the llama.cpp ENGINE radio is the
         # short plain label ("🦙 llama.cpp") and the provider constant names
         # the settings group box.
@@ -1254,8 +1274,12 @@ class TestStartupWiring(unittest.TestCase):
             # NOTE: no `config` — any detection attempt would need it
 
         import types
-        orig = gui_app.threading
-        gui_app.threading = types.SimpleNamespace(Thread=_RecThread)
+        # refactor/gui-app-split: _startup_llamacpp_autodetect now lives in
+        # gitcurator.gui.main_window.llamacpp, so the Thread recorder must
+        # be swapped in on the owning module to actually intercept spawns.
+        import gitcurator.gui.main_window.llamacpp as gui_llamacpp
+        orig = gui_llamacpp.threading
+        gui_llamacpp.threading = types.SimpleNamespace(Thread=_RecThread)
         try:
             gui_app.MainWindow._startup_llamacpp_autodetect(_Done())
             done = _Done()
@@ -1263,7 +1287,7 @@ class TestStartupWiring(unittest.TestCase):
             done._closing = True   # closing guard: also no thread
             gui_app.MainWindow._startup_llamacpp_autodetect(done)
         finally:
-            gui_app.threading = orig
+            gui_llamacpp.threading = orig
         self.assertEqual(started, [])
 
 
