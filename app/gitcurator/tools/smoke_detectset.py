@@ -86,13 +86,23 @@ def main():
     saved = {"n": 0}
     win.save_config = lambda: saved.__setitem__("n", saved["n"] + 1)
 
-    # the buttons exist on the main screen
-    assert win.detect_set_ollama_btn.text() == "🧠 Detect & Set Ollama", \
-        win.detect_set_ollama_btn.text()
-    assert win.detect_set_llamacpp_btn.text() == "🦙 Detect & Set llama.cpp"
-    print("OK buttons on main screen:",
-          win.detect_set_ollama_btn.text(), "+",
-          win.detect_set_llamacpp_btn.text())
+    # v0.23.0 — the buttons are GONE from the main screen (owner request:
+    # "the settings is enough"). They live on the Settings → 🧠 LLM page
+    # (the Quick switch row inside the local host group); the handlers and
+    # the whole detect→menu→set→save flow are unchanged.
+    assert not hasattr(win, "detect_set_ollama_btn"), \
+        "main-view Detect & Set Ollama button must be gone"
+    assert not hasattr(win, "detect_set_llamacpp_btn"), \
+        "main-view Detect & Set llama.cpp button must be gone"
+    assert win.llm_host_local.text() == "🖥️ Locally hosted LLM model"
+    assert win.llm_host_cloud.text() == "☁️ Cloud API model"
+    # the smoke config saves llm_provider=cloud → the CLOUD group shows and
+    # the local host group (with the Quick switch row) starts hidden; the
+    # first Detect & Set flips the host radio to local.
+    assert win.llm_host_cloud.isChecked()
+    assert win.local_llm_group.isHidden()
+    print("OK main view cleaned: the Detect & Set buttons live only in "
+          "Settings → 🧠 LLM (local host group)")
 
     # point the LIVE widgets at the fakes (the snapshot must honor them)
     win.ollama_url.setText(ollama_url)
@@ -129,6 +139,9 @@ def main():
     assert win.config["ollama"]["model"] == "llama3.1:8b"
     assert win.ollama_model.currentText() == "llama3.1:8b"
     assert win.llm_provider_ollama.isChecked()
+    # v0.23.0 — a Detect & Set always lands on the LOCAL host radio too
+    assert win.llm_host_local.isChecked()
+    assert not win.local_llm_group.isHidden()
     assert len(dialogs) == 1 and dialogs[0][0] == "ollama"
     assert dialogs[0][2] == ["llama3.1:8b", "qwen2.5:7b"]
     assert saved["n"] == 1

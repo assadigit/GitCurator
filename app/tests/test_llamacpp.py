@@ -552,7 +552,7 @@ class TestWorkerRouter(unittest.TestCase):
 
         def recorder(api_url, api_key, model, messages,
                      json_mode=False, timeout_s=300, num_ctx=None,
-                     on_warn=None):
+                     max_output_tokens=None, on_warn=None):
             seen.append((api_url, model, json_mode))
             return _LLMACPP_CHAT
 
@@ -760,9 +760,12 @@ class TestLabel(unittest.TestCase):
 
     def test_gui_uses_the_constant(self):
         src = self._source('gitcurator.gui.app')
-        # the radio button AND the settings group box
+        # v0.23.0 — the two-level radios: the llama.cpp ENGINE radio is the
+        # short plain label ("🦙 llama.cpp") and the provider constant names
+        # the settings group box.
         self.assertGreaterEqual(
-            src.count('_llm_client.LLAMACPP_PROVIDER_LABEL'), 2)
+            src.count('_llm_client.LLAMACPP_PROVIDER_LABEL'), 1)
+        self.assertIn('QRadioButton("🦙 llama.cpp")', src)
         # the three provider values persist through save_config
         self.assertIn('"llamacpp"', src)
 

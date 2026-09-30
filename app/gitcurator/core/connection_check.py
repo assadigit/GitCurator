@@ -281,15 +281,19 @@ def check_cloud(config: dict) -> Dict[str, str]:
     if not url:
         return _result("Cloud API", LEVEL_ERROR,
                        "no API URL configured — Settings ▸ LLM")
+    # v0.23.0 — preflight_cloud routes by URL: api.anthropic.com → the
+    # Claude /v1/models preflight, everything else → OpenAI-compatible.
+    flavor = ("Claude" if _llm.is_anthropic_url(url)
+              else "OpenAI-compatible")
     try:
-        endpoint_ok, message, model_listed = _llm.preflight_openai(
+        endpoint_ok, message, model_listed = _llm.preflight_cloud(
             url, key, model, 15)
     except Exception as exc:  # preflight is never-a-gate; belt & braces
         return _result("Cloud API", LEVEL_ERROR,
                        f"{url} — check failed ({type(exc).__name__}: {exc})")
     if not endpoint_ok:
-        return _result("Cloud API", LEVEL_ERROR, f"{url} — {message}")
-    detail = f"{url} — {message}"
+        return _result("Cloud API", LEVEL_ERROR, f"{url} ({flavor}) — {message}")
+    detail = f"{url} ({flavor}) — {message}"
     if model_listed is True:
         return _result("Cloud API", LEVEL_OK, detail + f" · '{model}' listed")
     if model_listed is False:

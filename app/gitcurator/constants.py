@@ -148,12 +148,18 @@ CONFIG_EXAMPLE = {
     # v26 — Fix 4: Cloud LLM API support (OpenAI-compatible).
     # ``llm_provider`` selects the backend used by ProcessingWorker._llm_analyze.
     # 'ollama' (default) keeps the existing local-Ollama flow.
-    # 'cloud' switches to an OpenAI-compatible HTTP API (any provider that
-    # exposes /v1/chat/completions — OpenAI, Together, OpenRouter, etc.).
+    # 'cloud' switches to a cloud HTTP API — v0.23.0: the URL decides the
+    # wire format (api.anthropic.com → the Claude Messages API; anything
+    # else → OpenAI-compatible /v1/chat/completions).
     "llm_provider": "ollama",
     "cloud_api_url": "https://api.openai.com/v1",
     "cloud_api_key": "",
     "cloud_model": "gpt-4o-mini",
+    # v0.23.0 — the OUTPUT half of the context budget (e.g. 32k output on
+    # a 160k-total model). 0 = leave the cap to the server. Ollama sends
+    # options.num_predict; OpenAI-compatible sends max_tokens; Claude
+    # REQUIRES max_tokens (llm_client falls back to 4096 when unset).
+    "llm_max_output_tokens": 0,
     # v0.15.0 — llama.cpp engine detection: llama-server as its OWN
     # provider value ('llamacpp'), detected like Ollama instead of
     # hand-configured like the cloud endpoint. llamacpp_api_url is the
