@@ -54,7 +54,7 @@ export async function handleWebhook(request, env) {
 
   if (urls.length === 0) {
     await sendMessage(env, chatId,
-      "📋 Send me a GitHub link to track it!\n\n" +
+      "📋 Send me a link — a GitHub repo or any website — and I'll track it!\n\n" +
       "Commands: /help"
     );
     return new Response('OK', { status: 200 });

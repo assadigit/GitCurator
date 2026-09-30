@@ -6,7 +6,9 @@
 // 7-day retry buffer = no link left behind.
 
 import {
-  normalizeUrl, isGitHubUrl, parseGitHubUrl, formatStars,
+  normalizeUrl, normalizeUrlTyped, isGitHubUrl, parseGitHubUrl, formatStars,
+  domainMatches, domainsFromEnv, scrubUrlToken,
+  DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS,
   truncate, now, uuid
 } from './utils.js';
 import { sendMessage, inlineKeyboard } from './telegram.js';
@@ -49,11 +51,22 @@ export async function handleQueue(batch, env) {
 async function processUrlsMessage(data, env) {
   const { urls, chat_id, user_id, message_id, received_at } = data;
 
-  // Deduplicate URLs within the same message
-  const uniqueUrls = [...new Set(urls.map(u => normalizeUrl(u)))];
+  // v0.22.0 — the bot accepts EVERY link, not just GitHub. The desktop's
+  // Websites pipeline (v0.11.0+) fetches non-GitHub links into the Websites
+  // vault; the bot's job is to confirm receipt and track them in the ledger
+  // (SPEC §4.2: "Telegram only confirms receipt"). Policy lists mirror the
+  // desktop (blocked = never fetched; self = the bot's own hosts, never
+  // stored because the query can carry a live token).
+  const blockedDomains = domainsFromEnv(env.BLOCKED_DOMAINS, DEFAULT_BLOCKED_DOMAINS);
+  const selfDomains = domainsFromEnv(env.SELF_DOMAINS, DEFAULT_SELF_DOMAINS);
+
+  // Deduplicate URLs within the same message. Identity is website-aware
+  // (v0.22.0): GitHub URLs keep the frozen normalizeUrl semantics, every
+  // other URL keeps meaningful query params (a YouTube ?v= IS the page).
+  const uniqueUrls = [...new Set(urls.map(u => normalizeUrlTyped(u)))];
   const originalUrlsMap = {};
   for (const rawUrl of urls) {
-    const normalized = normalizeUrl(rawUrl);
+    const normalized = normalizeUrlTyped(rawUrl);
     if (!originalUrlsMap[normalized]) {
       originalUrlsMap[normalized] = rawUrl.replace(/[.,);]+$/, '');
     }
@@ -65,40 +78,52 @@ async function processUrlsMessage(data, env) {
     inVault: [],
     decommissioned: [],
     deadLetter: [],
-    nonGithub: []
+    blocked: [],
+    self: []
   };
 
   // Process each URL
   for (const urlNorm of uniqueUrls) {
     const urlOriginal = originalUrlsMap[urlNorm];
-    const github = isGitHubUrl(urlNorm);
+    const github = isGitHubUrl(normalizeUrl(urlOriginal));
     const githubInfo = github ? parseGitHubUrl(urlNorm) : null;
+    const urlType = github ? 'github' : 'non_github';
 
-    // Check decommissioned
-    const isDecommissioned = await decommissionIsDecommissioned(env.DB, urlNorm);
-    if (isDecommissioned) {
-      results.decommissioned.push({ url: urlNorm, original: urlOriginal });
+    // Self domains (the bot's own worker) — never stored, never fetched.
+    // The URL shown back is query-stripped so a live token never echoes.
+    if (domainMatches(urlOriginal, selfDomains)) {
+      results.self.push({ url: normalizeUrl(urlOriginal), original: urlOriginal });
       continue;
     }
 
-    // Check dead letters
-    const isDead = await deadLetterIsDead(env.DB, urlNorm);
-    if (isDead) {
-      results.deadLetter.push({ url: urlNorm, original: urlOriginal });
-      continue;
-    }
-
-    // Non-GitHub URLs go to dead letters
-    if (!github) {
+    // Blocked domains (x-family policy) — recorded as dead letters with
+    // their own reason; they are never fetched by the desktop either.
+    if (!github && domainMatches(urlOriginal, blockedDomains)) {
       await deadLetterInsert(env.DB, {
         url_normalized: urlNorm,
-        url_original: urlOriginal,
-        reason: 'not_github',
+        url_original: scrubUrlToken(urlOriginal),
+        reason: 'blocked_domain',
         first_attempted_at: received_at,
         last_attempted_at: now(),
         telegram_message_id: message_id
       });
-      results.nonGithub.push({ url: urlNorm, original: urlOriginal });
+      results.blocked.push({ url: urlNorm, original: urlOriginal });
+      continue;
+    }
+
+    // Check decommissioned
+    const isDecommissioned = await decommissionIsDecommissioned(env.DB, urlNorm);
+    if (isDecommissioned) {
+      results.decommissioned.push({ url: urlNorm, original: urlOriginal, isWebsite: !github });
+      continue;
+    }
+
+    // Check dead letters (invalid format / persistent fetch failures /
+    // blocked domains — the v0.01 'not_github' tail was migrated to the
+    // ledger by migrate-not-github.sql at the v0.22.0 deploy)
+    const isDead = await deadLetterIsDead(env.DB, urlNorm);
+    if (isDead) {
+      results.deadLetter.push({ url: urlNorm, original: urlOriginal, isWebsite: !github });
       continue;
     }
 
@@ -108,6 +133,7 @@ async function processUrlsMessage(data, env) {
       results.inVault.push({
         url: urlNorm,
         original: urlOriginal,
+        isWebsite: !github,
         path: mirrorEntry.vault_path,
         category: mirrorEntry.category,
         title: mirrorEntry.title
@@ -121,18 +147,19 @@ async function processUrlsMessage(data, env) {
       // Already seen — update forward count
       await ledgerUpdateForward(env.DB, urlNorm, message_id);
       if (mirrorEntry && mirrorEntry.status === 'pending') {
-        results.pending.push({ url: urlNorm, original: urlOriginal });
+        results.pending.push({ url: urlNorm, original: urlOriginal, isWebsite: !github });
       } else if (!mirrorEntry) {
-        results.pending.push({ url: urlNorm, original: urlOriginal });
+        results.pending.push({ url: urlNorm, original: urlOriginal, isWebsite: !github });
       }
       continue;
     }
 
-    // New URL — insert into ledger
+    // New URL — insert into ledger (GitHub repo OR website). Secret
+    // query values are scrubbed from the stored original (v0.21.0 parity).
     await ledgerInsert(env.DB, {
       url_normalized: urlNorm,
-      url_original: urlOriginal,
-      url_type: 'github',
+      url_original: scrubUrlToken(urlOriginal),
+      url_type: urlType,
       github_owner: githubInfo?.owner || null,
       github_repo: githubInfo?.repo || null,
       first_seen_at: received_at,
@@ -148,25 +175,28 @@ async function processUrlsMessage(data, env) {
     await cacheSetDedup(env.CACHE, urlNorm, { status: 'pending' });
 
     // Log activity
-    await activityLog(env.DB, 'received', urlNorm, `Received: ${githubInfo.owner}/${githubInfo.repo}`);
+    if (github) {
+      await activityLog(env.DB, 'received', urlNorm, `Received: ${githubInfo.owner}/${githubInfo.repo}`);
+    } else {
+      await activityLog(env.DB, 'received', urlNorm, `Received website: ${urlNorm}`);
+    }
 
     results.new.push({
       url: urlNorm,
       original: urlOriginal,
-      owner: githubInfo.owner,
-      repo: githubInfo.repo,
+      isWebsite: !github,
+      owner: githubInfo?.owner || null,
+      repo: githubInfo?.repo || null,
       ledgerId: newLedgerEntry?.id || null
     });
-
-    // Enqueue GitHub enrichment (Layer 3 — will add metadata fetch)
-    // For now, we just send the basic reply
   }
 
   // Send reply
   await sendReply(env, chat_id, results, message_id);
 
-  // Enrich new URLs with GitHub metadata (Layer 3)
-  for (const item of results.new) {
+  // Enrich new GITHUB URLs with metadata (Layer 3) — websites are
+  // classified by the desktop's Websites pipeline, not here.
+  for (const item of results.new.filter(i => !i.isWebsite)) {
     try {
       await env.INGEST_QUEUE.send(JSON.stringify({
         type: 'enrich',
@@ -189,12 +219,32 @@ async function processUrlsMessage(data, env) {
 async function sendReply(env, chatId, results, originalMessageId) {
   const total = results.new.length + results.pending.length +
                 results.inVault.length + results.decommissioned.length +
-                results.deadLetter.length + results.nonGithub.length;
+                results.deadLetter.length + results.blocked.length +
+                results.self.length;
 
   // Single URL — detailed reply
   if (total === 1) {
     if (results.new.length === 1) {
       const item = results.new[0];
+      if (item.isWebsite) {
+        // v0.22.0 — websites are received and tracked too
+        const callbackData = item.ledgerId
+          ? `decomm:${item.ledgerId}`
+          : `decomm:${item.url}`.substring(0, 64);
+        const reply = await sendMessage(env, chatId,
+          `🌐 <b>Received — website</b>: ${item.url}\n` +
+          `Status: <b>Pending processing</b> (Websites vault)`,
+          {
+            reply_markup: inlineKeyboard([[
+              { text: '🗑️ Mark Decommission', callback_data: callbackData }
+            ]])
+          }
+        );
+        if (reply) {
+          await ledgerUpdateBotReply(env.DB, item.url, reply.message_id);
+        }
+        return;
+      }
       const replyText =
         `📋 <b>Received</b>: ${item.owner}/${item.repo}\n` +
         `🔗 ${item.url}\n` +
@@ -217,10 +267,17 @@ async function sendReply(env, chatId, results, originalMessageId) {
       }
     } else if (results.pending.length === 1) {
       const item = results.pending[0];
-      await sendMessage(env, chatId,
-        `⏳ <b>Already pending</b>: ${item.url}\n` +
-        `(Already forwarded — waiting for desktop to process)`
-      );
+      if (item.isWebsite) {
+        await sendMessage(env, chatId,
+          `⏳ <b>Already pending</b> (website): ${item.url}\n` +
+          `(Already forwarded — waiting for desktop to process)`
+        );
+      } else {
+        await sendMessage(env, chatId,
+          `⏳ <b>Already pending</b>: ${item.url}\n` +
+          `(Already forwarded — waiting for desktop to process)`
+        );
+      }
     } else if (results.inVault.length === 1) {
       const item = results.inVault[0];
       await sendMessage(env, chatId,
@@ -235,11 +292,23 @@ async function sendReply(env, chatId, results, originalMessageId) {
         `🗑️ <b>Already decommissioned</b>: ${item.url}\n` +
         `(This repo is marked as dead — 404 or manually removed)`
       );
-    } else if (results.nonGithub.length === 1) {
-      const item = results.nonGithub[0];
+    } else if (results.blocked.length === 1) {
+      const item = results.blocked[0];
       await sendMessage(env, chatId,
-        `⚠️ <b>Non-GitHub URL — skipped</b>: ${item.url}\n` +
-        `(Only GitHub links are tracked)`
+        `🚫 <b>Blocked domain — never fetched</b>: ${item.url}\n` +
+        `(x.com / twitter.com / t.co links are recorded but not processed, by policy)`
+      );
+    } else if (results.self.length === 1) {
+      const item = results.self[0];
+      await sendMessage(env, chatId,
+        `🤖 <b>Own link — ignored</b>: ${item.url}\n` +
+        `(The bot's own links are never processed)`
+      );
+    } else if (results.deadLetter.length === 1) {
+      const item = results.deadLetter[0];
+      await sendMessage(env, chatId,
+        `💀 <b>Dead letter</b>: ${item.url}\n` +
+        `(Previously marked unprocessable — see /notfound)`
       );
     }
     return;
@@ -248,14 +317,28 @@ async function sendReply(env, chatId, results, originalMessageId) {
   // Multiple URLs — summary reply
   const parts = [`📋 <b>Received ${total} links:</b>\n`];
 
-  if (results.new.length > 0) {
-    parts.push(`\n✅ <b>New (pending): ${results.new.length}</b>`);
-    const shown = results.new.slice(0, 5);
+  const newGithub = results.new.filter(i => !i.isWebsite);
+  const newWebsites = results.new.filter(i => i.isWebsite);
+
+  if (newGithub.length > 0) {
+    parts.push(`\n✅ <b>New repos (pending): ${newGithub.length}</b>`);
+    const shown = newGithub.slice(0, 5);
     for (const item of shown) {
       parts.push(`  • ${item.owner}/${item.repo}`);
     }
-    if (results.new.length > 5) {
-      parts.push(`  ... and ${results.new.length - 5} more`);
+    if (newGithub.length > 5) {
+      parts.push(`  ... and ${newGithub.length - 5} more`);
+    }
+  }
+
+  if (newWebsites.length > 0) {
+    parts.push(`\n🌐 <b>New websites (pending): ${newWebsites.length}</b>`);
+    const shown = newWebsites.slice(0, 5);
+    for (const item of shown) {
+      parts.push(`  • ${truncate(item.url, 60)}`);
+    }
+    if (newWebsites.length > 5) {
+      parts.push(`  ... and ${newWebsites.length - 5} more`);
     }
   }
 
@@ -263,7 +346,7 @@ async function sendReply(env, chatId, results, originalMessageId) {
     parts.push(`\n📚 <b>Already in vault:</b> ${results.inVault.length}`);
     const shown = results.inVault.slice(0, 3);
     for (const item of shown) {
-      parts.push(`  • ${item.url} → ${item.path}`);
+      parts.push(`  • ${truncate(item.url, 50)} → ${item.path}`);
     }
     if (results.inVault.length > 3) {
       parts.push(`  ... and ${results.inVault.length - 3} more`);
@@ -274,12 +357,25 @@ async function sendReply(env, chatId, results, originalMessageId) {
     parts.push(`\n🗑️ <b>Already decommissioned:</b> ${results.decommissioned.length}`);
   }
 
-  if (results.nonGithub.length > 0) {
-    parts.push(`\n⚠️ <b>Non-GitHub:</b> ${results.nonGithub.length}`);
+  if (results.blocked.length > 0) {
+    parts.push(`\n🚫 <b>Blocked domains (never fetched):</b> ${results.blocked.length}`);
   }
 
-  if (results.pending.length > 0) {
-    parts.push(`\n⏳ <b>Already pending:</b> ${results.pending.length}`);
+  if (results.self.length > 0) {
+    parts.push(`\n🤖 <b>Own links (ignored):</b> ${results.self.length}`);
+  }
+
+  if (results.deadLetter.length > 0) {
+    parts.push(`\n💀 <b>Dead letters:</b> ${results.deadLetter.length}`);
+  }
+
+  const pendingGithub = results.pending.filter(i => !i.isWebsite);
+  const pendingWebsites = results.pending.filter(i => i.isWebsite);
+  if (pendingGithub.length > 0) {
+    parts.push(`\n⏳ <b>Already pending:</b> ${pendingGithub.length}`);
+  }
+  if (pendingWebsites.length > 0) {
+    parts.push(`\n⏳ <b>Already pending (websites):</b> ${pendingWebsites.length}`);
   }
 
   if (results.new.length > 0) {

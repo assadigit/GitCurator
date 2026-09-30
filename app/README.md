@@ -515,6 +515,7 @@ node deploy-dashboard.js
 
 ### Cloudflare stack — decision & status
 The desktop-side Cloudflare sync is currently **dormant** (`main.py` keeps `cf_manager = None`), but the stack is **fixed, not deleted**:
+- **v0.22.0 — the bot accepts every link (LIVE, deployed 2026-09-30):** non-GitHub links are no longer dead-lettered "not_github" — they are ledger'd as `non_github` and get a "🌐 Received — website" reply (the desktop Websites pipeline processes them into the Websites vault). The x-family policy (x.com/twitter.com/t.co, env `BLOCKED_DOMAINS`) gets its own `blocked_domain` dead-letter reason + 🚫 replies; the bot's own links (env `SELF_DOMAINS`) are never stored; secret query values are scrubbed from stored originals; `/pending`, `/status`, `/api/pending` and the dashboard serve websites too; `migrate-not-github.sql` amnestied the 43 wrongly-rejected links. Redeploy after changes: `bash deploy-latest.sh` (schema is non-GitHub-capable — no migration needed beyond the one-time amnesty).
 - **HMAC key mismatch FIXED** (`cloudflare_sync.py::_sign_request`): the Worker stores `sha256(shared_secret)` as the HMAC key; the desktop used to sign with the raw secret → every sync endpoint 401'd. The desktop now derives the same key.
 - **Webhook impersonation FIXED** (`cloudflare-bot/src/index.js`): set `WEBHOOK_SECRET` (see `cloudflare-bot/wrangler.toml` for the 2-command setup) and forged Telegram updates are rejected with 403.
 - **`save_config` key-wipe FIXED**: pairing keys survive saves now.
@@ -524,7 +525,7 @@ The desktop-side Cloudflare sync is currently **dormant** (`main.py` keeps `cf_m
 Secrets were previously committed to this folder (bot tokens, api id/hash, Cloudflare account info, session files). Rotate every credential before exposing anything publicly, and never commit this folder to a public repo.
 
 ### Key Features
-- Forward GitHub links to bot → auto-reply with stars + description
+- Forward links to the bot — GitHub repos → the GitHub vault, any other website → the Websites vault — auto-reply with status (stars + description for repos)
 - Desktop app processes links → writes Obsidian notes
 - Local folder backup (works with OneDrive/Dropbox/Google Drive sync)
 - Web dashboard with stats, pending links, decommissioned repos, errors

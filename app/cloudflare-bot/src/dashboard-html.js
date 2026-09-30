@@ -674,10 +674,15 @@ async function loadPending() {
   let html = '<div class="page-header"><h1>Pending Links</h1><p>'+p.length+' link(s) waiting for processing</p></div>';
   if (p.length === 0) { html += '<div class="card"><div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><p>No pending links</p></div></div>'; }
   else {
-    html += '<div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr><th>Repository</th><th>Stars</th><th>Description</th><th>Forwarded</th><th></th></tr></thead><tbody>';
+    html += '<div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr><th>Link</th><th>Stars</th><th>Description</th><th>Forwarded</th><th></th></tr></thead><tbody>';
     p.forEach(l => {
       const m = l.github_metadata;
-      html += '<tr><td><a href="https://github.com/'+l.github_owner+'/'+l.github_repo+'" target="_blank" class="link">'+l.github_owner+'/'+l.github_repo+'</a></td>';
+      // v0.22.0 — website links (url_type='non_github') have no owner/repo
+      const isWebsite = l.url_type === 'non_github' || !l.github_owner;
+      const linkCell = isWebsite
+        ? '<a href="'+esc(l.url_normalized)+'" target="_blank" class="link">🌐 '+esc(trunc(l.url_normalized,60))+'</a>'
+        : '<a href="https://github.com/'+l.github_owner+'/'+l.github_repo+'" target="_blank" class="link">'+l.github_owner+'/'+l.github_repo+'</a>';
+      html += '<tr><td>'+linkCell+'</td>';
       html += '<td>'+(m&&m.stars?'⭐ '+fmtStars(m.stars):'—')+'</td>';
       html += '<td style="color:var(--muted);max-width:300px">'+esc(trunc(m&&m.description?m.description:'',70))+'</td>';
       html += '<td style="color:var(--muted);font-size:12px">'+fmtAgo(l.first_seen_at)+'</td>';

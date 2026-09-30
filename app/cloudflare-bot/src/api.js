@@ -193,12 +193,13 @@ async function handleGetPending(request, env) {
   await stateSet(env.DB, 'desktop_last_poll', now());
 
   // Get pending links from ledger that don't have a vault_mirror entry
-  // or have status=pending in vault_mirror
+  // or have status=pending in vault_mirror.
+  // v0.22.0 — includes websites (url_type='non_github'); the desktop's
+  // Websites pipeline processes those into the Websites vault.
   const result = await env.DB.prepare(`
     SELECT l.* FROM ever_seen_ledger l
     LEFT JOIN vault_mirror v ON l.url_normalized = v.url_normalized
     WHERE l.forgotten = 0
-      AND l.url_type = 'github'
       AND (v.status IS NULL OR v.status = 'pending')
       AND l.url_normalized NOT IN (SELECT url_normalized FROM decommission_events)
       AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0)
@@ -209,6 +210,7 @@ async function handleGetPending(request, env) {
   const pending = result.results.map(row => ({
     url_normalized: row.url_normalized,
     url_original: row.url_original,
+    url_type: row.url_type,
     github_owner: row.github_owner,
     github_repo: row.github_repo,
     github_metadata: row.github_stars ? {
