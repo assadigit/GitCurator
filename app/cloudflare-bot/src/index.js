@@ -57,7 +57,7 @@ export default {
       return jsonResponse({
         status: 'ok',
         service: 'github-curator-bot',
-        version: '1.0.0',
+        version: '0.22.0',
         last_webhook_at: lastWebhook,
         cutover_complete: cutoverComplete === '1',
         timestamp: new Date().toISOString()

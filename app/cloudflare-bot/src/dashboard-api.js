@@ -296,7 +296,6 @@ async function handleDashboardPending(env, url) {
     SELECT l.* FROM ever_seen_ledger l
     LEFT JOIN vault_mirror v ON l.url_normalized = v.url_normalized
     WHERE l.forgotten = 0
-      AND l.url_type = 'github'
       AND (v.status IS NULL OR v.status = 'pending')
       AND l.url_normalized NOT IN (SELECT url_normalized FROM decommission_events)
       AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0)
@@ -307,6 +306,7 @@ async function handleDashboardPending(env, url) {
   const pending = (result.results || []).map(row => ({
     url_normalized: row.url_normalized,
     url_original: row.url_original,
+    url_type: row.url_type,
     github_owner: row.github_owner,
     github_repo: row.github_repo,
     github_metadata: row.github_stars ? {

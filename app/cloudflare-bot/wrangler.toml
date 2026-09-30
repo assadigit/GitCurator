@@ -60,3 +60,10 @@ binding = "DLQ"
 #   curl "https://api.telegram.org/bot$BOT_TOKEN/setWebhook?url=https://<worker>/webhook&secret_token=$WEBHOOK_SECRET"
 # index.js then rejects any POST /webhook without a matching
 # X-Telegram-Bot-Api-Secret-Token header (stops forged updates).
+#
+# v0.22.0 — OPTIONAL plain-text vars (not secrets; defaults match the
+# desktop app, Settings → 📁 Vault):
+#   [vars]
+#   BLOCKED_DOMAINS = "x.com,twitter.com,t.co"                        # never fetched, by policy
+#   SELF_DOMAINS    = "github-to-obsidian-bot.aliassadi-plus.workers.dev"  # the bot's own hosts — never stored
+# Omit them entirely to keep the defaults; set to "" to opt out.

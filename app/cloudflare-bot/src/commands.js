@@ -4,7 +4,7 @@
 // All Telegram bot commands with rich formatting.
 
 import {
-  normalizeUrl, isGitHubUrl, parseGitHubUrl, formatStars,
+  normalizeUrl, normalizeWebsiteUrl, isGitHubUrl, parseGitHubUrl, formatStars,
   truncate, now, toIranTime, timeAgo, uuid
 } from './utils.js';
 import { sendMessage, editMessage, inlineKeyboard, isUserAllowed } from './telegram.js';
@@ -110,11 +110,13 @@ export async function handleCommand(text, chatId, userId, message, env) {
 
 async function cmdStart(env, chatId) {
   await sendMessage(env, chatId,
-    "🤖 <b>GitHub Project Curator Bot</b>\n\n" +
-    "Forward me GitHub links and I'll track them for processing!\n\n" +
-    "The desktop app will pick them up automatically and create Obsidian notes.\n\n" +
+    "🤖 <b>Link Curator Bot</b>\n\n" +
+    "Forward me links — GitHub repositories or any website — and I'll track them for processing!\n\n" +
+    "The desktop app picks them up automatically and creates Obsidian notes:\n" +
+    "  • GitHub repos → the GitHub Projects vault\n" +
+    "  • Any other website → the Websites vault\n\n" +
     "<b>Quick Start:</b>\n" +
-    "  1. Forward a GitHub link to me\n" +
+    "  1. Forward a link to me\n" +
     "  2. I'll reply with status (pending/in-vault/decommissioned)\n" +
     "  3. Desktop app processes it and writes an Obsidian note\n" +
     "  4. My reply updates to show the vault path\n\n" +
@@ -155,7 +157,7 @@ async function cmdHelp(env, chatId) {
     "  /dashboard — Get dashboard login link\n" +
     "  /logout — Revoke dashboard sessions\n\n" +
 
-    "<b>💡 Just forward GitHub links to me — I'll handle the rest!</b>"
+    "<b>💡 Just forward links to me — GitHub repos or any website — I'll handle the rest!</b>"
   );
 }
 
@@ -197,11 +199,11 @@ async function cmdStats(env, chatId) {
 
 async function cmdPending(env, chatId) {
   // Get pending links (in ledger but not in vault_mirror with in_vault status)
+  // v0.22.0 — includes websites (url_type='non_github')
   const result = await env.DB.prepare(`
     SELECT l.* FROM ever_seen_ledger l
     LEFT JOIN vault_mirror v ON l.url_normalized = v.url_normalized
     WHERE l.forgotten = 0
-      AND l.url_type = 'github'
       AND (v.status IS NULL OR v.status = 'pending')
       AND l.url_normalized NOT IN (SELECT url_normalized FROM decommission_events)
       AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0)
@@ -221,6 +223,12 @@ async function cmdPending(env, chatId) {
 
   for (let i = 0; i < result.results.length; i++) {
     const row = result.results[i];
+    if (row.url_type === 'non_github' || !row.github_owner) {
+      // Website link (v0.22.0)
+      lines.push(`${i + 1}. 🌐 <b>${truncate(row.url_normalized, 60)}</b>`);
+      lines.push(`   📅 ${timeAgo(row.first_seen_at)}`);
+      continue;
+    }
     const starsStr = row.github_stars ? `⭐ ${formatStars(row.github_stars)}` : '';
     const desc = row.github_description ? ` — ${truncate(row.github_description, 60)}` : '';
     lines.push(`${i + 1}. <b>${row.github_owner}/${row.github_repo}</b>`);
@@ -239,22 +247,21 @@ async function cmdPending(env, chatId) {
 
 async function cmdStatus(env, chatId, args) {
   if (!args) {
-    await sendMessage(env, chatId, "Usage: <code>/status &lt;url&gt;</code>\n\nExample: <code>/status github.com/vercel/next.js</code>");
+    await sendMessage(env, chatId, "Usage: <code>/status &lt;url&gt;</code>\n\nExample: <code>/status github.com/vercel/next.js</code> or <code>/status reverseui.com</code>");
     return;
   }
 
-  const urlNorm = normalizeUrl(args.startsWith('http') ? args : `https://${args}`);
-  const github = parseGitHubUrl(urlNorm);
-
-  if (!github) {
-    await sendMessage(env, chatId, `❌ Not a valid GitHub URL: <code>${args}</code>`);
-    return;
-  }
+  const raw = args.startsWith('http') ? args : `https://${args}`;
+  const github = parseGitHubUrl(normalizeUrl(raw));
+  // v0.22.0 — website URLs are tracked too; identity is website-aware
+  // (query params that matter, e.g. YouTube ?v=, are kept)
+  const urlNorm = github ? normalizeUrl(raw) : normalizeWebsiteUrl(raw);
+  const displayName = github ? `${github.owner}/${github.repo}` : urlNorm;
 
   const ledger = await ledgerGetByUrl(env.DB, urlNorm);
   if (!ledger) {
     await sendMessage(env, chatId,
-      `❌ <b>Not found</b>: ${github.owner}/${github.repo}\n\n` +
+      `❌ <b>Not found</b>: ${displayName}\n\n` +
       `This URL has never been forwarded to the bot.`
     );
     return;
@@ -273,11 +280,14 @@ async function cmdStatus(env, chatId, args) {
   }
 
   const parts = [
-    `🔍 <b>Status</b>: ${github.owner}/${github.repo}\n`,
+    `🔍 <b>Status</b>: ${displayName}\n`,
     `📝 Ledger: #${ledger.id} — first seen ${timeAgo(ledger.first_seen_at)}`,
     `📋 Status: ${statusLine}`
   ];
 
+  if (ledger.url_type === 'non_github') {
+    parts.push('🌐 Website link (Websites vault)');
+  }
   if (ledger.github_stars) {
     parts.push(`⭐ Stars: ${formatStars(ledger.github_stars)}`);
   }
@@ -298,9 +308,13 @@ async function cmdStatus(env, chatId, args) {
 
   const buttons = [];
   if (!isDecomm) {
-    buttons.push([{ text: '🗑️ Mark Decommission', callback_data: `decomm:${urlNorm}` }]);
+    buttons.push([{ text: '🗑️ Mark Decommission', callback_data: `decomm:${urlNorm}`.substring(0, 64) }]);
   }
-  buttons.push([{ text: '🐙 Open in GitHub', url: `https://github.com/${github.owner}/${github.repo}` }]);
+  if (github) {
+    buttons.push([{ text: '🐙 Open in GitHub', url: `https://github.com/${github.owner}/${github.repo}` }]);
+  } else {
+    buttons.push([{ text: '🔗 Open website', url: urlNorm }]);
+  }
 
   await sendMessage(env, chatId, parts.join('\n'), {
     reply_markup: inlineKeyboard(buttons)
