@@ -1,11 +1,19 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 38 audited
-# Python modules and runs the full 772-case suite (34 core + 11 e2e +
+# Every push to main, every tag, and every PR compiles the 67 audited
+# Python modules and runs the full 796-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 60 connection + 47 detectset + 44 webproxy +
-# 49 intakefix + 38 sealfix + 30 v0230).
+# 49 intakefix + 38 sealfix + 30 v0230 + 24 refactor_surface).
+# v0.24.0: the structural split of gitcurator/gui/app.py (13,815 lines)
+# into 28 focused modules — gui/{link_helpers,dead_links,telegram_lazy,
+# platform_intake,vault_index,cache_db,link_tracker,log_bridge,
+# worker_jobs,processing_worker,dialogs,headless}.py plus the
+# gui/main_window/ package (window.py + 15 domain mixins). app.py is now
+# the ~470-line facade; zero behavior change, verified per-move by the
+# fingerprint/surface/import gate and the 24-case characterization suite
+# (tests/test_refactor_surface.py joins the run: 796).
 # v0.23.0: the five-request desktop overhaul — the Test Connection
 # modal, the two-radio LLM tab with first-class Anthropic Claude
 # support + the split context budget (llm_num_ctx +
@@ -59,7 +67,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 742 tests + websites pipeline)
+    name: Python gate (compile + 796 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -82,13 +90,42 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 38 audited modules
+      - name: Compile the 67 audited modules
         run: >
           python -m py_compile
           main.py
           gitcurator/gui/app.py
           gitcurator/gui/icons.py
           gitcurator/gui/telegram_lock.py
+          gitcurator/gui/link_helpers.py
+          gitcurator/gui/dead_links.py
+          gitcurator/gui/telegram_lazy.py
+          gitcurator/gui/platform_intake.py
+          gitcurator/gui/vault_index.py
+          gitcurator/gui/cache_db.py
+          gitcurator/gui/link_tracker.py
+          gitcurator/gui/log_bridge.py
+          gitcurator/gui/worker_jobs.py
+          gitcurator/gui/processing_worker.py
+          gitcurator/gui/dialogs.py
+          gitcurator/gui/headless.py
+          gitcurator/gui/main_window/__init__.py
+          gitcurator/gui/main_window/window.py
+          gitcurator/gui/main_window/theme.py
+          gitcurator/gui/main_window/ui.py
+          gitcurator/gui/main_window/hero.py
+          gitcurator/gui/main_window/connection_tests.py
+          gitcurator/gui/main_window/llamacpp.py
+          gitcurator/gui/main_window/phase6.py
+          gitcurator/gui/main_window/test_connection_modal.py
+          gitcurator/gui/main_window/vaults_config.py
+          gitcurator/gui/main_window/input_proxy.py
+          gitcurator/gui/main_window/telegram_ui.py
+          gitcurator/gui/main_window/processing_control.py
+          gitcurator/gui/main_window/dashboard.py
+          gitcurator/gui/main_window/bot_queue.py
+          gitcurator/gui/main_window/backup_seal.py
+          gitcurator/gui/main_window/lifecycle.py
           gitcurator/core/links.py
           gitcurator/core/storage.py
           gitcurator/core/note_builder.py
@@ -132,4 +169,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 38 compiles + 772 tests + offline golden run (v0.23.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 67 compiles + 796 tests + offline golden run (v0.24.0)."

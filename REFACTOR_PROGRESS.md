@@ -36,8 +36,59 @@ updates YES, CI edit YES, modules under gui/, docs untouched, per-module
 commits. Owner then said: "Push and commit, then release new version so i
 can test." — proceed through Phase 3/4 and release v0.24.0.
 
-## Phase 3 — extractions
+## Phase 3 — extractions (DONE, 2026-09-30)
 
-| # | Commit | Module | Gate |
-|---|---|---|---|
-| 0 | docs + characterization tests (796/796) | tests.test_refactor_surface joins CI | ✅ |
+Every row = one commit, gated by: compile (all files) + fresh-process
+import of every module + SURFACE (722/722) + FINGERPRINT (365 functions
+verbatim exactly once) + full 796-case suite + offline golden (milestones).
+"tests re-aimed" = approved patch-target updates (expectations unchanged).
+
+| # | Commit | Module | ln | notes |
+|---|---|---|---|---|
+| 0 | 975729a | docs + tests.test_refactor_surface (24 cases) | — | suite 772 → 796 |
+| 1 | 9b716eb | gui/link_helpers.py | 62 | extract/clean/normalize_url |
+| 2 | c8dddf0 | gui/dead_links.py | 70 | DEAD_LINK_THRESHOLD + dead_link_threshold |
+| 3 | 7e13362 | gui/telegram_lazy.py | 63 | the mutually-recursive lazy shims travel together |
+| 4 | 64b4d14 | gui/platform_intake.py | 254 | PLATFORM_INFO + inbox routing |
+| 5 | 07bb05c | gui/vault_index.py | 213 | VaultIndex + find_obsidian_vaults + _safe_moc_name |
+| 6 | ecdafde | gui/cache_db.py | 508 | CacheDB |
+| 7 | 6cd0a43 | gui/link_tracker.py | 449 | LinkTracker |
+| 8 | 41abe47 | gui/log_bridge.py | 84 | _GuiLogHandler + install/remove |
+| 9 | d8921de | gui/worker_jobs.py | 278 | tests re-aimed: intakefix `_run_telegram_worker` |
+| 10 | 99aa7b2 | gui/processing_worker.py | 3386 | tests re-aimed: phase1/2 `Github` (was silently hitting the real API) |
+| 11 | c676a2f | gui/dialogs.py | 290 | SettingsDialog + ConnectionTestDialog |
+| 12 | 89b7d8e | gui/headless.py | 263 | run_headless + _is_process_running |
+| 13 | 63fb00d | main_window/theme.py (ThemeMixin) | 917 | 19 methods |
+| 14 | dcbfcf2 | main_window/ui.py (UiMixin) | 1494 | 8 methods; tests re-aimed: llamacpp/phase4/phase5 source scans |
+| 15 | b2cd49c | main_window/hero.py (HeroMixin) | 236 | 6 methods |
+| 16 | 4d29919 | main_window/connection_tests.py (ConnectionTestsMixin) | 566 | 11 methods |
+| 17 | f583acf | main_window/llamacpp.py (LlamaCppMixin) | 591 | 12 methods; tests re-aimed: llamacpp `threading` recorder |
+| 18 | 966c995 | main_window/phase6.py (Phase6Mixin) | 121 | 3 methods |
+| 19 | 84d08b2 | main_window/test_connection_modal.py (TestConnectionModalMixin) | 254 | 4 methods |
+| 20 | d1c1ced | main_window/vaults_config.py (VaultConfigMixin) | 379 | 12 methods; tests re-aimed: v0230 + intakefix `CONFIG_FILE` |
+| 21 | 4217147 | main_window/input_proxy.py (InputProxyMixin) | 166 | 5 methods |
+| 22 | cf61e46 | main_window/telegram_ui.py (TelegramUiMixin) | 242 | 5 methods |
+| 23 | 5d74c00 | main_window/processing_control.py (ProcessingControlMixin) | 718 | 12 methods |
+| 24 | 9cc747f | main_window/dashboard.py (DashboardMixin) | 714 | 10 methods |
+| 25 | 07ca7f2 | main_window/bot_queue.py (BotQueueMixin) | 1213 | 13 methods |
+| 26 | 112b005 | main_window/backup_seal.py (BackupSealMixin) | 851 | 20 methods |
+| 27 | 7b85477 | main_window/lifecycle.py (LifecycleMixin) | 273 | 3 methods (closeEvent etc.) |
+| 28 | 9eacd26 | main_window/window.py (MainWindow shell) | 233 | mixin composition + `__init__` + `_open_settings` + class signal |
+
+## Phase 4 — closeout (DONE)
+
+- app.py: **13,815 → 473 lines** (facade). 28 new modules; largest
+  processing_worker.py 3,386; main_window/ui.py 1,494; bot_queue.py 1,213.
+- Final verification on the exact final tree: FINGERPRINT PASS (365
+  functions verbatim exactly once), SURFACE PASS (722/722), IMPORT PASS
+  (76 modules), GATE PASS (**796/796** + offline golden **30/30**),
+  offscreen smoke of the real composed MainWindow (construction, theming,
+  logging, progress, hero state): **ALL SMOKE CHECKS PASSED**.
+- ci.yml: compile list 38 → 67 modules; suite line gains
+  tests.test_refactor_surface (796); comments updated.
+- VERSION 0.23.0 → 0.24.0; STATUS.md phase row + version line;
+  CHANGELOG 0.24.0 entry. Released as v0.24.0 per owner instruction
+  ("Push and commit, then release new version so i can test.").
+- Known harmless wrinkle: `gitcurator/tools/smoke_detectset.py` still
+  patches `gui_app.CONFIG_FILE` (dev tool, not part of the test gate) —
+  recorded in REFACTOR_NOTICED_ISSUES.md.
