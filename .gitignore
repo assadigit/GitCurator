@@ -52,3 +52,6 @@ app/config.local.json
 # v0.06 — runtime logs / single-instance locks anywhere in the tree
 **/logs/
 app/app.lock
+
+# ── Cloudflare wrangler local cache (never commit account cache) ──────────────
+.wrangler/

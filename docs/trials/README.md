@@ -29,7 +29,7 @@ Nothing about your real vaults is touched.
    to try **Cloudflare Workers AI** instead, set in the same settings
    (or `config.json`):
    - `llm_provider`: `cloud`
-   - `cloud_api_url`: `https://api.cloudflare.com/client/v4/accounts/20b665b0bc839144c1e9f16aaf07953d/ai/v1`
+   - `cloud_api_url`: `https://api.cloudflare.com/client/v4/accounts/YOUR_CF_ACCOUNT_ID/ai/v1`
    - `cloud_api_key`: *(your new Cloudflare token — after you add the
      Workers AI permission to it, see the phase report)*
    - `cloud_model`: `@cf/meta/llama-3.1-8b-instruct`

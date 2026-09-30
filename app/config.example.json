@@ -63,6 +63,6 @@
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
   "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
-  "cloudflare_account_id": "20b665b0bc839144c1e9f16aaf07953d",
+  "cloudflare_account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
   "cloudflare_workers_ai_token": "YOUR_CLOUDFLARE_WORKERS_AI_TOKEN_HERE"
 }
