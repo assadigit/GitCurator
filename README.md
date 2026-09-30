@@ -1,396 +1,378 @@
 # GitCurator
 
-> Telegram → Ollama → Obsidian. An automation that watches your Telegram
-> Saved Messages for GitHub repositories, curates them with a **local LLM**,
-> and writes clean, structured notes into your **Obsidian vault**.
+> **Your personal AI librarian.** Forward any link to a Telegram bot — GitHub
+> repositories, tools, articles, any website — and GitCurator's LLM curates
+> it into a clean, structured, cross-linked Obsidian library: categorized,
+> summarized, deduplicated, backed up to private GitHub mirrors, and
+> (optionally) published as a public directory.
 
-**Version:** `0.09.4` — the CLI's anti-repeat fix: the bot queue can no longer look fully-unprocessed — `--auto` now reuses the GUI's whole "already done" mechanism (anchored cache.db, `last_processed_msg_id` skip, Phase 5 CLEAR) and STOPS with an actionable message when the vault path looks wrong (see [CHANGELOG.md](CHANGELOG.md) · [VERSION](VERSION))
-**Status:** redesigned PyQt6 GUI (v0.03 two-stage SYNC: fetch undone bot items → PROCESS → run; v0.05 auto-starts `ollama serve` when the server is down; v0.06 reliability fixes; **v0.07 main screen rebuilt per design review** — one unified SVG icon set, one-accent palette, labeled `PROCESSED x / y` counter, active-state log filter tabs; **v0.07.1 hotfix** — official Lucide icons bundled verbatim, proxy pre-flight, DC-rotating connect retries, token whitespace healing; **v0.08** — every icon re-fit to its area (they were rendering 2× too big and clipped — the "partial sun"), window re-proportioned 1000×375 → **900×600 (exact 6:4)**, **404 QUARANTINE** (dead links confirmed after 3 consecutive 404s across sessions are silently skipped in every input path), and a **visualized CLI companion** — `cli.py` + `Start-GitCurator-CLI.bat`, colors/spinners/live progress, zero flags needed) on the modular `gitcurator` package · 101/101 automated tests green · v0.04 ships the owner's real credentials pre-filled in `app/config.json` + `installer.config.json` (private repo, owner's explicit request — the v0.0.10 credential-free guarantee is lifted for this release line).
+**Version:** `0.23.0` · **Suite:** 772 automated tests + a 30-link golden set ·
+**Releases:** every version since v0.14.1 ships a deterministic Windows zip ·
+**Status:** all six SPEC phases done and merged — see
+[STATUS.md](STATUS.md) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
 
 ---
+
+## Executive summary — what this app is
+
+GitCurator is a **personal "second brain" library builder**. It solves a
+problem every heavy internet reader has: you save dozens of links in Telegram
+"Saved Messages" (or send them to a bot), they pile up in an unsorted mess,
+and you never look at them again.
+
+GitCurator turns that pile into a real library, automatically:
+
+1. **You forward links to the Telegram bot** [@githubfetcherbot](https://t.me/githubfetcherbot)
+   (from your phone, desktop, anywhere). The bot — a Cloudflare Worker —
+   replies instantly, records every link in a permanent ledger (D1 database),
+   and never loses one.
+2. **Your desktop app fetches the queue** (one **SYNC** button — or a fully
+   automatic CLI run), and routes each link: GitHub repositories go to the
+   GitHub pipeline, every other website to the Websites pipeline.
+3. **An LLM curates each link** — locally with **Ollama** or **llama.cpp**
+   (your models, your machine, nothing leaves it), or through a cloud API
+   (**Anthropic Claude** or any **OpenAI-compatible** endpoint). It fetches
+   the repo/site, categorizes it into *your* taxonomy, and writes a rich
+   Obsidian note: TL;DR, what it is, standout features, best-used-for,
+   pricing, tags.
+4. **Notes land in three separate Obsidian vaults** — a GitHub Projects
+   vault, a Websites vault, and your own Manual Notes vault the app never
+   touches except a read-only `Library/` mirror.
+5. **After every run, everything is sealed** — both machine vaults are
+   committed and pushed to private GitHub repositories (VaultSeal), and the
+   curated collection can be published as an emoji-rich public directory
+   (Good Repos).
+
+The design principles, in one breath: **local-first, private by default, no
+link left behind, your moves are corrections (never damage), existing notes
+are never rewritten, and every risky operation has a dry-run.**
+
+| Component | Stack |
+|---|---|
+| Desktop app | Python 3.10+ / PyQt6 GUI + a visualized CLI (Windows-first, `.bat` launchers) |
+| Bot backend | Cloudflare Worker + D1 + KV + Queues (`app/cloudflare-bot/`) |
+| LLM backends | Ollama · llama.cpp · Anthropic Claude · any OpenAI-compatible endpoint |
+| Storage | Obsidian vaults (Markdown) + `cache.db` (SQLite) |
+| Backup | private GitHub mirrors per vault (VaultSeal) + optional public directory (Good Repos) |
+| Verification console | Next.js 16 dashboard (`dashboard/`) — runs the real test suite, tracks history & drift |
+| Tests | 772 automated cases, zero network needed; 38 modules compiled in CI |
 
 ## How it works
 
 ```
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│   Telegram   │   │  Link & repo  │   │     Local    │   │   Obsidian   │
-│    Saved     ├──▶│  extraction   ├──▶│    Ollama    ├──▶│    vault     │
-│  Messages    │   │  (links.py)   │   │  (llm_client)│   │  (notes.md)  │
-└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
-       ▲                  │                  │                  │
-       │           Telethon fetcher    timeout-wrapped     sanitized frontmatter
-       │           / bot queue         chat calls         + atomic writes
-   PyQt6 GUI ── or ── headless CLI (run_headless)
+        you, on any device
+              │   forward any link (GitHub repo or website)
+              ▼
+   Telegram ── @githubfetcherbot
+              │   webhook — instant reply (✓ Received / ⭐ repo info)
+              ▼
+   Cloudflare Worker  (app/cloudflare-bot)
+     D1 ledger · dedup · blocked/self-domain policy──▶  its web dashboard:
+              │   bot queue (no link is ever lost)        stats · pending ·
+              ▼                                          dead letters · activity
+   Desktop app — SYNC  (PyQt6 GUI · visualized CLI · headless)
+     ├─ GitHub pipeline   → GitHub API   → notes + banner images
+     └─ Websites pipeline → polite fetch → taxonomy filing
+              │
+              │   curated by YOUR LLM — Ollama · llama.cpp · Claude · any
+              │   OpenAI-compatible endpoint
+              ▼
+   Obsidian vaults
+     ├─ GitHub Projects vault   (machine-written)
+     ├─ Websites vault          (machine-written)
+     └─ Manual Notes vault      (yours; read-only Library/ mirror)
+              ▼
+   after every run:  VaultSeal (private GitHub mirrors)
+                      + Good Repos (the public directory, optional)
 ```
 
-1. **Fetch** — new messages arrive from Telegram (Telethon subprocess reading
-   Saved Messages, or the bot-chat queue via `@githubfetcherbot`).
-2. **Extract** — GitHub URLs are normalized and deduplicated by the single
-   `links.py` module (one pattern, four former drifting copies removed).
-3. **Curate** — a local Ollama model categorizes, summarizes and cross-checks
-   each repository (all calls timeout-wrapped; failures degrade gracefully).
-4. **Write** — sanitized, structured Obsidian notes (frontmatter + banners)
-   land in your vault via atomic tempfile + `os.replace` writes.
-5. **Seal** — the whole vault is committed and pushed to a **private GitHub
-   repository** after every run (`vaultseal.py`) — Obsidian's free tier has no
-   sync, VaultSeal is the safety net.
-6. **Publish** — the curated notes become an emoji-rich **public README
-   directory** (`goodrepos.py`) organized like *AI → Skills → …*, with the
-   notes mirrored into category folders of the public `good-repos` repo.
+1. **Send** — forward any link to the bot. GitHub repos get a reply with
+   stars and description; websites get a "🌐 Received" reply; blocked
+   domains (x.com / twitter.com / t.co by default) get an honest 🚫.
+2. **Ledger** — the Worker normalizes the URL (tracking parameters dropped,
+   meaningful ones kept — a YouTube `?v=` **is** the page), dedupes against
+   the permanent D1 ledger, and queues it. Secret query values are scrubbed
+   from everything it stores.
+3. **SYNC** — the desktop app fetches only undone bot items, then processes.
+   You can also import a `.txt`/`.md` file of URLs instead of Telegram.
+4. **Curate** — the LLM categorizes into *your* taxonomy (a file you own and
+   edit; every answer must match a category you wrote, or it goes to
+   `_review/` — nothing is ever filed under an invented name), then writes
+   the structured note atomically.
+5. **Learn from you** — when you move a note to a different folder, that
+   move is recorded as a *correction*: the note's categories update, the
+   category is locked, and your past corrections become few-shot examples
+   for the classifier. The app never moves it back.
+6. **Seal** — both machine vaults commit + push to their private GitHub
+   mirrors with reconciliation (rebase/merge on divergence, a rescue branch
+   if ever irreconcilable — main is never force-pushed). Optionally, the
+   curated notes are also published to the `good-repos` public directory.
 
+## The three vaults
 
-## The CLI companion (v0.09 — one click, fully visualized, zero extra deps)
+| Vault | Config key | Who writes it | Backup |
+|---|---|---|---|
+| **GitHub Projects** | `vault_path` | the app only | private `my-awesome-github-directory` |
+| **Websites** | `website_vault_path` | the app only | private `my-awesome-websites-directory` |
+| **Manual Notes** | `manual_vault_path` | **you only** | your own repo |
 
-Prefer a terminal? Keep `config.json` in the project folder (the SAME
-file the GUI uses) and double-click:
+The app keeps a **read-only `Library/` mirror** of both machine libraries
+inside your Manual Notes vault, so you can link `[[a repo note]]` from your
+own ideas and see backlinks — while the app is forbidden (and tested) to
+touch one file outside `Library/`.
 
+Ownership is explicit: new notes carry `managed_by` / `schema_version`
+stamps; unmanaged files are never touched; **existing notes are never
+rewritten**; your hand-edited placeholders survive automatic retries.
+
+## Feature tour
+
+### Intake — the bot accepts every link (v0.22.0, live)
+- Non-GitHub links are no longer rejected — they are ledger'd and flow to
+  the Websites vault on your next SYNC.
+- **No link left behind** — a permanent D1 ledger (`ever_seen_ledger`) plus
+  the desktop manifest; every link's state is knowable at any time
+  (`/pending`, `/status`, the web dashboard).
+- **Blocked domains** (default `x.com, twitter.com, t.co`) are recorded in
+  the platform `_inbox` tables but never fetched, never noted, purged from
+  retry queues.
+- **Self domains** (the bot's own auth links) are never stored at all;
+  secret query values are scrubbed from every stored original.
+- **Decommission** — mark a repo dead from Telegram; it is never re-added.
+
+### The desktop app (v0.23.0)
+- **Test Connection modal** — four subsystem rows (📁 Vaults · 🧠 LLM · 🐙
+  GitHub · ✈️ Telegram, with a **live** Telegram leg) spin → settle on
+  ✅/⚠️/❌ with the check lines; **🚀 Start Syncing stays disabled until
+  everything is connected**, then turns green and starts the SYNC flow.
+- **Two-radio LLM tab** — 🖥️ Locally hosted (Ollama / llama.cpp + their
+  Detect & Set buttons) / ☁️ Cloud API (URL + key + model — **Anthropic
+  Claude** or any OpenAI-compatible endpoint; an `api.anthropic.com` URL
+  automatically speaks the Messages API).
+- **Split context budget** — *Model max context window* (`llm_num_ctx`)
+  plus *Output max tokens* (`llm_max_output_tokens`) — e.g. 160k total /
+  32k output. Nothing is ever truncated silently on any backend.
+- **Input = the bot queue + Import txt file** (`.txt` or `.md`, one URL per
+  line) — the old ID-range/markers/single-message modes are gone.
+- **Every dialog themed** — cream light / plum night, AA contrast, one
+  Lucide icon pack, always-visible theme toggle.
+
+### The pipelines
+- **GitHub** — repo metadata + README via the GitHub API, LLM analysis
+  (category · summary · standout features · best-used-for), sanitized
+  frontmatter, banner images, atomic writes. A 401 token failure degrades
+  gracefully to anonymous access instead of failing the batch.
+- **Websites** — polite fetch (timeout, size cap, per-domain pause,
+  identifiable User-Agent, optional proxy with DNS resolved at the exit),
+  HTML/og extraction with JS-shell and paywall heuristics, **two-pass
+  classification into your taxonomy with exact-name validation**, `_review/`
+  for low-confidence or unfetchable links, multi-day retry queue (max 3,
+  hand-edited placeholders are never touched on upgrade).
+- **Moves are corrections** (SPEC §4.4) — vault-vs-`cache.db` reconciliation
+  at every run start: moved → accept + lock + log; hand-edited → flag only;
+  deleted → dismiss (never re-added); duplicates → flag; unmapped folders →
+  kept exactly as placed. First run after upgrade records a silent baseline.
+- **404 quarantine** — a repo 404ing N times in a row (configurable,
+  default 3, a success resets the counter) is confirmed dead and skipped
+  everywhere, with a placeholder note in `_missing/` so it stops counting
+  as pending (delete the note to re-check).
+
+### LLM backends
+- **Ollama** — auto-detected, auto-started when the server is down; the
+  model picker recommends a same-family stand-in when the configured model
+  isn't pulled.
+- **llama.cpp** — *caught automatically* ~1.5s after launch: the running
+  `llama-server` **process's actual listening ports** (any `--port`), then
+  common ports; the loaded model is auto-filled. Loopback traffic never
+  rides the proxy.
+- **Cloud** — Anthropic Claude (Messages API, required `max_tokens`) or any
+  OpenAI-compatible endpoint (llama.cpp server, vLLM, LM Studio, proxies);
+  `/v1/models` pre-flight (warn, never block), JSON mode with clean
+  fallback, wall-clock timeouts on every call.
+- **Per-task model overrides** (`models.classify` / `models.analyze`) and
+  **your past corrections as few-shot examples** for the classifier.
+
+### The Linking layer (Phase 6)
+- **Recall hooks** — every note gets a neutral "Use when you need to…"
+  sentence (invisible to fingerprinting, dry-run first).
+- **Local embeddings** — only the recall field + description + tags are
+  embedded (never full text); Ollama or any OpenAI-compatible
+  `/v1/embeddings`.
+- **Suggested links wait for you** — cosine candidates + one LLM yes/no per
+  pair land in `<manual vault>/Library/Suggestions.md` as checkboxes;
+  tick to approve / strike to reject, then `--collect` writes the approved
+  *Related (auto)* blocks into the `Library/` mirror copies only. A "no"
+  is remembered forever.
+
+### Resilience (hardened over 23 versions)
+- **Proxy everywhere it's needed** — SOCKS5/HTTP for Telegram *and* web
+  fetches (DNS at the proxy exit — the fix for blocked-web connections),
+  per-batch pre-flight with DIRECT fallback, loopback never proxied, retry
+  queue re-armed when the proxy epoch changes.
+- **VaultSeal reconciliation** — plain push → fetch → rebase / merge
+  unrelated histories / rescue branch; the token never touches
+  `.git/config`, is never logged.
+- **Atomic writes, thread-safe SQLite (WAL), stuck-subprocess killing,
+  graceful Ctrl+C, headless-safe degradation** for every modal condition
+  (LLM failure, disk full, auth code).
+- **Dry-run everywhere** — the same full pipeline, zero writes; plus
+  read-only safety tools (`scan_vault_edits.py`, `snapshot_vault.py`).
+
+## Install & quickstart
+
+### Windows (the release zip — the owner's path)
+Download `GitCurator-vX.Y.Z-windows.zip` from
+[Releases](https://github.com/assadigit/GitCurator/releases), unzip, then:
+
+```bat
+1-INSTALL.bat        :: once — creates the app's private .venv + installs requirements
+GitCurator.bat       :: the desktop app
+GitCurator-DRY-RUN.bat  :: a full rehearsal that writes NOTHING
 ```
-Start-GitCurator-CLI.bat      (Windows — same engine as GitCurator-CLI.bat)
-GitCurator-CLI-Setup.bat      (Windows — first-run credential wizard)
-./gitcurator-cli.sh           (Linux/macOS)
+
+`WINDOWS-QUICKSTART.md` (inside the zip / [app/](app/WINDOWS-QUICKSTART.md))
+is the 3-step guide with the vault paths. The zip is deterministic —
+byte-identical when rebuilt from the same tag.
+
+### From a checkout
+```bash
+cd app
+pip install -r requirements.txt
+python main.py                        # GUI
+python -m unittest tests.test_core -v  # quick unit-test smoke (no network)
+```
+Requirements: Python 3.10+, PyQt6, Telethon, PyGithub, PySocks (see
+`app/requirements.txt`), plus any one LLM backend. The full suite is the
+exact module list in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+(run from `app/`; the GUI tests run offscreen via `QT_QPA_PLATFORM=offscreen`).
+
+### The visualized CLI (one click, zero flags)
+```bat
+Start-GitCurator-CLI.bat        (double-click)
+python main.py --cli --auto --yes          :: full automatic run
+python main.py --cli --auto --yes --dry-run :: the SAME run, writes nothing
+python main.py --cli --init    :: first-run credential wizard
+python main.py --cli --status  :: vault map + config + cache + quarantine
+python main.py --cli --test-connection     :: the four-subsystem battery
+python main.py --cli --list-dead / --reset-dead   :: 404 quarantine
 ```
 
-v0.09 merges the two lineages' CLIs into ONE engine (`main.py --cli` →
-`gitcurator/cli.py` — plain ANSI, no `rich` dependency). It carries the
-v0.07.2 **model picker**: pre-flight checks run BEFORE any work, and when
-the configured Ollama model isn't pulled you get an interactive numbered
-menu (smart recommendation first — same family/size as the configured
-model, embedding models flagged and never recommended); scheduled/piped
-runs auto-pick the closest stand-in so a missing model can never fail or
-degrade a batch. The choice is saved to `config.json`.
-
-That's the whole interface. The CLI then runs the complete pipeline
-automatically, in color, with loading animations:
-
+### The Cloudflare bot (optional deploy, already live for the owner)
+```bash
+cd app/cloudflare-bot
+npm install && npx wrangler login
+node install.js                 # or: bash deploy-latest.sh (idempotent)
 ```
-  ╔════════════════════════════════════════╗
-  ║   GitCurator — Telegram → GitHub →     ║   ← ASCII banner + version
-  ║            Ollama → Obsidian           ║
-  ╚════════════════════════════════════════╝
-  ── run configuration ────────────────────   ← masked secrets, vault, proxy
-  ── pre-flight checks ────────────────────   ← spinner per check
-    ✓ GitHub token   authenticated as you · 4996 API calls left
-    ✓ Proxy          127.0.0.1:10808 reachable (socks5, 3 ms)
-    ✓ LLM provider   Ollama up · 3 model(s)
-  ── fetching the bot queue ───────────────   ← live worker log + spinner
-     Bot queue: 42 total · 18 in vault · 7 dead · 12 to process
-     Dedup ground truth — vault index: 18 note(s) · cache: 927 processed repo(s)
-  ── processing 12 repo(s) ────────────────   ← live bar: repo · ██ 7/12 · 0:42
-  ── VaultSeal / Good Repos ───────────────   ← post-run, same as the GUI
-     ✓ bot queue marked read · last_processed_msg_id advanced (Phase 5 CLEAR)
-  run summary: processed / warnings / retry queue / quarantined / elapsed
+Deployed at `github-to-obsidian-bot.aliassadi-plus.workers.dev`
+(currently **v0.22.0**). Its web dashboard shows stats, pending links,
+dead letters and the activity log.
+
+### The verification dashboard (developer tool)
+```bash
+cd dashboard
+bun install && bun run db:push && bun run dev   # http://localhost:3000
 ```
-
-Useful flags: `--init` (credential wizard — ends by offering the
-Telegram login) · **`--login` (v0.09.3: interactive Telegram login —
-connect, receive the verification code, type it here; 2FA password
-supported; the session is saved and shared with the GUI)** · `--auto`
-(SYNC → process → seal → publish; v0.09.4: fetches only messages newer than the last verified batch and clears the queue only after every link verified) · `--status` (config + cache +
-quarantine summary) · `--retry-failed` · `--mark-read` ·
-`--import-file urls.txt` · `--from-id/--to-id`, `--offset-start/--count`,
-`--single-id` · `--list-dead` / `--reset-dead` (quarantine management,
-ported from the v0.08 companion) · `--strikes N` (quarantine threshold
-for this run) · `--vault` / `--config` overrides.
-
-The CLI supports Ctrl+C as a graceful stop and delivers the worker's
-signals to the renderer through a main-thread bridge so the live
-display stays thread-safe.
-
-## The 404 quarantine (v0.09 — dead links stop wasting runs, tunably)
-
-A GitHub link that returns **404 N times in a row — counted across
-sessions** — is confirmed dead and silently skipped from every input
-path (bot queue, Telethon channel fetch, import files, retries) before
-any GitHub API call. Attempt logging stays quiet (`🗑️ 404, attempt 1/N`);
-reaching the threshold logs `QUARANTINED` and writes its single permanent
-row into `_inbox/notfound-links/notfound_links.md`. Batch summaries
-report the skipped count in one aggregate line — no more per-URL 404 spam
-from the same six dead repos every run.
-
-**v0.09 unifications (from the merged lineage):**
-
-- **The threshold is configurable again** — `notfound_strike_threshold`
-  in `config.json` (default 3, min 2), set from the GUI
-  (*Settings → Dashboard → "Deleted Repos — 404 Quarantine"*) or the CLI
-  (`--strikes N`). v0.08 had it hardcoded to 3.
-- **Consecutive semantics restored** — a SUCCESSFUL fetch resets the
-  counter (v0.08 counted attempts forever, so stale strikes from months
-  ago could quarantine a live repo after one more transient miss).
-- **v0.07 caches migrate automatically** — the old `notfound_strikes`
-  table moves into `decommissioned_repos.fail_count` on first open
-  (higher count wins when a URL exists in both).
-- **Two viewers** — Settings → Dashboard shows in-progress attempts AND
-  confirmed rows (⛔) with the threshold spinbox; `More ▸ 🚫 View 404
-  Quarantine` lists confirmed-dead with one-click reset. CLI:
-  `--list-dead` / `--reset-dead`.
-
-False positives recover: a repo that went PRIVATE reads as 404 to an
-unauthorized token, so a reset gives every link a fresh set of attempts.
-
-## Reliability (v0.06 — the "another operation is already running" fix)
-
-The v0.05 forever-bug had two independent root causes, both fixed and both
-covered by automated reproduction tests:
-
-- **Stuck Telegram lock** — a hung telethon subprocess (dead proxy, session
-  contention) could block the fetch worker forever, so the single-operation
-  lock never released and every Telegram button logged
-  `⏳ Another Telegram operation is already running`. The new
-  `integrations/subprocess_runner.py` kills stalled children (idle timeout +
-  30-min hard cap, interactive-auth grace), `gui/telegram_lock.py` tracks
-  lock OWNERS (the busy message now names the holder and its age), 15
-  early-return paths release correctly, two signal-ordering self-deadlocks
-  are deferred, every worker always emits its finished signal, and a
-  watchdog force-releases anything held implausibly long.
-- **Zombie process → "Another instance is already running"** — modal dialogs
-  fired by the 2-second startup timer outlived the main window;
-  `app.exec()` never returned, `app.lock` was never cleaned up, and the next
-  launch refused to start. Shutdown is now guarded (`_closing` flag + modal
-  guards + explicit `QApplication.quit()`), so the process always dies and
-  the lock file always gets removed.
-
-Same release: set-backed link dedup (O(n²) → O(n)), SQLite WAL + hot-column
-indexes, vault filtering moved off the GUI thread, no more per-link manifest
-rewrites, and telethon imports deferred out of the GUI process.
-
-## UI standards (v0.0.6 + v0.0.7 pastel, v0.0.8 toggle, v0.07 main screen)
-
-The desktop GUI follows a small, explicit set of visual rules:
-
-- **Fixed 1000×375 main window** — never resizes; the log panel is the one
-  growable region, every Settings page scrolls independently at its natural
-  height.
-- **One growable region per screen** — the results/list/log panel absorbs the
-  leftover vertical space; forms and buttons stay content-sized.
-- **One icon system (v0.07.1)** — every glyph is the REAL Lucide icon
-  pack (v0.544.0, ISC license) bundled verbatim in `gitcurator/gui/icons.py`
-  — official geometry, not redraws — tinted per theme at render time (no
-  emoji, no pixel-art, no mixed rendering styles).
-- **One accent + semantic states (v0.07)** — lavender is the only
-  interactive-chrome accent (hero CTA fill, filter-tab active state,
-  progress chunk, links); green/amber/red appear ONLY as success/warning/
-  error states (proxy health, log levels, the STOP kill-switch).
-- **Status always labeled and truthful (v0.07)** — the `PROCESSED x / y`
-  counter shows live batch counts, fetched-queue counts, or the last
-  manifest's real totals — never a blank placeholder; the proxy dot reads
-  `Connected / Idle / Error` with a matching semantic text color.
-- **Always-visible light/dark toggle (v0.0.8)** — a compact moon/sun icon
-  button in the top bar flips the full cream/plum pastel theme and persists
-  the choice; the tooltip always names the current mode (never color alone).
-- **Button variants** — filled lavender hero (main screen), filled pastel-mint
-  primary (Settings, exactly one per page), outlined violet secondary, red
-  filled danger (`#D63A24`, white text) for destructive actions only;
-  everything infrequent (tests, verify, export, retry, recategorize) lives
-  in the **More ⋯ menu**.
-- **Pastel palette, AA contrast** — cream day (`#FBF8F2` + white sheets +
-  warm-sand borders) / plum night (`#2B2639` sheets, recessed `#17131F` log
-  well, lavender accents); every text pair ≥ 4.5:1 including placeholder
-  text (`QPalette.PlaceholderText`); red only for errors; pending counts
-  neutral.
-- **Design tokens** — 4/8/16/24/32/48px spacing scale; type scale of four
-  sizes (16 titles / 13 labels / 12 body / 12 mono); 2px focus outlines
-  on every interactive element, both themes; accessible names on every
-  icon-only control.
-
-## Resilience (v0.0.8)
-
-Real-world Windows runs surfaced three failure modes — all fixed:
-
-- **401 bad-credentials fallback** — an expired/rotated GitHub token used
-  to fail every repo of a batch with raw `401` JSON. The first 401 now
-  logs ONE actionable error, drops the token for the rest of the batch
-  (anonymous access, 60 req/h), retries the current repo, and continues.
-- **`🔑 Test GitHub Token`** (Credentials tab) — validates the token as
-  typed *before* Save via `GET /user`: shows the account login on success,
-  an actionable 401/403 message on failure.
-- **Windows-safe MOC filenames** — LLM categories with quotes or `>`
-  separators (`"Agents_Skills"`, `AI > Skills`) no longer crash master-index
-  generation with `[Errno 22]`; one canonical sanitizer keeps the
-  `_moc/` files and their `[[_moc/…]]` wiki-links in sync.
-
-## Usability (v0.0.9)
-
-The Backup tab fits the fixed window again, and theme switches keep every
-status readable:
-
-- **Scrollable, compacted Backup tab** — the four sections (Vault Backup,
-  VaultSeal, Good Repos, Dashboard) sit in a vertical-only scroll area with
-  compacted rows (status dots share the action rows, settings checkboxes
-  side-by-side), so every control is reachable inside the fixed 1000×750
-  window.
-- **Theme-synced status dots** — toggling light/dark re-runs all three
-  Backup status refreshers (no more light-theme deep-butter stranded on
-  plum), and the dark scrollbar handle is readable on plum (WCAG 1.4.11).
-
-## Security & Deploy (v0.0.10)
-
-The git tree is now credential-free, and updating the Cloudflare worker to
-the latest version is a two-minute command:
-
-- **Scrubbed tree** — `session.session` files untracked + gitignored,
-  `config.json` / `installer.config.json` are clean templates, and the docs
-  use `YOUR_BOT_TOKEN` placeholders. Git history predating v0.0.10 still
-  holds the old blobs — rewrite history (`git filter-repo`) before ever
-  making the repository public.
-- **`deploy-latest.ps1` / `deploy-latest.sh`** (in `app/cloudflare-bot/`) —
-  wrangler auth check → idempotent D1 schema → `wrangler deploy` → live
-  health check, with an optional `--with-secret` flow for the v30
-  `WEBHOOK_SECRET` webhook anti-impersonation hardening. Secrets, data, D1,
-  KV, Queues and R2 all persist across deploys.
-- **Old release zips removed** — v0.01–v0.09 zips all carried the Telethon
-  session (v0.01–v0.07 in the working tree; v0.08/v0.09 hidden inside the
-  bundled `.git/objects` store) and were deleted from the download folders.
-  The v0.0.10 zip is built via `git archive` — tracked tree only, no `.git`,
-  no sessions, no caches.
-
-## VaultSeal — automatic vault backup (v0.0.5)
-
-Obsidian's free mode has no sync and no off-site backup. VaultSeal closes
-that gap: after **every** curation run — 1 new project or 100 — the whole
-vault is committed and pushed to a private GitHub repository. Restore is
-plain `git clone`: the full vault at any point in its history, and Obsidian
-opens the clone directly.
-
-- **Zero-config** — on by default (`vaultseal.enabled`), reuses your
-  `github_token`, derives the repo name from the vault folder, and creates
-  the private repo on the first seal if it doesn't exist.
-- **Hygiene** — machine-specific state (`workspace.json`, `.trash/`, OS
-  noise) is excluded via a managed `.gitignore` block, merged idempotently.
-- **Never dangerous** — a vault nested inside another git repository
-  bootstraps its own repo (a parent's files can never be sealed); an
-  unchanged vault is a no-op; a failed push keeps the local commit.
-- **Credential hygiene** — the token is used only for API calls and one-time
-  push URLs; it is never written to `.git/config`, never persisted, never
-  logged.
-- **Runs for failed batches too** — notes written before a mid-run failure
-  are exactly what you want backed up.
-
-Manual seal / status: `python app/gitcurator/integrations/vaultseal.py
---vault <path> [--token $GITHUB_TOKEN]` · configure in the GUI's Backup tab
-or `config.json` (`vaultseal` section). The dashboard's **Vault Seal** tab
-shows live vault state and the seal history (`GET /api/vault-seal`).
-
-## Good Repos — the public curated directory (v0.0.7)
-
-VaultSeal keeps the vault private; **GoodRepos shares the curation with the
-world**. After every run, the curated notes become a browsable, emoji-rich
-README directory — organized like *AI → Skills → …* — with the full notes
-mirrored into category folders of the **public**
-[`good-repos`](https://github.com/assadigit/good-repos) repository. Everyone
-can benefit from your curated collection of good GitHub repositories.
-
-- **Emoji README, auto-maintained** — stats line, contents anchors, category
-  tree with per-category counts, and one line per repo: link, TL;DR, stars,
-  language, tags. Regenerated after every run.
-- **History-preserving publishes** — the module fetches the remote history
-  first (`fetch` + `reset --mixed`), so each publish is a real diff on top of
-  the previous directory; an unchanged vault is a no-op.
-- **Public by design** — creates the repo as public via the API if missing
-  (warns if an existing repo is private, still publishes).
-- **Same hygiene as VaultSeal** — pure stdlib, token never persisted, never
-  logged; only curated notes + `_index.md` + `links_manifest.json` are
-  copied (no config, no sessions).
-- **Derived data** — the vault (and its private VaultSeal mirror) remains
-  the source of truth; delete `good-repos` and the next run recreates it.
-
-Manual publish / status: `python app/gitcurator/integrations/goodrepos.py
---vault <path> [--repo-name good-repos] [--token $GITHUB_TOKEN]` · configure
-in the GUI's Backup tab or `config.json` (`goodrepos` section). The
-dashboard's **Good Repos** tab shows the live directory scan and the publish
-history (`GET /api/goodrepos`).
+A Next.js 16 console over the app: runs the **real test suite on demand**
+(`POST /api/verify`), persists every run (manual / startup / 6-hour
+scheduler), flags code drift, and reports live repository + release +
+VaultSeal + Good Repos state.
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
-| `app/` | The Python application: PyQt6 GUI + visualized CLI (start with `app/README.md`) |
-| `app/main.py` | Thin launcher — the real entry point is `gitcurator.gui.app.main` |
-| `app/cli.py` + `Start-GitCurator-CLI.bat` | **Visualized CLI** (v0.08) — one-click, zero flags; real code in `gitcurator.cli_app` |
-| `app/gitcurator/core/` | Pure-stdlib testable core — `links` · `storage` · `note_builder` · `llm_client` |
-| `app/gitcurator/integrations/` | Telegram fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · `error_reporter` |
-| `app/gitcurator/cloud/` | Cloudflare + Google Drive integrations (optional, graceful) |
-| `app/gitcurator/gui/` | `app.py` — MainWindow, pipeline worker, headless CLI · `icons.py` — the Lucide pack |
-| `app/gitcurator/tools/` | Developer utilities (diagnostics, import-surface docs) |
-| `app/gitcurator/constants.py` | Shared design tokens + config defaults |
-| `app/tests/` | 101 tests (34 unit + 11 e2e + 28 goodrepos + 19 reliability + 9 quarantine) — fake Ollama + fake GitHub, zero pip |
-| `app/cloudflare-bot/` | Optional Cloudflare Worker deployment (canonical copy) |
-| `dashboard/` | Next.js 16 verification console for the app (live tests, history, drift detection) |
+| `app/` | **The application** — start with [app/README.md](app/README.md) |
+| `app/gitcurator/core/` | Pure-stdlib testable core — links · storage · note_builder · llm_client · website_pipeline · taxonomy · web_fetch/extract · note_state (moves-as-corrections) · mirror · linking · embeddings · dryrun |
+| `app/gitcurator/integrations/` | Telethon fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · subprocess_runner · backfill_manager |
+| `app/gitcurator/gui/` | `app.py` (MainWindow, workers) · `icons.py` (the bundled Lucide pack) · themed dialogs |
+| `app/gitcurator/tools/` | Golden runners · backfill · mirror · link-builder · safety scanners · `build_zip.py` |
+| `app/taxonomy/` | The Websites category file — **yours to edit**; the classifier may only use names from it |
+| `app/prompts/` | The pipeline prompts (w01 category · w02 subcategory · w03 analyze) |
+| `app/tests/` | 772 tests + `golden/websites.json` (the 30-link golden set) |
+| `app/cloudflare-bot/` | The Telegram bot Worker — canonical deploy copy (D1 schema, migrations, deploy scripts) |
+| `app/cloudflare-bot/dashboard/` | The bot's web dashboard (stats · pending · dead letters · activity) |
+| `dashboard/` | The Next.js 16 verification console for the repo |
+| `docs/` | Phase reports, trial guides, kickoff notes |
+| `SPEC.md` | The agent briefing — mission, the six phases, the non-negotiables |
+| `STATUS.md` | The build memory between sessions — phases table + session log |
+| `CHANGELOG.md` | Every version, plain-language, owner-readable |
+| `unique_links.csv` | The owner's 784-link bookmark export (the backfill source) |
 
-## Quickstart — the app (Windows)
+## Configuration
 
-```bat
-cd app
-pip install -r requirements.txt
-python main.py            :: GUI mode
-python main.py --help     :: headless mode options
-```
+Everything lives in `app/config.json` (template committed; your real file is
+untracked) and is edited from the GUI's Settings pages — 📁 Vault · 🧠 LLM ·
+✈️ Telegram · 🌐 Proxy · 🐙 GitHub · 💾 Backup. The keys you'll actually
+touch:
 
-Requirements: Python 3.10+, a running [Ollama](https://ollama.com) server,
-and (optionally) Telegram API credentials in `app/config.json`.
-Run the test suite: `python -m unittest tests.test_core tests.test_e2e -v`
+| Key | Meaning |
+|---|---|
+| `vault_path` / `website_vault_path` / `manual_vault_path` | the three vaults |
+| `pipelines.github` / `pipelines.websites` | per-vault pipeline switches |
+| `llm_provider` | `ollama` · `llamacpp` · `cloud` |
+| `llm_num_ctx` / `llm_max_output_tokens` | the split context budget |
+| `web_blocked_domains` | never-fetched domains (default the x-family) |
+| `notfound_strike_threshold` | 404 quarantine threshold (default 3) |
+| `proxy.*` | SOCKS5/HTTP proxy — Telegram + web fetches |
 
-## Quickstart — the dashboard
+## Testing, CI & verification
 
-```bash
-cd dashboard
-bun install            # or npm install
-bun run db:push       # create the SQLite history database
-bun run dev           # http://localhost:3000
-```
+- **772 automated tests**, zero network at test time — the core is pure
+  stdlib and the outside world is faked (fake Ollama, fake GitHub, a real
+  fake SOCKS5 server, offscreen Qt). Exact command in
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (run from `app/`).
+- **The golden set** — 30 real links run through the real pipeline offline
+  in CI (`run_golden_websites.py --offline`), and `--live` against any
+  backend for side-by-side comparison reports.
+- **CI** (`.github/workflows/ci.yml`) — requirements + Qt system libs,
+  38 modules compiled, the full 772 suite and the offline golden run on
+  every push/tag/PR. *Note: GitHub Actions on this private repo is
+  currently blocked by an account-billing failure — gates run green through
+  the [gitcurator-gate](https://github.com/assadigit/gitcurator-gate)
+  mirror instead (latest: 772/772 + golden 30/30 on v0.23.0).*
+- **The dashboard** (`dashboard/`) is the human face of all of it — run
+  history, pass-rate streaks, drift detection, release + seal status.
 
-The dashboard expects the Python app at `../app` (override with
-`GITCURATOR_APP_DIR`). It runs the real test suite on demand
-(`POST /api/verify`), persists every run — tagged by who triggered it
-(manual button, server-startup pass or the 6-hour scheduler) — flags code
-drift between runs, and reports live repository/release status
-(`GET /api/releases` — last commit, tags, dirty files, CHANGELOG, zip
-backups, and the last 10 GitHub Actions runs). The **Vault Seal** tab
-(`GET /api/vault-seal`) shows the live git state of your vault and the
-seal history; "Seal vault now" runs the real `app/gitcurator/integrations/vaultseal.py` (local
-commit — pushing stays the app's job; the dashboard holds no GitHub token
-by design). Optionally point it at a vault with `GITCURATOR_VAULT_DIR`.
+## Versioning & releases
 
-## Versioning
+- Semantic versioning, git tags `vX.Y.Z`; the working tree on `main` is
+  always the latest version.
+- Every release v0.14.1 → v0.23.0 ships `GitCurator-vX.Y.Z-windows.zip`,
+  built by `tools/build_zip.py` deterministically from the tag (fixed
+  timestamps, tracked files only, secrets banned — byte-identical
+  rebuilds). v0.23.0: 83 files, sha256
+  `89e78290a4b9f45bf89f323bc82ecb92503b706b47a9ec6a4784a38f268bd04d`.
+- `CHANGELOG.md` holds the plain-language history; `STATUS.md` the phase
+  table and session log.
 
-- Semantic versioning `MAJOR.MINOR.PATCH`, git tags `vMAJOR.MINOR.PATCH`.
-- **0.0.4** — Provenance & CI History: every verification run records its
-  origin (manual / startup / scheduled — badges + stats in the History tab,
-  source column in the CSV export); the Releases tab gains a CI run-history
-  strip (last 10 Actions runs, each chip linking to its run) plus a
-  version-history timeline rail and card-hover polish.
-- **0.0.3** — CI Pipeline & Actions Status: GitHub Actions runs the
-  73-test gate (12 py_compiles) on every push/tag/PR; the Releases tab shows live CI status.
-- **0.0.2** — Repository & Release Console: `/api/releases` + Releases tab,
-  header backup download, version alignment, mobile 2×4 tab grid.
-- **0.0.1** — initial repository import. The internal build lineage
-  (v30.0 → v30.4) maps to this snapshot; see `CHANGELOG.md`.
-- Future releases: every meaningful change set ships as a new tag, and the
-  working tree on `main` is always the latest version. Each release also
-  produces a `GitCurator-vX.YY.zip` snapshot (source + .git history +
-  runtime DBs) served by the dashboard's Releases tab.
+## Security — read before deploying anything
 
-## CI
+- **This repository is private and must stay that way.** Git history
+  predating v0.0.10 contains real credentials (session files, tokens). Run
+  `git filter-repo` + credential rotation BEFORE any visibility flip.
+- Since v0.0.10 the tree ships credential-free: config templates, session
+  files gitignored, `YOUR_BOT_TOKEN` placeholders in docs.
+- **Credential rotation is the standing P0** — every secret has been exposed
+  in chat during development. Rotate the Telegram bot token / API
+  credentials, the Cloudflare tokens, and the GitHub PAT; then update the
+  app (Settings → Credentials) and the Worker
+  (`npx wrangler secret put BOT_TOKEN`).
+- The app's token hygiene: tokens are used for API calls and one-time push
+  URLs only — never written to `.git/config`, never persisted, never
+  logged; secret query values are scrubbed from every stored URL.
 
-Every push, tag and PR runs `.github/workflows/ci.yml` — py_compile of the
-12 audited modules + the 73-case suite (no pip installs needed; the
-testable core is pure stdlib). The dashboard's Releases tab shows the
-live status when a read-only `GITCURATOR_GH_TOKEN` is configured.
+## Further reading
 
-## Security — read before deploying
-
-Since v0.0.10 the git tree ships **without live credentials** (session files
-untracked, configs are templates, docs use placeholders). Two things remain:
-
-- **Git history** still contains pre-scrub blobs (`session.session`, real
-  tokens) in commits before v0.0.10. The repository is private — keep it
-  that way, or run `git filter-repo` + force-push BEFORE any visibility flip.
-- **Credential rotation is still the standing P0** — every value was exposed
-  in chat during development. Rotate the Telegram bot token / api credentials
-  / sessions and the GitHub PAT, then update them in the app (Settings →
-  Credentials → '🔑 Test GitHub Token') and on the worker
-  (`npx wrangler secret put BOT_TOKEN`). The dashboard's Go-Live tab tracks
-  this rotation checklist (3 × P0 items).
+| Doc | For |
+|---|---|
+| [app/README.md](app/README.md) | the full per-feature manual (every version's section) |
+| [app/WINDOWS-QUICKSTART.md](app/WINDOWS-QUICKSTART.md) | the 3-step Windows guide |
+| [app/cloudflare-bot/README.md](app/cloudflare-bot/README.md) | the bot Worker: deploy, env vars, dashboard |
+| [SPEC.md](SPEC.md) | the mission, the six phases, the non-negotiables |
+| [STATUS.md](STATUS.md) | live build state — phases, decisions, session log |
+| [CHANGELOG.md](CHANGELOG.md) | every version in plain language |
+| [docs/reports/](docs/reports/) | the per-phase engineering reports |
 
 ## License
 
-Private project — all rights reserved.
+Private personal project — all rights reserved. Not for distribution.
