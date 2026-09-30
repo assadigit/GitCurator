@@ -161,29 +161,6 @@ except ImportError:
 # nothing. The lazy shims below preserve the old names for any external
 # callers.
 
-def _import_telethon_fetcher():
-    """Import the telethon fetcher on demand. Returns (fn, error_cls),
-    where fn is a failing stub when telethon is not installed."""
-    try:
-        from gitcurator.integrations.telethon_fetcher import (
-            fetch_github_urls_sync, TelegramFetcherError,
-        )
-        return fetch_github_urls_sync, TelegramFetcherError
-    except ImportError as e:
-        print(f"Failed to import telethon_fetcher: {e}")
-        print("Make sure telethon is installed: pip install telethon")
-        def _stub(*args, **kwargs):
-            return {"success": False, "error": "Telethon not installed"}
-        return _stub, Exception
-
-
-def fetch_github_urls_sync(*args, **kwargs):
-    """Lazy proxy — resolves telethon on first call (headless single-id only)."""
-    fn, _ = _import_telethon_fetcher()
-    return fn(*args, **kwargs)
-
-
-TelegramFetcherError = Exception  # lazily replaced by the real class on use
 
 # v28 — Cloudflare bot sync + Google Drive backup (optional, graceful if missing)
 try:
@@ -194,6 +171,11 @@ except ImportError as e:
     _CLOUDFLARE_AVAILABLE = False
     print(f"[WARN] Cloudflare modules not available: {e}")
     print("[WARN] Bot sync + GDrive backup disabled. Install cloudflare_sync.py, cloudflare_manager.py, error_reporter.py, gdrive_backup.py")
+from gitcurator.gui.telegram_lazy import (
+    _import_telethon_fetcher,
+    fetch_github_urls_sync,
+    TelegramFetcherError,
+)
 from gitcurator.gui.dead_links import DEAD_LINK_THRESHOLD, dead_link_threshold
 from gitcurator.gui.link_helpers import extract_github_urls, clean_url, normalize_url
 
