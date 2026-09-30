@@ -698,9 +698,23 @@ class TestCliStatusMirrorRow(unittest.TestCase):
 class TestGuiWiring(unittest.TestCase):
 
     def test_vault_page_mentions_the_mirror_tool(self):
-        src_path = os.path.join(_APP_ROOT, 'gitcurator', 'gui', 'app.py')
-        with open(src_path, encoding='utf-8') as f:
-            src = f.read()
+        # refactor/gui-app-split: the GUI source moved out of the single
+        # app.py — the same expectations scan the code's new home(s).
+        gui_dir = os.path.join(_APP_ROOT, 'gitcurator', 'gui')
+        parts = []
+        for rel in ('app.py', 'dialogs.py'):
+            path = os.path.join(gui_dir, rel)
+            if os.path.exists(path):
+                with open(path, encoding='utf-8') as f:
+                    parts.append(f.read())
+        mw_dir = os.path.join(gui_dir, 'main_window')
+        if os.path.isdir(mw_dir):
+            for name in sorted(os.listdir(mw_dir)):
+                if name.endswith('.py'):
+                    with open(os.path.join(mw_dir, name),
+                              encoding='utf-8') as f:
+                        parts.append(f.read())
+        src = "\n".join(parts)
         self.assertIn('manual_mirror_hint', src)
         self.assertIn('tools/mirror_manual.py', src)
         self.assertIn('Library/ mirror', src)
