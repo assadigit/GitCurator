@@ -171,6 +171,11 @@ except ImportError as e:
     _CLOUDFLARE_AVAILABLE = False
     print(f"[WARN] Cloudflare modules not available: {e}")
     print("[WARN] Bot sync + GDrive backup disabled. Install cloudflare_sync.py, cloudflare_manager.py, error_reporter.py, gdrive_backup.py")
+from gitcurator.gui.log_bridge import (
+    _GuiLogHandler,
+    _install_gui_log_handler,
+    _remove_gui_log_handler,
+)
 from gitcurator.gui.link_tracker import LinkTracker
 from gitcurator.gui.cache_db import CacheDB
 from gitcurator.gui.vault_index import VaultIndex, find_obsidian_vaults, _safe_moc_name
@@ -3585,51 +3590,6 @@ class TestWorker(QThread):
 # Background jobs (run inside TestWorker). Each accepts a log_signal so it can
 # stream progress from the worker thread to the GUI via a queued signal.
 # ============================================================================
-
-class _GuiLogHandler(logging.Handler):
-    """Bridges Python logging -> Qt signal so the fetcher's internal log
-    lines (session path, proxy tuple, attempt details) appear in the GUI log,
-    not just the terminal."""
-    def __init__(self, log_signal):
-        super().__init__()
-        self._log_signal = log_signal
-
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            level = record.levelname.lower()
-            if level == 'warning':
-                level = 'warning'
-            elif level in ('error', 'critical'):
-                level = 'error'
-            else:
-                level = 'info'
-            self._log_signal.emit(msg, level)
-        except Exception:
-            pass
-
-
-def _install_gui_log_handler(log_signal):
-    """Attach a _GuiLogHandler to the root logger for the duration of a job.
-    Returns the handler so it can be removed afterwards.
-
-    CRITICAL: also set the root logger's LEVEL to INFO. By default the root
-    logger level is WARNING, which means logger.info() calls are silently
-    dropped BEFORE they ever reach the handler. This was why the Session/Proxy/
-    Attempt diagnostics weren't appearing in the GUI log."""
-    handler = _GuiLogHandler(log_signal)
-    handler.setLevel(logging.INFO)
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)   # <-- THIS WAS MISSING
-    root.addHandler(handler)
-    return handler
-
-
-def _remove_gui_log_handler(handler):
-    try:
-        logging.getLogger().removeHandler(handler)
-    except Exception:
-        pass
 
 
 # ============================================================================
