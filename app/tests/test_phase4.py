@@ -584,7 +584,7 @@ class TestWorkerRouters(unittest.TestCase):
 
         def recorder(api_url, api_key, model, messages,
                      json_mode=False, timeout_s=300, num_ctx=None,
-                     on_warn=None):
+                     max_output_tokens=None, on_warn=None):
             seen.append((model, json_mode))
             return json.dumps({
                 'summary': 'ok', 'how_it_works': 'ok',
@@ -689,8 +689,9 @@ def _redirect_db(tmp):  # retained for reference; the APP_DIR patch above
 
 class TestRelabel(unittest.TestCase):
 
-    LABEL = ('OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, '
-             'cloud)')
+    # v0.23.0 — the parenthetical is gone (owner request: "remove
+    # parenthesis"); the examples live in tooltips now.
+    LABEL = 'OpenAI-compatible endpoint'
 
     def test_the_constant(self):
         self.assertEqual(_llm.CLOUD_PROVIDER_LABEL, self.LABEL)

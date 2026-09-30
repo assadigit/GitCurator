@@ -111,12 +111,15 @@ the mirror tool yourself.
   Don't have it? Install from <https://ollama.com>, then run
   `ollama pull llama3.1` — or use a local **llama.cpp** server
   (llama-server): the app detects it AUTOMATICALLY at launch (whatever
-  port it runs on) and switches to it when Ollama isn't running —
-  or pick any OpenAI-compatible endpoint in Settings → 🧠 LLM.
-  **Switching between the two?** The **🧠 Detect & Set Ollama** and
-  **🦙 Detect & Set llama.cpp** buttons (main screen, under SYNC) do it
-  in one click: probe the engine, pick the model when several are
-  installed, set + save. Terminal twin: `GitCurator-CLI.bat` style —
+  port it runs on) and switches to it when Ollama isn't running.
+  **Two options in Settings → 🧠 LLM** (v0.23.0): 🖥️ **Locally hosted
+  LLM model** (Ollama / llama.cpp engines) or ☁️ **Cloud API model** —
+  any OpenAI-compatible endpoint **or Anthropic Claude** (an
+  `api.anthropic.com` URL switches the wire format automatically).
+  **Switching between the local engines?** The **🧠 Detect & Set Ollama**
+  and **🦙 Detect & Set llama.cpp** buttons (Settings → 🧠 LLM, inside
+  the Locally hosted group) do it in one click: probe the engine, pick
+  the model when several are installed, set + save. Terminal twin:
   `python main.py --cli --detect-llm ollama` (or `llamacpp`).
 - Everything the app writes stays inside this folder (`config.json`,
   `cache.db`, `reports\`) or inside the vaults you point it at.

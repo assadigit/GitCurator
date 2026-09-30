@@ -532,21 +532,32 @@ class TestApplyQuickDetect(unittest.TestCase):
 class TestGuiWiring(unittest.TestCase):
 
     def test_main_screen_buttons_exist(self):
+        # v0.23.0 — owner request: "Remove detect set ollama and detect set
+        # llama.cpp from the main view of app (the settings is enough)".
+        # The MAIN VIEW no longer constructs either button (the Settings
+        # quick row keeps the plain strings, but only as LOCAL widgets —
+        # the main-view row's self.detect_set_* attributes are gone, and
+        # its llm_row layout with them). The handlers stay.
         import gitcurator.gui.app as gui_app
         src = inspect.getsource(gui_app.MainWindow.initUI)
-        self.assertIn('QPushButton("🧠 Detect & Set Ollama")', src)
-        self.assertIn('QPushButton(\n            "🦙 Detect & Set llama.cpp")',
-                      src)
-        self.assertIn("self.quick_detect_set_ollama", src)
-        self.assertIn("self.quick_detect_set_llamacpp", src)
+        self.assertNotIn('self.detect_set_ollama_btn', src)
+        self.assertNotIn('self.detect_set_llamacpp_btn', src)
+        self.assertNotIn('llm_row', src)  # the removed main-view row layout
+        # the v0.23.0 removal note is right there where the row used to be
+        self.assertIn('the LLM quick-switch row', src)
 
     def test_settings_llm_page_quick_switch_row(self):
         import gitcurator.gui.app as gui_app
         src = inspect.getsource(gui_app.MainWindow.initUI)
         self.assertIn("⚡ Quick switch:", src)
-        # BOTH quick-row buttons wire to the same handlers
-        self.assertGreaterEqual(src.count("quick_detect_set_ollama"), 2)
-        self.assertGreaterEqual(src.count("quick_detect_set_llamacpp"), 2)
+        # v0.23.0 — the quick row lives ONLY in Settings → 🧠 LLM (the
+        # main-view copies are gone), so initUI wires each handler once.
+        self.assertEqual(src.count("quick_detect_set_ollama"), 1)
+        self.assertEqual(src.count("quick_detect_set_llamacpp"), 1)
+        # …and the quick row sits INSIDE the local host group so the
+        # buttons appear when "Locally hosted LLM model" is selected.
+        self.assertIn('local_layout.addLayout(quick_row)', src)
+        self.assertIn('"🖥️ Locally hosted LLM model"', src)
 
     def test_handlers_and_runner_exist(self):
         import gitcurator.gui.app as gui_app

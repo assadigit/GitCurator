@@ -1,3 +1,112 @@
+## [0.23.0] — The five-request desktop overhaul: the Test Connection modal, the two-radio LLM tab with Claude, the split context budget, the wizard light-mode fix, Import txt file — 2026-09-30
+
+The owner's five requests, verbatim scope: (1) remove the Detect & Set
+Ollama / llama.cpp buttons from the main view ("the settings is
+enough"); (2) Test Connection opens a modal with a loading state, every
+connected subsystem gets an emoji check, a close button and a Start
+Syncing button that "turns to green after everything is connected —
+before that it's turned off"; (3) the About Me Wizard "only opens in
+dark mode — fix it"; (4) the LLM part gets two radios — Locally hosted
+LLM model (→ the detect buttons) / Cloud API model (→ API URL, key,
+model — both Claude and OpenAI-compatible), the parenthetical leaves the
+endpoint label, and the context window splits into model max context +
+output max tokens ("my model is 160k total, 32k of which is output");
+(5) Input loses ID range + single msg + markers and gains "Import txt
+file (which works both .md and .txt… instead of fetching from
+telegram)".
+
+### 1) The main view drops the LLM quick-switch row
+
+The 🧠 Detect & Set Ollama / 🦙 Detect & Set llama.cpp buttons (v0.18.0)
+are gone from the main screen; the row they lived in is deleted. Both
+buttons — and the whole detect → model-menu → set-and-save fast lane —
+live on unchanged in Settings → 🧠 LLM.
+
+### 2) Test Connection is now a modal (ConnectionTestDialog)
+
+Clicking Test Connection opens a modal with four subsystem rows — 📁
+Vaults, 🧠 LLM, 🐙 GitHub, ✈️ Telegram. Each row starts ⏳ Waiting…,
+spins (braille animation) while its section runs, and settles on
+✅ Connected / ⚠️ Connected (warnings) / ❌ Not connected with the check
+lines under it. The Telegram row keeps spinning through the LIVE leg
+(bot-queue read or account-login probe) exactly like the log battery
+always did. Bottom row: ✕ Close (always enabled) and 🚀 Start Syncing —
+DISABLED until every row reports ok, then it flips to the filled
+pastel-mint "go" style and starts the main view's SYNC flow. The
+battery worker gained structured `section_signal`/`result_signal`
+streams (the same results the log prints); `_connection_battery_job`
+grew optional `on_section`/`on_result` callbacks. A closed dialog never
+crashes a late result (every handler re-checks `isVisible()`).
+
+### 3) The About Me Wizard light-mode fix — and every other dialog's
+
+Root cause (reproduced offscreen): top-level dialogs do NOT inherit the
+window palette — they keep the OS system palette — while the propagated
+`QWidget { color: … }` rule DOES reach them. App-light + OS-dark =
+dark-plum text painted on the system-dark window: an invisible dialog
+("only opens in dark mode"). Both themes now pin EVERY dialog's surface
+(`QDialog { background-color: … }` — cream light / plum dark), the
+wizard's hardcoded `#423A52` intro color is gone (the themed rules color
+it), and its buttons ride the tracked design-system styles so a theme
+flip restyles them.
+
+### 4) The LLM tab: two radios, Claude, and the split context budget
+
+- **Two radios** — 🖥️ Locally hosted LLM model / ☁️ Cloud API model (the
+  owner's exact two options). Local reveals the engine choice (🧠 Ollama
+  / 🦙 llama.cpp radios) with the two Detect & Set buttons; Cloud reveals
+  API URL / API key / Model. The stored `llm_provider` keeps its three
+  values ('ollama' | 'llamacpp' | 'cloud') — old configs load unchanged.
+- **Claude is first-class** — `llm_client` gained the Anthropic Messages
+  API: `anthropic_chat` (x-api-key + anthropic-version headers, the
+  system message as the top-level `system` parameter, REQUIRED
+  `max_tokens`, text-block content joined, same wall-clock timeout +
+  CloudLLM* error contract as the OpenAI path) and
+  `anthropic_list_models`. `cloud_chat` is the single router the worker
+  calls: the URL decides the wire format — api.anthropic.com → Claude,
+  everything else → OpenAI-compatible (llama.cpp / vLLM / LM Studio /
+  OpenAI / OpenRouter / Together…). `CLOUD_PROVIDER_LABEL` lost its
+  parenthetical ("OpenAI-compatible endpoint"); the pre-flight, the
+  Test Cloud API button and the batch banner all speak both formats.
+- **The split context budget** — the single "Context window (tokens)"
+  field became **Model max context window (tokens)** (`llm_num_ctx`,
+  unchanged semantics: Ollama num_ctx / the over-budget warning) +
+  **Output max tokens** (`llm_max_output_tokens`, new, default 0 =
+  server's choice): Ollama sends `options.num_predict`, OpenAI-compatible
+  sends `max_tokens`, Claude sends your value with a 4096 fallback. The
+  owner's example — 160k total, 32k output — is the fields' tooltip.
+
+### 5) Input: Import txt file (.txt AND .md) — the other modes removed
+
+The Input tab's ID Range, Markers and Single Msg modes are gone, with
+their code: `generate_marker_hash` / `copy_marker_hash` /
+`find_by_marker` / `find_keyword_ids` / `preview_messages` /
+`_show_preview_modal`, the `_telegram_single_job` /
+  `_telegram_keyword_job` / `_telegram_preview_job` subprocess wrappers,
+`update_mode`, the More ▸ Preview Messages action, and every
+single/keyword/range branch of `start_processing`. What remains is the
+owner's replacement: **Import txt file** — pick a `.txt` OR `.md` file
+(one URL per line, `#` comments skipped); PROCESS runs it through the
+same intake as any batch (GitHub repos → the GitHub pipeline, every
+other website → the Websites pipeline). PROCESS's dispatcher is now:
+fetched bot queue → import file → the helpful "Nothing to Process"
+message. The CLI/headless `--from-id/--to-id/--offset-start/--count/
+--single-id` flags keep working (a separate documented surface;
+ProcessingWorker keeps the two telegram modes they drive).
+
+### Tests
+
+`tests/test_v0230.py` (30 cases): the Claude wire format against fake
+servers (headers, system extraction, max_tokens fallback + override,
+text-block join, error objects, /v1/models), the cloud_chat URL router
+(mocked — no network), max_tokens/num_predict emission, the worker's
+budget pass-through, the modal's row lifecycle + gating, themed dialog
+backgrounds + the wizard in light mode, the import-only Input tab (.md
+path end-to-end), and the two-radio LLM tab (visibility + persistence).
+Updated: test_detectset (the buttons now live in Settings only), the
+label constants, the recorder fakes (`max_output_tokens`), and the
+smoke tool. **Suite: 772** (was 742) — all green; golden offline 30/30.
+
 ## [0.22.0] — The bot accepts every link: websites into the ledger, the x-family policy, the not_github amnesty — 2026-09-30
 
 The owner sent `https://reverseui.com/` to @githubfetcherbot and got back:

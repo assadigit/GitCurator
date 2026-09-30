@@ -235,11 +235,37 @@ def extract_json(text: str) -> dict:
 # estimate guard below warns BEFORE the server can chop anything quietly.
 DEFAULT_NUM_CTX = 8192
 
+# v0.23.0 — the OUTPUT half of the context budget. Models split their total
+# window between the prompt and the answer (e.g. a 160k-total model with a
+# 32k output cap leaves 128k for the prompt). 0/None = leave the output cap
+# to the server's default (OpenAI-compatible: don't send max_tokens; Ollama:
+# don't send num_predict). Anthropic REQUIRES max_tokens on every call —
+# the Claude path falls back to this default when unset.
+DEFAULT_MAX_OUTPUT_TOKENS = 0
+ANTHROPIC_FALLBACK_MAX_TOKENS = 4096
+
 # The canonical label for the cloud provider option (SPEC §6 Phase 4:
 # relabel "Cloud API" — GUI radio, settings group, CLI wizard and README
-# all import this single constant).
-CLOUD_PROVIDER_LABEL = (
-    "OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, cloud)")
+# all import this single constant). v0.23.0: the parenthetical is gone —
+# the label names exactly what the field is; the examples live in tooltips.
+CLOUD_PROVIDER_LABEL = "OpenAI-compatible endpoint"
+
+# v0.23.0 — the Claude/Anthropic API is a FIRST-CLASS cloud backend. The
+# Messages API is NOT OpenAI-shaped (x-api-key + anthropic-version headers,
+# /v1/messages, required max_tokens, content-blocks response), so the URL
+# decides the wire format: an api.anthropic.com base routes to anthropic_chat,
+# everything else to openai_chat (llama.cpp / vLLM / LM Studio / OpenAI /
+# OpenRouter / Together / Workers AI…). cloud_chat is the single router both
+# the GUI and the worker call.
+ANTHROPIC_VERSION_HEADER = "2023-06-01"
+ANTHROPIC_HOST_HINTS = ("api.anthropic.com", "anthropic.com")
+
+
+def is_anthropic_url(api_url: str) -> bool:
+    """True when the base URL points at the Anthropic API (api.anthropic.com
+    or any *.anthropic.com host — enterprise gateways keep the host name)."""
+    base = str(api_url or "").strip().lower()
+    return any(hint in base for hint in ANTHROPIC_HOST_HINTS)
 
 # Base URLs whose server REJECTED ``response_format`` (HTTP 400). Remembered
 # so later calls skip the doomed attempt instead of paying for the round
@@ -310,7 +336,7 @@ def resolve_task_model(config, task, default_model):
 
 def openai_chat(api_url, api_key, model, messages, timeout_s, *,
                 json_mode=False, temperature=0.7, verify_tls=False,
-                num_ctx=None, on_warn=None):
+                num_ctx=None, max_output_tokens=None, on_warn=None):
     """POST ``<api_url>/chat/completions`` through the SAME wall-clock
     timeout wrapper as Ollama (``call_with_timeout``) — a hung endpoint can
     no longer freeze a batch (SPEC §6 Phase 4).
@@ -361,6 +387,11 @@ def openai_chat(api_url, api_key, model, messages, timeout_s, *,
     def _post(use_json_mode):
         body = {'model': model, 'messages': messages,
                 'temperature': temperature}
+        # v0.23.0 — the output cap (the second half of the context budget:
+        # total window = prompt + output). Only sent when the user set one —
+        # 0/None keeps the server's own default.
+        if max_output_tokens and int(max_output_tokens) > 0:
+            body['max_tokens'] = int(max_output_tokens)
         if use_json_mode:
             body['response_format'] = {'type': 'json_object'}
         data = json.dumps(body).encode('utf-8')
@@ -503,11 +534,187 @@ def preflight_openai(api_url, api_key, model, timeout_s=15):
 
 
 # ---------------------------------------------------------------------------
+# v0.23.0 — the Anthropic Claude API (the second cloud wire format)
+# ---------------------------------------------------------------------------
+
+def anthropic_list_models(api_url, api_key, timeout_s=15):
+    """GET ``<api_url>/models`` with the Anthropic headers (x-api-key +
+    anthropic-version). Returns the model id list. Raises CloudLLMError on
+    anything but HTTP 200 — same contract as openai_list_models."""
+    import urllib.error
+    import urllib.request
+
+    base = (api_url or '').rstrip('/')
+    if not base:
+        raise CloudLLMError("no API URL configured for the Claude endpoint")
+    req = urllib.request.Request(base + '/models')
+    req.add_header('x-api-key', api_key or '')
+    req.add_header('anthropic-version', ANTHROPIC_VERSION_HEADER)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as e:
+        raise CloudLLMError(f"GET {base}/models answered HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise CloudLLMError(f"could not reach {base}/models: {e}")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        raise CloudLLMError(f"GET {base}/models returned a non-JSON body")
+    data = payload.get('data') if isinstance(payload, dict) else None
+    names = []
+    for m in (data if isinstance(data, list) else []):
+        if isinstance(m, dict):
+            mid = m.get('id') or m.get('name')
+            if mid:
+                names.append(str(mid))
+    return names
+
+
+def anthropic_chat(api_url, api_key, model, messages, timeout_s, *,
+                   json_mode=False, temperature=0.7, verify_tls=False,
+                   num_ctx=None, max_output_tokens=None, on_warn=None):
+    """POST ``<api_url>/messages`` — the Anthropic Claude wire format.
+
+    Same contract as ``openai_chat`` (wall-clock timeout via
+    ``call_with_timeout``, clear CloudLLM* errors, '' on a well-formed but
+    empty answer) with the Messages-API differences handled:
+
+      * headers: ``x-api-key`` + ``anthropic-version`` (no Bearer)
+      * the system message rides the top-level ``system`` parameter, and
+        only user/assistant turns stay in ``messages``
+      * ``max_tokens`` is REQUIRED by the API — the user's output cap when
+        set, else ANTHROPIC_FALLBACK_MAX_TOKENS
+      * the answer is a list of content blocks — the text blocks are joined
+      * ``response_format`` does not exist on this API: json_mode only adds
+        a JSON-only instruction to the system text (Claude follows it; the
+        extract_json parser handles the rest)
+    """
+    import urllib.error
+    import urllib.request
+    import ssl
+
+    base = (api_url or '').rstrip('/')
+    if not base:
+        raise CloudLLMError("no API URL configured for the Claude endpoint")
+
+    if num_ctx and int(num_ctx) > 0 and on_warn:
+        est = estimate_tokens(messages)
+        if est > int(num_ctx):
+            on_warn(
+                f"prompt ≈{est} tokens may exceed the model's context window "
+                f"(llm_num_ctx={int(num_ctx)}) — answers may degrade if the "
+                "model can't see the whole prompt.")
+
+    # Split the system messages out (Messages API: top-level `system`).
+    system_parts = [str(m.get('content') or '') for m in (messages or [])
+                    if isinstance(m, dict) and m.get('role') == 'system']
+    chat_messages = [
+        {'role': (m.get('role') if m.get('role') in ('user', 'assistant')
+                  else 'user'),
+         'content': str(m.get('content') or '')}
+        for m in (messages or []) if isinstance(m, dict)
+        and m.get('role') != 'system'
+    ]
+    system_text = "\n\n".join(p for p in system_parts if p)
+    if json_mode and system_text:
+        system_text = (system_text
+                       + "\n\nReply with ONLY a valid JSON object — no prose, "
+                         "no markdown fences.")
+
+    def _post():
+        body = {'model': model, 'messages': chat_messages,
+                'max_tokens': (int(max_output_tokens)
+                               if max_output_tokens and int(max_output_tokens) > 0
+                               else ANTHROPIC_FALLBACK_MAX_TOKENS),
+                'temperature': temperature}
+        if system_text:
+            body['system'] = system_text
+        data = json.dumps(body).encode('utf-8')
+        headers = {'Content-Type': 'application/json',
+                   'anthropic-version': ANTHROPIC_VERSION_HEADER}
+        if api_key:
+            headers['x-api-key'] = api_key
+        req = urllib.request.Request(
+            base + '/messages', data=data, headers=headers)
+        ctx = ssl.create_default_context()
+        if not verify_tls:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        sock_timeout = timeout_s + 5 if timeout_s and timeout_s > 0 else 120
+        return urllib.request.urlopen(req, context=ctx, timeout=sock_timeout)
+
+    def _content(payload):
+        if not isinstance(payload, dict):
+            raise CloudLLMBadResponse("endpoint returned a non-object body")
+        err = payload.get('error')
+        if err:
+            msg = err.get('message') if isinstance(err, dict) else str(err)
+            raise CloudLLMBadResponse(f"endpoint error object: {msg}")
+        blocks = payload.get('content')
+        if not isinstance(blocks, list) or not blocks:
+            raise CloudLLMBadResponse("endpoint returned no content blocks")
+        texts = [str(b.get('text') or '') for b in blocks
+                 if isinstance(b, dict) and b.get('type') == 'text']
+        return '\n'.join(t for t in texts if t)
+
+    try:
+        resp = call_with_timeout(_post, timeout_s)
+        raw = resp.read().decode('utf-8', errors='replace')
+        try:
+            return _content(json.loads(raw))
+        except json.JSONDecodeError:
+            raise CloudLLMBadResponse(
+                "endpoint returned a non-JSON body: " + (raw[:160] or '(empty)'))
+    except urllib.error.HTTPError as e:
+        body_text = ''
+        try:
+            body_text = e.read().decode('utf-8', errors='replace')
+        except Exception:
+            pass
+        raise CloudLLMHTTPError(e.code, body_text)
+    except urllib.error.URLError as e:
+        raise CloudLLMError(
+            f"could not reach the Claude endpoint {base}: {e}") from e
+
+
+def cloud_chat(api_url, api_key, model, messages, timeout_s, **kwargs):
+    """v0.23.0 — the ONE cloud router: the URL decides the wire format.
+    api.anthropic.com → anthropic_chat (Claude), everything else →
+    openai_chat (OpenAI-compatible: llama.cpp, vLLM, LM Studio, OpenAI,
+    OpenRouter, Together…). Same keyword arguments as both (json_mode,
+    num_ctx, max_output_tokens, on_warn, temperature, verify_tls)."""
+    if is_anthropic_url(api_url):
+        return anthropic_chat(api_url, api_key, model, messages, timeout_s,
+                              **kwargs)
+    return openai_chat(api_url, api_key, model, messages, timeout_s,
+                       **kwargs)
+
+
+def preflight_cloud(api_url, api_key, model, timeout_s=15):
+    """The model-list pre-flight for EITHER cloud wire format (the URL
+    decides, exactly like cloud_chat). Same contract as preflight_openai:
+    ``(endpoint_ok, message, model_listed)`` — never a gate."""
+    try:
+        if is_anthropic_url(api_url):
+            names = anthropic_list_models(api_url, api_key, timeout_s)
+        else:
+            names = openai_list_models(api_url, api_key, timeout_s)
+    except CloudLLMError as e:
+        return False, str(e), None
+    listed = None
+    if names:
+        lowered = {n.lower() for n in names}
+        listed = str(model or '').strip().lower() in lowered
+    return True, f"{len(names)} model(s) listed", listed
+
+
+# ---------------------------------------------------------------------------
 # Ollama chat with the explicit context window
 # ---------------------------------------------------------------------------
 
 def ollama_chat(client, model, messages, timeout_s, *, json_mode=True,
-                num_ctx=None, on_warn=None):
+                num_ctx=None, num_predict=None, on_warn=None):
     """``client.chat`` with the SAME wall-clock timeout wrapper as always,
     plus the explicit context window: ``options.num_ctx`` is sent on every
     call (Ollama's own default is small and truncates long prompts from
@@ -515,12 +722,17 @@ def ollama_chat(client, model, messages, timeout_s, *, json_mode=True,
     visible choice). When the estimated prompt exceeds ``num_ctx`` the
     caller is warned through ``on_warn`` BEFORE the call — nothing is ever
     chopped quietly. ``num_ctx=None`` (or 0) leaves the window to the
-    server. Returns the assistant content string (both ollama-py response
-    shapes handled by ``response_content``)."""
+    server. v0.23.0: ``num_predict`` (the OUTPUT half of the context
+    budget — e.g. 32k output on a 160k-total model) is sent as
+    options.num_predict when > 0; None/0 keeps the server default. Returns
+    the assistant content string (both ollama-py response shapes handled
+    by ``response_content``)."""
     kwargs = {'model': model, 'messages': messages}
     if num_ctx and int(num_ctx) > 0:
         num_ctx = int(num_ctx)
         kwargs['options'] = {'num_ctx': num_ctx}
+        if num_predict and int(num_predict) > 0:
+            kwargs['options']['num_predict'] = int(num_predict)
         est = estimate_tokens(messages)
         if est > num_ctx and on_warn:
             on_warn(
