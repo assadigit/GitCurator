@@ -108,35 +108,6 @@ from gitcurator.integrations.subprocess_runner import (
     live_worker_count as _live_telegram_worker_count,
 )
 
-# v0.08 — 404 QUARANTINE THRESHOLD (owner spec: "after 2-3 tries across
-# different sessions, system ignore those links"). A GitHub link that 404s
-# this many times (counted in cache.db, so the count survives restarts) is
-# confirmed dead and silently skipped in EVERY input path.
-DEAD_LINK_THRESHOLD = 3
-
-
-def dead_link_threshold(config=None) -> int:
-    """v0.09 (lineage merge) — the quarantine threshold is CONFIGURABLE.
-
-    The v0.08 lineage hardcoded DEAD_LINK_THRESHOLD = 3; the v0.07 lineage
-    had a config key (``notfound_strike_threshold``, owner request:
-    "auto-ignore after 2–3") with GUI + CLI controls. The merged design
-    keeps the v0.08 quarantine machinery but reads the threshold from the
-    SAME config key, so the Settings → Dashboard spinbox, ``--strikes N``
-    (CLI) and config.json all steer it. Accepts the config dict directly
-    (worker/CLI already hold it) or falls back to reading config.json.
-    Clamped to >= 2; any error falls back to DEAD_LINK_THRESHOLD."""
-    try:
-        cfg = config if isinstance(config, dict) else None
-        if cfg is None:
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r') as _f:
-                    cfg = json.load(_f)
-        raw = (cfg or {}).get('notfound_strike_threshold',
-                              DEAD_LINK_THRESHOLD)
-        return max(2, int(raw))
-    except (TypeError, ValueError, OSError, json.JSONDecodeError):
-        return DEAD_LINK_THRESHOLD
 
 # Historical name kept: the few path resolutions below that used to point
 # at the flat main.py directory. APP_DIR is the app/ root, so assets/,
@@ -223,6 +194,7 @@ except ImportError as e:
     _CLOUDFLARE_AVAILABLE = False
     print(f"[WARN] Cloudflare modules not available: {e}")
     print("[WARN] Bot sync + GDrive backup disabled. Install cloudflare_sync.py, cloudflare_manager.py, error_reporter.py, gdrive_backup.py")
+from gitcurator.gui.dead_links import DEAD_LINK_THRESHOLD, dead_link_threshold
 from gitcurator.gui.link_helpers import extract_github_urls, clean_url, normalize_url
 
 try:
