@@ -1357,6 +1357,25 @@ def _code_prompt(kind: str):
     return val
 
 
+def _links_blocked_domains(cfg: dict) -> list:
+    """v0.24.1 — core.links.blocked_domains_from_config, imported lazily
+    (CLI keeps its deps local). Never raises."""
+    try:
+        from gitcurator.core import links as _links
+        return _links.blocked_domains_from_config(cfg)
+    except Exception:
+        return []
+
+
+def _links_self_domains(cfg: dict) -> list:
+    """v0.24.1 — core.links.self_domains_from_config, imported lazily."""
+    try:
+        from gitcurator.core import links as _links
+        return _links.self_domains_from_config(cfg)
+    except Exception:
+        return []
+
+
 def fetch_bot_queue(cfg: dict, status: StatusLine, min_id: int = 0) -> dict:
     """Run _bot_queue_job in a worker thread while the main thread animates."""
     try:
@@ -1383,6 +1402,15 @@ def fetch_bot_queue(cfg: dict, status: StatusLine, min_id: int = 0) -> dict:
                 mark_read=False,
                 min_id=min_id,
                 vault_path=cfg.get("vault_path", ""),
+                blocked_domains=_links_blocked_domains(cfg),
+                self_domains=_links_self_domains(cfg),
+                # v0.24.1 — Fix (websites never sync): classify the
+                # non-GitHub links against the WEBSITES vault too, so the
+                # CLI's "pending" covers both pipelines (same fields the
+                # GUI's queue check produces).
+                website_vault_path=((cfg.get("website_vault_path") or "").strip() or None),
+                websites_pipeline_on=bool(
+                    (cfg.get("pipelines") or {}).get("websites", False)),
             )
         except Exception as exc:                       # pragma: no cover
             result_box["r"] = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -2042,12 +2070,29 @@ def cmd_auto(args) -> int:
     decomm = result.get("decommissioned_count", 0)
     non_github = result.get("non_github_urls", []) or []
     vault_index_count = result.get("vault_index_count")
+    # v0.24.1 — Fix (websites never sync): the WEBSITES side of the queue.
+    # "pending" now covers both pipelines — a caught-up GitHub vault no
+    # longer masks unprocessed website links.
+    pending_web = result.get("pending_website_urls") or []
+    web_in_vault = int(result.get("websites_in_vault_count", 0) or 0)
+    web_processed = int(result.get("websites_processed_count", 0) or 0)
 
     print(paint("Queue: ", C.BOLD)
-          + paint(f"{len(pending)} pending", C.GREEN if pending else C.DIM) + paint(" · ", C.DIM)
+          + paint(f"{len(pending)} repo(s) pending", C.GREEN if pending else C.DIM) + paint(" · ", C.DIM)
           + paint(f"{in_vault} already in vault", C.DIM) + paint(" · ", C.DIM)
           + paint(f"{decomm} decommissioned", C.DIM) + paint(" · ", C.DIM)
-          + paint(f"{len(non_github)} non-GitHub", C.DIM))
+          + paint(f"{len(pending_web)} website(s) pending", C.GREEN if pending_web else C.DIM)
+          + paint(f" · {len(non_github)} non-GitHub", C.DIM))
+    if result.get("websites_vault_index_count") is not None:
+        print(paint(f"Websites vault — {result['websites_vault_index_count']} note(s) indexed · "
+                    f"{web_in_vault + web_processed} already done", C.DIM))
+    elif non_github and result.get("websites_pipeline_off"):
+        cli_print(f"{len(non_github)} non-GitHub link(s) are waiting as _inbox rows — "
+                  "the Websites pipeline is OFF (config.json: pipelines.websites), "
+                  "so they are never curated into the Websites vault.", "info")
+    elif non_github and result.get("websites_no_vault"):
+        cli_print("Websites pipeline is ON but website_vault_path is empty — "
+                  "non-GitHub links stay in _inbox.", "info")
 
     # v0.09.4 — visibility + guard for the dedup layers. The vault index is
     # the app's ground truth for "already done" (a URL with a note in the
@@ -2111,13 +2156,20 @@ def cmd_auto(args) -> int:
                       "warning")
             return 1
 
-    if not pending:
+    if not pending and not pending_web:
         cli_print("All caught up — nothing to process. 🎉", "success")
+        if non_github and not pending_web:
+            # Websites are either done or off — the hint above already says
+            # which; nothing else to do here.
+            pass
         return 0
 
-    if getattr(args, "yes", False) is False and len(pending) > 10 and sys.stdin.isatty():
+    _total_batch = len(pending) + len(pending_web)
+    if getattr(args, "yes", False) is False and _total_batch > 10 and sys.stdin.isatty():
         ans = input(paint("? ", C.CYAN)
-                    + f"{len(pending)} repos ready — process them all? " + paint("[Y/n] ", C.CYAN)).strip().lower()
+                    + f"{_total_batch} item(s) ready ({len(pending)} repo(s) + "
+                    f"{len(pending_web)} website(s)) — process them all? "
+                    + paint("[Y/n] ", C.CYAN)).strip().lower()
         if ans.startswith("n"):
             cli_print("Cancelled — nothing was processed.", "warning")
             return 0

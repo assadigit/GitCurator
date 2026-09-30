@@ -68,13 +68,27 @@ class ProcessingControlMixin:
             return
 
         # Fetched bot queue first (the SYNC flow's fetched items).
+        # v0.24.1 — Fix (websites never sync): the gate covers pending
+        # WEBSITES too — a websites-only batch starts here when the GitHub
+        # side is already caught up. Before, "0 pending repos" blocked the
+        # batch and the Websites pipeline never ran from the queue.
         bot_urls = getattr(self, '_bot_queue_urls', [])
-        if bot_urls:
+        web_pending = getattr(self, '_bot_queue_pending_websites', []) or []
+        if bot_urls or web_pending:
             # v31.1 safety gate: confirm before large batches (>10 items).
-            if not self._confirm_batch(len(bot_urls), "the bot queue"):
+            if not self._confirm_batch(len(bot_urls) + len(web_pending), "the bot queue"):
                 self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
                 return
-            self.log_message(f"🚀 Processing {len(bot_urls)} repos from bot queue...", "info")
+            if bot_urls and web_pending:
+                self.log_message(
+                    f"🚀 Processing {len(bot_urls)} repo(s) + {len(web_pending)} "
+                    "website link(s) from bot queue...", "info")
+            elif bot_urls:
+                self.log_message(f"🚀 Processing {len(bot_urls)} repos from bot queue...", "info")
+            else:
+                self.log_message(
+                    f"🚀 Processing {len(web_pending)} website link(s) from bot "
+                    "queue (Websites pipeline)...", "info")
             # v23 — pass bot_source=True so the manifest records the source
             # as 'bot' and Phase 5 auto-mark-read can fire on success. Also
             # pass the non-GitHub links so they are tracked in the manifest
@@ -351,13 +365,26 @@ class ProcessingControlMixin:
             # GitHub URLs and ignored non-GitHub links. The LinkTracker's
             # manifest is now the single source of truth.
             #
+            # v0.24.1 — Fix (websites never sync): the gate now also fires for
+            # a WEBSITES-ONLY batch (bot messages full of site links). The
+            # batch's own manifest (worker.link_tracker) + its _bot_source
+            # flag decide — NOT the stale GUI _bot_queue_urls list, so an
+            # unrelated import batch can never consume the bot queue.
+            #
             # Fallback: if there is no link_tracker (e.g. vault_path was
             # empty when the worker started), fall back to the v22 vault
             # index check so we don't regress.
             bot_urls = getattr(self, '_bot_queue_urls', [])
+            worker_lt = getattr(self.worker, 'link_tracker', None) if self.worker else None
+            _batch_from_bot = bool(
+                getattr(self.worker, '_bot_source', False)) if self.worker else False
             all_clear = False
-            if bot_urls:
-                worker_lt = getattr(self.worker, 'link_tracker', None) if self.worker else None
+            # v0.24.1 — the batch's own _bot_source flag decides (every
+            # worker gets it in _start_worker since v23): a bot-queue batch
+            # (repos, websites, or both) verifies + consumes the queue; an
+            # import/retry/sources batch never does — even when a stale
+            # _bot_queue_urls list from an earlier check is still around.
+            if _batch_from_bot and (bot_urls or worker_lt is not None):
                 if worker_lt:
                     if worker_lt.get_all_clear():
                         all_clear = True

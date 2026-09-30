@@ -89,7 +89,7 @@ def _telegram_test_job(api_id, api_hash, phone, proxy, log_signal, code_callback
     }
     return _run_telegram_worker(config, log_signal, code_callback=code_callback)
 
-def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None, self_domains=None):
+def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None, self_domains=None, website_vault_path=None, websites_pipeline_on=False):
     """Fetch unread GitHub URLs from the user's dedicated bot chat.
     Uses the user's Telethon session (through proxy) to read messages sent
     TO the bot. Resolves the bot by username (no Bot API call needed —
@@ -116,6 +116,20 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     v0.21.0 — ``self_domains`` does the same for the app's OWN hosts
     (the bot's auth links): their own bucket (``self_count``), never
     pending, never fetched.
+
+    v0.24.1 — Fix (websites never sync): ``website_vault_path`` +
+    ``websites_pipeline_on`` classify the NON-GitHub links against the
+    WEBSITES vault (its own VaultIndex, keyed by
+    links.normalize_website_url) + the WebsiteStateDB dedupe tables, so
+    the queue knows how many website links are still UNDONE. Before this,
+    "pending" was GitHub-only: when every repo was already in the vault
+    the app said "All caught up" even with hundreds of unprocessed
+    website links waiting, and PROCESS never ran the Websites pipeline.
+    The result dict gains: pending_website_urls,
+    websites_in_vault_count, websites_processed_count,
+    websites_dismissed_count, websites_blocked_count,
+    websites_self_count, websites_vault_index_count (plus
+    websites_pipeline_off / websites_no_vault hints when not configured).
     """
     config = {
         'api_id': int(api_id),
@@ -169,6 +183,107 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             result['pending_urls'] = list(result.get('urls', []))
             result['in_vault_count'] = 0
             result['decommissioned_count'] = 0
+
+    # v0.24.1 — Fix (websites never sync): classify the NON-GitHub links
+    # against the Websites vault so "pending" covers BOTH pipelines. Runs
+    # on this worker thread (same anti-GUI-freeze rule as the GitHub
+    # classification above). The WebsitePipeline's own dedupe layers are
+    # replicated exactly (core/website_pipeline._process_link_inner):
+    #   blocked/self domain   -> never fetched (_inbox row is the record)
+    #   dismissed             -> owner deleted the note; never re-add
+    #   in vault (real note)  -> done
+    #   in vault, failed _review placeholder with retries left -> PENDING
+    #   (the upgrade/retry path — the pipeline re-processes it)
+    #   websites_processed    -> done (any fetch_status but a failed one
+    #   whose note is a _review placeholder is still retried via due list)
+    #   anything else         -> PENDING (never processed)
+    if result.get('success') and not mark_read:
+        non_github = list(result.get('non_github_urls', []) or [])
+        if not websites_pipeline_on:
+            # The switch is OFF: websites are _inbox rows by design — but
+            # SAY so (the owner's rule: never silently look "caught up"
+            # while non-GitHub links are sitting unprocessed).
+            result['pending_website_urls'] = []
+            if non_github:
+                result['websites_pipeline_off'] = True
+        elif not (website_vault_path or '').strip():
+            result['pending_website_urls'] = []
+            if non_github:
+                result['websites_no_vault'] = True
+        elif not os.path.isdir(website_vault_path):
+            # v0.24.1 — a configured-but-missing Websites vault path is a
+            # config error: say so, and treat every non-GitHub link as
+            # pending (never silently "all caught up"; VaultIndex.rebuild
+            # on a missing dir would otherwise index 0 notes quietly).
+            log_signal.emit(
+                f"⚠️ Websites vault not found at {website_vault_path} — "
+                "treating every non-GitHub link as pending. Fix the path "
+                "in Settings → 📁 Vault.", "warning")
+            result['pending_website_urls'] = list(non_github)
+        elif non_github:
+            try:
+                wvi = VaultIndex(
+                    website_vault_path,
+                    normalizer=_links.normalize_website_url)
+                wvi.rebuild(log_signal=None)
+                result['websites_vault_index_count'] = wvi.count
+                state = None
+                try:
+                    state = _website_pipeline.WebsiteStateDB()
+                except Exception as state_err:
+                    log_signal.emit(
+                        f"⚠️ Websites state DB unavailable ({state_err}) — "
+                        "classifying by vault index only.", "warning")
+                pending_web, web_in_vault, web_done, web_dismissed = [], 0, 0, 0
+                web_blocked, web_self = 0, 0
+                for url in non_github:
+                    canonical = _links.normalize_website_url(url)
+                    if blocked_domains and _links.domain_is_blocked(
+                            url, blocked_domains):
+                        web_blocked += 1
+                    elif self_domains and _links.domain_is_self(
+                            url, self_domains):
+                        web_self += 1
+                    elif wvi.has_url(url):
+                        # In the vault. A failed-fetch _review placeholder
+                        # with retries remaining is PENDING (upgrade path);
+                        # everything else is a real note — done.
+                        prior = None
+                        if state is not None:
+                            try:
+                                prior = state.processed_row(canonical)
+                            except Exception:
+                                prior = None
+                        if (prior and prior.get('fetch_status') == 'failed'
+                                and state is not None):
+                            pending_web.append(url)
+                        else:
+                            web_in_vault += 1
+                    elif state is not None and state.is_dismissed(canonical):
+                        web_dismissed += 1
+                    elif state is not None and state.is_processed(canonical):
+                        web_done += 1
+                    else:
+                        pending_web.append(url)
+                if state is not None:
+                    try:
+                        state.close()
+                    except Exception:
+                        pass
+                result['pending_website_urls'] = pending_web
+                result['websites_in_vault_count'] = web_in_vault
+                result['websites_processed_count'] = web_done
+                result['websites_dismissed_count'] = web_dismissed
+                result['websites_blocked_count'] = web_blocked
+                result['websites_self_count'] = web_self
+            except Exception as web_err:
+                log_signal.emit(
+                    f"⚠️ Websites vault filter failed in worker ({web_err}) — "
+                    "treating every non-GitHub link as a pending website.",
+                    "warning")
+                result['pending_website_urls'] = list(non_github)
+        else:
+            result['pending_website_urls'] = []
     return result
 
 def _connection_battery_job(config, log_signal, on_section=None, on_result=None):

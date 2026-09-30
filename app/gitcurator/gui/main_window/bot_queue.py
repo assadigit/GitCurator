@@ -192,7 +192,14 @@ class BotQueueMixin:
                                   worker.request_code,
                                   vault_path=(_vault_for_filter or None),
                                   blocked_domains=_links.blocked_domains_from_config(self.config),
-                                  self_domains=_links.self_domains_from_config(self.config))
+                                  self_domains=_links.self_domains_from_config(self.config),
+                                  # v0.24.1 — Fix (websites never sync): hand
+                                  # the WEBSITES vault + pipeline switch to the
+                                  # job so the non-GitHub links get the same
+                                  # pending classification the GitHub ones
+                                  # have always had.
+                                  website_vault_path=((self.config.get('website_vault_path') or '').strip() or None),
+                                  websites_pipeline_on=bool(((self.config or {}).get('pipelines') or {}).get('websites', False)))
         worker._fn = _job
 
         worker.log_message.connect(self.log_message)
@@ -285,10 +292,80 @@ class BotQueueMixin:
                 # Store ONLY pending URLs for processing (Q9: progress bar shows only new repos)
                 self._bot_queue_urls = pending_urls
 
+                # v0.24.1 — Fix (websites never sync): classify the
+                # non-GitHub links against the WEBSITES vault too. The
+                # worker thread precomputes it (v0.06 perf rule); this
+                # GUI-side fallback only fires for results that arrive
+                # unclassified. Without this, "pending" was GitHub-only
+                # and the app reported "All caught up" while unprocessed
+                # website links waited in the queue forever.
+                _websites_on = bool(((self.config or {}).get('pipelines') or {}).get('websites', False))
+                _web_vault = (self.config.get('website_vault_path') or '').strip()
+                if 'pending_website_urls' in result:
+                    pending_websites = list(result.get('pending_website_urls') or [])
+                    _websites_in_vault = int(result.get('websites_in_vault_count', 0) or 0)
+                    _websites_processed = int(result.get('websites_processed_count', 0) or 0)
+                    _websites_dismissed = int(result.get('websites_dismissed_count', 0) or 0)
+                    _websites_blocked = int(result.get('websites_blocked_count', 0) or 0)
+                    _websites_self = int(result.get('websites_self_count', 0) or 0)
+                    if result.get('websites_vault_index_count'):
+                        self.log_message(
+                            f"📚 Websites vault index: {result['websites_vault_index_count']} notes indexed", "info")
+                else:
+                    pending_websites = []
+                    _websites_in_vault = _websites_processed = 0
+                    _websites_dismissed = _websites_blocked = _websites_self = 0
+                    if _websites_on and _web_vault and non_github:
+                        try:
+                            _wvi = VaultIndex(_web_vault, normalizer=_links.normalize_website_url)
+                            _wvi.rebuild(log_signal=None)
+                            _wstate = None
+                            try:
+                                _wstate = _website_pipeline.WebsiteStateDB()
+                            except Exception:
+                                _wstate = None
+                            _blocked_list = _links.blocked_domains_from_config(self.config)
+                            _self_list = _links.self_domains_from_config(self.config)
+                            for _u in non_github:
+                                _canon = _links.normalize_website_url(_u)
+                                if _links.domain_is_blocked(_u, _blocked_list):
+                                    _websites_blocked += 1
+                                elif _links.domain_is_self(_u, _self_list):
+                                    _websites_self += 1
+                                elif _wvi.has_url(_u):
+                                    _prior = None
+                                    if _wstate is not None:
+                                        try:
+                                            _prior = _wstate.processed_row(_canon)
+                                        except Exception:
+                                            _prior = None
+                                    if _prior and _prior.get('fetch_status') == 'failed':
+                                        pending_websites.append(_u)
+                                    else:
+                                        _websites_in_vault += 1
+                                elif _wstate is not None and _wstate.is_dismissed(_canon):
+                                    _websites_dismissed += 1
+                                elif _wstate is not None and _wstate.is_processed(_canon):
+                                    _websites_processed += 1
+                                else:
+                                    pending_websites.append(_u)
+                            if _wstate is not None:
+                                try:
+                                    _wstate.close()
+                                except Exception:
+                                    pass
+                        except Exception as _wvi_err:
+                            self.log_message(
+                                f"⚠️ Websites vault classification failed: {_wvi_err}", "warning")
+                            pending_websites = list(non_github)
+                self._bot_queue_pending_websites = pending_websites
+                _total_pending = len(pending_urls) + len(pending_websites)
+
                 # Update pending badge (Q15). v31.1: zinc + ⏳ — a pending
                 # count is routine, NOT an error; red is reserved for failures.
-                if pending_urls:
-                    self.pending_badge.setText(f"⏳ {len(pending_urls)} pending")
+                # v0.24.1: the count now includes pending WEBSITES too.
+                if _total_pending:
+                    self.pending_badge.setText(f"⏳ {_total_pending} pending")
                     self.pending_badge.setStyleSheet(
                         "background-color: #6C6480; color: white; padding: 4px 8px; "
                         "border-radius: 10px; font-size: 12px; font-weight: bold;"
@@ -303,6 +380,8 @@ class BotQueueMixin:
                     self.pending_badge.setVisible(True)
 
                 # Build display (Q6: show vault-dedup count)
+                # v0.24.1: the queue report now shows the WEBSITES side too —
+                # both pipelines' pending state, side by side.
                 display = f"📬 Bot Queue Results\n"
                 display += f"{'='*50}\n"
                 display += f"Total GitHub URLs in bot:  {len(all_urls)}\n"
@@ -314,6 +393,32 @@ class BotQueueMixin:
                     display += f"🔒 Self domains (own bot):  {self_count}\n"
                 display += f"⏳ Pending (not in vault):  {len(pending_urls)}\n"
                 display += f"🔗 Non-GitHub links:        {len(non_github)}\n"
+                if _websites_on and _web_vault and non_github:
+                    display += f"{'='*50}\n"
+                    display += f"🌐 WEBSITES pipeline (vault: {_web_vault})\n"
+                    if result.get('websites_vault_index_count') is not None:
+                        display += f"📚 Websites vault notes:    {result.get('websites_vault_index_count', 0)}\n"
+                    display += f"✅ Websites in vault:       {_websites_in_vault}\n"
+                    display += f"✔️ Websites processed:      {_websites_processed}\n"
+                    if _websites_dismissed:
+                        display += f"🗑️ Websites dismissed:      {_websites_dismissed}\n"
+                    if _websites_blocked:
+                        display += f"🚫 Blocked domains:         {_websites_blocked}\n"
+                    if _websites_self:
+                        display += f"🔒 Self domains (own bot):  {_websites_self}\n"
+                    display += f"⏳ Websites pending:        {len(pending_websites)}\n"
+                elif non_github:
+                    if not _websites_on:
+                        display += f"{'='*50}\n"
+                        display += (f"⚠️ Websites pipeline is OFF — {len(non_github)} non-GitHub "
+                                    "link(s) stay as _inbox rows.\n")
+                        display += "   Enable it in Settings → 📁 Vault to process them "
+                        display += "into the Websites vault.\n"
+                    elif not _web_vault:
+                        display += f"{'='*50}\n"
+                        display += (f"⚠️ Websites pipeline is ON but no Websites vault is "
+                                    "set — non-GitHub link(s) stay as _inbox rows.\n")
+                        display += "   Pick one in Settings → 📁 Vault.\n"
                 if getattr(self, '_bot_queue_duplicates', 0) > 0:
                     display += f"🔄 Duplicates removed:      {self._bot_queue_duplicates}\n"
                 display += f"{'='*50}\n\n"
@@ -326,22 +431,49 @@ class BotQueueMixin:
                     display += "🎉 All GitHub repos are already in the vault!\n"
                     display += "Click '✅ Verify All Processed' to confirm.\n"
 
-                if non_github:
+                if _websites_on and _web_vault:
+                    if pending_websites:
+                        display += f"\nPENDING WEBSITES ({len(pending_websites)} — need processing):\n"
+                        _shown = pending_websites[:50]
+                        for i, u in enumerate(_shown, 1):
+                            display += f"  {i}. {u}\n"
+                        if len(pending_websites) > len(_shown):
+                            display += f"  … and {len(pending_websites) - len(_shown)} more\n"
+                    else:
+                        display += "\n🎉 All non-GitHub links are processed into the Websites vault!\n"
+                elif non_github:
                     display += f"\nNON-GITHUB LINKS ({len(non_github)}):\n"
                     display += "(Recorded in _inbox/ per platform)\n"
 
                 self.queue_display.setPlainText(display)
 
-                if pending_urls:
+                if _total_pending:
                     self.log_message(
-                        f"📬 Queue: {len(pending_urls)} new repos pending ({in_vault_count} already in vault)",
+                        f"📬 Queue: {len(pending_urls)} new repo(s) + "
+                        f"{len(pending_websites)} website link(s) pending "
+                        f"({in_vault_count} repos + "
+                        f"{_websites_in_vault + _websites_processed} websites already done)",
                         "success"
                     )
                 else:
                     self.log_message(
-                        f"📬 Queue: All {len(all_urls)} GitHub repos already in vault! 0 pending.",
+                        f"📬 Queue: all caught up — {len(all_urls)} GitHub repos "
+                        f"and {len(non_github)} non-GitHub link(s) are already "
+                        "processed.",
                         "success"
                     )
+                    # v0.24.1 — actionable hints instead of a silent "caught up"
+                    if result.get('websites_pipeline_off') and non_github:
+                        self.log_message(
+                            f"ℹ️ {len(non_github)} non-GitHub link(s) are waiting as "
+                            "_inbox rows — turn the Websites pipeline ON "
+                            "(Settings → 📁 Vault) to curate them into the "
+                            "Websites vault.", "info")
+                    elif result.get('websites_no_vault') and non_github:
+                        self.log_message(
+                            f"ℹ️ Websites pipeline is ON but no Websites vault is "
+                            "set (Settings → 📁 Vault) — non-GitHub links stay in "
+                            "_inbox.", "info")
                     # Hide mark-all-read button until verify passes
                     self.mark_all_read_btn.setVisible(False)
             else:
@@ -359,21 +491,44 @@ class BotQueueMixin:
         return True
 
     def process_bot_queue(self):
-        """Process all repos in the bot queue."""
+        """Process all repos in the bot queue.
+
+        v0.24.1 — Fix (websites never sync): a batch now starts when EITHER
+        pipeline has pending work. Before this, the guard was GitHub-only —
+        with every repo already in the vault (0 pending GitHub URLs) the
+        button refused to run, so the non-GitHub links sitting in the queue
+        NEVER reached the Websites pipeline (the worker has supported
+        websites-only batches since v0.11.0 — see _run_impl's
+        "not urls and not (_websites_pipeline_on and _website_links)" —
+        but no caller ever started one from the queue flow)."""
         urls = getattr(self, '_bot_queue_urls', [])
-        if not urls:
-            self.log_message("No repos in queue. Click 'Check Queue' first.", "warning")
+        websites_pending = getattr(self, '_bot_queue_pending_websites', []) or []
+        if not urls and not websites_pending:
+            self.log_message("No items in queue. Click 'Check Queue' first.", "warning")
             return
         # v31.1 safety gate: confirm before large batches (>10 items).
-        if not self._confirm_batch(len(urls), "the bot queue"):
+        # v0.24.1: the count covers BOTH pipelines' pending items.
+        if not self._confirm_batch(len(urls) + len(websites_pending), "the bot queue"):
             self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
             return
-        self.log_message(f"🚀 Processing {len(urls)} repos from bot queue...", "info")
+        if urls and websites_pending:
+            self.log_message(
+                f"🚀 Processing {len(urls)} repo(s) + {len(websites_pending)} "
+                f"website link(s) from bot queue...", "info")
+        elif urls:
+            self.log_message(f"🚀 Processing {len(urls)} repos from bot queue...", "info")
+        else:
+            self.log_message(
+                f"🚀 Processing {len(websites_pending)} website link(s) from bot "
+                "queue (Websites pipeline)...", "info")
         # Process the URLs using the existing pipeline. v23 — pass
         # bot_source=True and the non-GitHub links so the manifest can
         # track every link through the 5-phase pipeline.
         # v25 pre-flight: forward the intake duplicate stats so the final
         # report can show "🔄 N duplicate URL(s) removed".
+        # v0.24.1: the full non-GitHub list is passed (the Websites
+        # pipeline's own dedupe skips the already-done links) — exactly the
+        # payload a GitHub+websites batch has always carried.
         self._start_worker_with_urls(
             urls,
             bot_source=True,
@@ -509,7 +664,8 @@ class BotQueueMixin:
             # last_processed_msg_id to self._pending_last_processed_update
             # ONLY if Phase 5 CLEAR passes (all links verified).
             # v31.1 safety gate: confirm before large batches (>10 items).
-            if not self._confirm_batch(len(urls), "the new bot messages"):
+            # v0.24.1: the count covers repos AND website links.
+            if not self._confirm_batch(len(urls) + len(non_github), "the new bot messages"):
                 self.log_message("⏹️ Batch cancelled — nothing was processed.", "warning")
                 return
             self._start_worker_with_urls(
