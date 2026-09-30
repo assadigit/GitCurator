@@ -223,6 +223,7 @@ except ImportError as e:
     _CLOUDFLARE_AVAILABLE = False
     print(f"[WARN] Cloudflare modules not available: {e}")
     print("[WARN] Bot sync + GDrive backup disabled. Install cloudflare_sync.py, cloudflare_manager.py, error_reporter.py, gdrive_backup.py")
+from gitcurator.gui.link_helpers import extract_github_urls, clean_url, normalize_url
 
 try:
     from gitcurator.cloud.gdrive_backup import GDriveBackup
@@ -261,28 +262,6 @@ def setup_logging(log_level="INFO", log_dir="logs"):
 # ============================================================================
 # Utility
 # ============================================================================
-
-def extract_github_urls(text: str) -> List[str]:
-    """v30 — Fix (Standardize link parsing): delegated to links.py, the single
-    source of truth. The old inline regex here (no-www, no-dots) silently
-    dropped valid repos like github.com/john.doe/my.project that the
-    telegram worker / backfill manager DID capture — the same message
-    produced different link sets depending on which module parsed it."""
-    return _links.extract_github_urls(text)
-
-def clean_url(url: str) -> str:
-    return _links.clean_url(url)
-
-
-def normalize_url(url: str) -> str:
-    """v30 — delegated to links.normalize_url (single implementation).
-    - Lowercase domain
-    - Replace twitter.com with x.com
-    - Strip query params (?s=20, ?ref=...)
-    - Strip #fragment
-    - Strip trailing /
-    """
-    return _links.normalize_url(url)
 
 
 # v25 pre-flight: non-GitHub link platform classification.
