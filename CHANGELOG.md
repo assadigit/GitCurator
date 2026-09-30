@@ -1,3 +1,91 @@
+## [0.22.0] — The bot accepts every link: websites into the ledger, the x-family policy, the not_github amnesty — 2026-09-30
+
+The owner sent `https://reverseui.com/` to @githubfetcherbot and got back:
+
+> ⚠️ Non-GitHub URL — skipped: https://reverseui.com
+> (Only GitHub links are tracked)
+
+— but the Websites vault has existed since v0.11.0, and the owner's
+v0.20.0 request #3 was "every website (which be pasted in the same
+robot) must be processed and stored in websites vault".
+
+### Root cause
+
+The Cloudflare Worker is a v0.01 design (2026-09-16) that predates the
+Websites pipeline by two weeks. Its queue consumer dead-lettered every
+non-GitHub URL (`reason='not_github'`) and replied "Only GitHub links
+are tracked". SPEC §2 Non-negotiable #9 ("Do not touch:
+`app/cloudflare-bot/`") then shielded it from every Websites-pipeline
+phase (v0.11.0 → v0.21.0): the desktop learned to process websites, the
+bot never did. 43 wrongly-rejected links sat in `dead_letters`; on top,
+`/api/pending` (api.js), `/pending` + `/status` (commands.js) and the
+dashboard pending API all filtered `url_type='github'` — while the D1
+schema had supported `non_github` ledger rows the whole time (schema.sql
+line 14): nothing ever wrote them from the queue.
+
+(The desktop was never actually blocked: the Telethon bot-queue path
+reads the chat directly and extracts `non_github_urls` itself — the
+bot's reply and its D1 records were the lie.)
+
+### The fix (app/cloudflare-bot/ — the owner lifted SPEC §2#9 for this change, 2026-09-30)
+
+- **`queue-consumer.js`** — non-GitHub URLs are now ledger'd
+  (`url_type='non_github'`, owner/repo NULL) exactly like GitHub repos:
+  mirror → ledger → insert → KV → activity log, and the bot replies
+  **"🌐 Received — website: … Status: Pending processing (Websites
+  vault)"** with the same Mark-Decommission button. Enrichment stays
+  GitHub-only.
+- **Website identity, desktop parity** — `normalizeUrlTyped` (utils.js):
+  GitHub URLs keep the frozen `normalizeUrl` semantics (SPEC §4.3.1),
+  every other URL gets `normalizeWebsiteUrl`, a JS port of
+  `links.normalize_website_url` (https, `www.` dropped, tracking params
+  dropped, meaningful params KEPT — a YouTube `?v=` IS the page; the
+  bare root slash is kept only when the original had it, Python
+  `urlparse` parity). Verified golden-value-equal against the desktop
+  function on 10 cases.
+- **Blocked domains** (v0.20.0 parity) — x.com/twitter.com/t.co (env
+  `BLOCKED_DOMAINS`, comma-separated; missing = the desktop default, `""`
+  opts out) are dead-lettered with their own reason `blocked_domain` and
+  get **"🚫 Blocked domain — never fetched"** — the desktop never
+  fetches them either.
+- **Self domains** (v0.21.0 parity) — the bot's own workers.dev links
+  (`…/auth/?token=…`) are never stored at all; the reply shows the
+  query-stripped URL so a live token never echoes.
+- **Token scrubbing** (v0.21.0 parity) — `scrubUrlToken` (port of
+  `scrub_url_token`) masks secret-named query values in every stored
+  `url_original`.
+- **Surfaces un-GitHub'd** — `/api/pending` (api.js) and the dashboard
+  pending API (dashboard-api.js) serve websites too; the dashboard table
+  renders 🌐 rows with direct links (was `null/null`); `/pending`
+  renders website URLs; `/status` accepts any URL (was "❌ Not a valid
+  GitHub URL"; websites get a 🔗 Open website button); `/start`, `/help`
+  and the no-URL prompt now say "links — GitHub repos or any website".
+- **`migrate-not-github.sql`** — the one-time amnesty: all 43
+  `not_github` dead letters moved into the ledger as `non_github` rows
+  (first_seen preserved from the original attempt), then deleted from
+  `dead_letters`. Idempotent (INSERT OR IGNORE + reason-scoped DELETE).
+- Worker self-report `1.0.0` → `0.22.0` in `/health` + package.json
+  (never bumped since v0.01).
+
+### Deployed + verified live (2026-09-30)
+
+- `wrangler d1 execute curator-bot --remote --file=schema.sql` (safe,
+  IF NOT EXISTS) → `--file=migrate-not-github.sql` (43 rows moved,
+  dead_letters now empty: 340 github + 43 non_github in the ledger) →
+  `wrangler deploy` (version `43c6005d-1642-45d0-9e5a-8d268359ae95`).
+- End-to-end through REAL webhook updates: `https://reverseui.com/` →
+  ledger row #384 (`non_github`) + the 🌐 reply
+  (`bot_reply_message_id` 1462) + activity log "Received website";
+  `/status reverseui.com` → the migrated 03:36 row (was: "Not a valid
+  GitHub URL"); re-sent `github.com/imputnet/cobalt` → forward_count 2,
+  the ⏳ Already-pending path (GitHub regression green); `x.com/…` +
+  `t.co/…` links → `dead_letters` `blocked_domain` rows (🚫 replies).
+  Queue consumer logs clean (`wrangler tail`: Queue curator-ingest Ok).
+- The desktop side needed nothing: with `pipelines.websites` ON and
+  `website_vault_path` set (the owner's configuration since v0.20.0),
+  the next "Check Queue"/PROCESS run fetches these links into the
+  Websites vault exactly as SPEC §4.2-4.3 prescribes.
+
 ## [0.21.0] — The seal truth: mirror reconciliation, self domains, full-accounting report, direct fallback — 2026-09-30
 
 The owner's v0.20.0 batch log (2026-09-30 02:17) ended with
