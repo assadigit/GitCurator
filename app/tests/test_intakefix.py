@@ -693,7 +693,12 @@ class TestGuiRoundTrip(unittest.TestCase):
                        'vault_path': os.path.join(tmp, 'gh'),
                        'website_vault_path': os.path.join(tmp, 'web')},
                       f)
-        ga.CONFIG_FILE = cfg_path
+        # refactor/gui-app-split: load_config/save_config now live in
+        # gitcurator.gui.main_window.vaults_config — the temp config path
+        # must be swapped in on the owning module (otherwise the round trip
+        # silently reads/writes the repo's real config.json).
+        import gitcurator.gui.main_window.vaults_config as gui_vaults
+        gui_vaults.CONFIG_FILE = cfg_path
         from PyQt6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])
         w = ga.MainWindow()

@@ -401,22 +401,27 @@ class _GuiCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import gitcurator.gui.app as gui_app
+        # refactor/gui-app-split: load_config/save_config now live in
+        # gitcurator.gui.main_window.vaults_config — the temp config path
+        # must be swapped in on the owning module.
+        import gitcurator.gui.main_window.vaults_config as gui_vaults
         cls.gui_app = gui_app
+        cls.gui_vaults = gui_vaults
         cls._old_cwd = os.getcwd()
         cls._tmp = tempfile.mkdtemp(prefix="gk-v0230-")
         os.chdir(cls._tmp)
-        cls._old_cfg = gui_app.CONFIG_FILE
+        cls._old_cfg = gui_vaults.CONFIG_FILE
         cls._cfg_path = os.path.join(cls._tmp, "config.json")
         with open(cls._cfg_path, "w", encoding="utf-8") as f:
             json.dump({"telegram_api_id": 1, "telegram_api_hash": "x",
                        "telegram_phone": "", "github_token": "",
                        "vault_path": cls._tmp}, f)
-        gui_app.CONFIG_FILE = cls._cfg_path
+        gui_vaults.CONFIG_FILE = cls._cfg_path
 
     @classmethod
     def tearDownClass(cls):
         os.chdir(cls._old_cwd)
-        cls.gui_app.CONFIG_FILE = cls._old_cfg
+        cls.gui_vaults.CONFIG_FILE = cls._old_cfg
 
     def _window(self):
         return self.gui_app.MainWindow()
