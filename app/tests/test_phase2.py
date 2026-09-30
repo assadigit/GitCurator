@@ -36,6 +36,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import gitcurator.gui.app as gui_app
+import gitcurator.gui.processing_worker as gui_pw  # refactor/gui-app-split: ProcessingWorker consumes Github from here
 from gitcurator.core import dryrun
 from gitcurator.core import prompts as _prompts
 from gitcurator.core import web_extract as _web_extract
@@ -995,7 +996,7 @@ class TestWorkerWebsites(unittest.TestCase):
                 raise RuntimeError("network blocked in test")
 
         db_path = os.path.join(tmp, 'cache.db')
-        orig_github = gui_app.Github
+        orig_github = gui_pw.Github
         orig_ns_init = note_state.NoteStateDB.__init__
         orig_ws_init = wp.WebsiteStateDB.__init__
         orig_cache_init = gui_app.CacheDB.__init__
@@ -1014,7 +1015,7 @@ class TestWorkerWebsites(unittest.TestCase):
                         on_warn=None):
             return fake(messages)
 
-        gui_app.Github = _FastFailGithub
+        gui_pw.Github = _FastFailGithub
         note_state.NoteStateDB.__init__ = _redirect(orig_ns_init)
         wp.WebsiteStateDB.__init__ = _redirect(orig_ws_init)
         gui_app.CacheDB.__init__ = _redirect(orig_cache_init)
@@ -1022,7 +1023,7 @@ class TestWorkerWebsites(unittest.TestCase):
         try:
             worker._run_impl()
         finally:
-            gui_app.Github = orig_github
+            gui_pw.Github = orig_github
             note_state.NoteStateDB.__init__ = orig_ns_init
             wp.WebsiteStateDB.__init__ = orig_ws_init
             gui_app.CacheDB.__init__ = orig_cache_init
