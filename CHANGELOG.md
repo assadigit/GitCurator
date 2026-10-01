@@ -72,6 +72,20 @@ flips; mixed counts; nothing-pending bails) — worker-side cases run
 headless anywhere, plus an offscreen end-to-end replay on the REAL composed MainWindow (check_bot_queue → _on_finished renders the actual queue panel → hero flip → PROCESS starts the websites-only batch; only the Telethon subprocess and the batch launcher are stubbed). Full gate green:
 67-module compile, 818 tests, offline golden run 30/30.
 
+### Delivery
+
+Branch `fix/websites-queue-sync` merged into main `--no-ff` (`826b278`,
+tree identical to the branch tip `cc13ee2`; branch kept for diffing).
+**CI green on main** — run 36784587162 (push event): the same 67-module
+compile + 818-test + websites-pipeline gate the session ran locally
+before pushing. (The fix branch itself carries no CI run: ci.yml
+triggers on main pushes / `v*` tags / PRs to main only, and the branch
+went up without a PR — the merge's green run covers the exact tree that
+shipped.) **No tag or release yet** — the owner tests from release
+zips, so `v0.24.1` + the Windows zip (tag → CI on the tag →
+`build_zip.py` → attach) is one command away, the owner's call; until
+then, `main` at `826b278` is the deliverable.
+
 ## [0.24.0] — The app.py split: 13,815 lines become 28 focused modules, zero behavior change — 2026-09-30
 
 A pure structural refactor of `gitcurator/gui/app.py` (branch
