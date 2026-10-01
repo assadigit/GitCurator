@@ -3,7 +3,7 @@
 Owner ask (session brief): "a hygiene and modularization pass" — split only
 what needs splitting, delete what is provably dead, make the Cloudflare bot
 match the app verifiably, and keep every existing behavior. Suite
-**818 → 824** (all green, twice at baseline, twice at the end). Zero
+**818 → 826** (all green, twice at baseline, twice at the end). Zero
 behavior change in the app except one new information line in Test
 Connection (below).
 
@@ -53,7 +53,7 @@ file. The zip now ships **six** launchers (was seven).
 **5. The Cloudflare bot now provably matches the app.** The contract
 audit (every endpoint, field, HMAC scheme, schema + migration, policies)
 found two real gaps, both fixed and covered by the bot's **first test
-suite** (Node's built-in runner, `npm test`, 32 cases, zero new
+suite** (Node's built-in runner, `npm test`, 31 cases, zero new
 dependencies):
 - **The dead-letter queue never had a consumer** — a link that failed 5
   processing retries sat in a queue forever, never reaching the permanent
@@ -68,7 +68,8 @@ dependencies):
   from one place (`src/version.js`), and Test Connection — when a Worker
   URL is configured — adds ONE line to the Telegram section comparing it
   with the version this app expects (`✅ Bot Worker — v0.25.0 — matches
-  this app`, or a ⚠️ with the exact redeploy command when older). No
+  this app`, or a ⚠️ with the exact redeploy command when older; a bot
+  NEWER than the app is an info line, not a warning). No
   Worker URL configured → nothing changes in the battery.
 - Validated prepare-only: `wrangler deploy --dry-run` bundles clean, and
   a local `wrangler dev` run recorded a GitHub link, a website link and
@@ -82,6 +83,17 @@ the project is, how to run the tests, the architecture map, and the
 do-not-read-in-full list — CHANGELOG/STATUS/CSV data), `.gitignore`
 completed, and the split's safety net rebuilt (fingerprint / surface /
 import checks — failure-proved before any move).
+
+**7. Independent review fixes.** A fresh reviewer agent tried to break
+the pass and found one real defect (the advertised `npm test` script used
+a directory argument modern Node rejects — fixed to `node --test`, true
+count 31 cases; the helper file no longer counts itself) plus small
+polish, all applied: the Worker version check now bypasses the system
+proxy exactly like the sync client it mirrors (no false ⚠️ behind
+v2rayN-style proxies), a deployed bot NEWER than the app is an info line
+instead of a misleading warning, the in-app redeploy hint names the
+Windows launcher too, the Worker's 31 Node tests now run in CI, and the
+stale 818-test mentions in CI were corrected.
 
 **Not done on purpose (owner decisions, listed in the session report):**
 the root `dashboard/` (still used?), the dormant `gitcurator/cloud/`

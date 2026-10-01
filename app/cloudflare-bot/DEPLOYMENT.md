@@ -40,7 +40,7 @@ First time here instead? Follow the from-scratch guide below.
 
 ## 📦 v0.25.0 update pack — the bot must match the app (prepare-only)
 
-This release changes the Worker (tested 32/32 with Node's built-in test
+This release changes the Worker (tested 31/31 with Node's built-in test
 runner — `npm test` — and validated with `wrangler deploy --dry-run` plus a
 local `wrangler dev` run: a forwarded GitHub link, a website link and an
 x.com link were recorded exactly as the app expects: ledger / ledger /

@@ -527,6 +527,21 @@ def check_telegram_local(config: dict,
 # The Cloudflare bot Worker version (staleness check, v0.25.0)
 # ---------------------------------------------------------------------------
 
+def _version_cmp(a: str, b: str) -> int:
+    """Compare two dotted version strings numerically (0.22.0 vs 0.25.0).
+    Non-numeric segments compare equal to 0; returns -1/0/1."""
+    def parts(v):
+        out = []
+        for chunk in str(v).strip().lstrip("v").split("."):
+            digits = "".join(ch for ch in chunk if ch.isdigit())
+            out.append(int(digits) if digits else 0)
+        while len(out) < 3:
+            out.append(0)
+        return out[:3]
+    pa, pb = parts(a), parts(b)
+    return (pa > pb) - (pa < pb)
+
+
 def check_worker_version(config: dict,
                          http_get=None) -> Optional[Dict[str, str]]:
     """When a Cloudflare Worker URL is configured, compare its deployed
@@ -534,11 +549,35 @@ def check_worker_version(config: dict,
     ``EXPECTED_WORKER_VERSION`` so a stale bot is detectable from Test
     Connection. Returns a result dict, or ``None`` when no worker URL is
     configured (the sync is optional — nothing to check, nothing to say).
-    Never raises. ``http_get`` (url) → dict is injectable for tests."""
+    Never raises. ``http_get`` (url) → dict is injectable for tests.
+
+    The fetch deliberately BYPASSES the system proxy, exactly like the
+    sync client it mirrors (``cloud/cloudflare_sync.py``): owners behind
+    an intercepting proxy (v2rayN & co.) would otherwise see a false
+    ⚠️/❌ for a Worker that works."""
     url = (config or {}).get("cloudflare_worker_url", "")
     if not url:
         return None
-    fetch = http_get or _http_get_json
+
+    def _direct_get(u, timeout_s=8.0):
+        req = urllib.request.Request(
+            u, headers={"User-Agent": "GitCurator-connection-check"})
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}))  # no proxy, like cloudflare_sync
+        with opener.open(req, timeout=timeout_s) as resp:
+            try:
+                raw = resp.read().decode("utf-8") or "{}"
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("non-dict /health payload")
+        return payload
+
+    fetch = http_get or _direct_get
     try:
         data = fetch(url.rstrip("/") + "/health", timeout_s=8.0)
     except Exception as exc:
@@ -551,16 +590,25 @@ def check_worker_version(config: dict,
     if not deployed:
         return _result("Bot Worker", LEVEL_WARN,
                        "no version reported by /health — redeploy the "
-                       "Worker (bash deploy-latest.sh in app/cloudflare-bot)")
-    if str(deployed) == str(EXPECTED_WORKER_VERSION):
+                       "Worker (deploy-latest.sh / deploy-latest.ps1 in "
+                       "app/cloudflare-bot)")
+    cmp = _version_cmp(str(deployed), str(EXPECTED_WORKER_VERSION))
+    if cmp == 0:
         return _result("Bot Worker", LEVEL_OK,
                        f"v{deployed} — matches this app "
                        f"(expected v{EXPECTED_WORKER_VERSION})")
+    if cmp < 0:
+        return _result(
+            "Bot Worker", LEVEL_WARN,
+            f"v{deployed} deployed, this app expects v{EXPECTED_WORKER_VERSION} "
+            "— an older bot may miss newer link handling; update it: "
+            "cd app/cloudflare-bot && bash deploy-latest.sh "
+            "(Windows: .\\deploy-latest.ps1)")
     return _result(
-        "Bot Worker", LEVEL_WARN,
-        f"v{deployed} deployed, this app expects v{EXPECTED_WORKER_VERSION} "
-        "— an older bot may miss newer link handling; redeploy with: "
-        "cd app/cloudflare-bot && bash deploy-latest.sh")
+        "Bot Worker", LEVEL_INFO,
+        f"v{deployed} deployed is NEWER than this app expects "
+        f"(v{EXPECTED_WORKER_VERSION}) — update the desktop app when "
+        "convenient; the bot stays backward compatible")
 
 
 # ---------------------------------------------------------------------------

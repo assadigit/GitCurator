@@ -6,7 +6,7 @@
 > summarized, deduplicated, backed up to private GitHub mirrors, and
 > (optionally) published as a public directory.
 
-**Version:** `0.25.0` · **Suite:** 824 automated tests + a 30-link golden set ·
+**Version:** `0.25.0` · **Suite:** 826 automated tests + a 30-link golden set ·
 **Releases:** every version since v0.14.1 ships a deterministic Windows zip ·
 **Status:** all six SPEC phases done and merged — see
 [STATUS.md](STATUS.md) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
@@ -58,7 +58,7 @@ are never rewritten, and every risky operation has a dry-run.**
 | Storage | Obsidian vaults (Markdown) + `cache.db` (SQLite) |
 | Backup | private GitHub mirrors per vault (VaultSeal) + optional public directory (Good Repos) |
 | Verification console | Next.js 16 dashboard (`dashboard/`) — runs the real test suite, tracks history & drift |
-| Tests | 824 automated cases, zero network needed; 77 modules compiled in CI |
+| Tests | 826 automated cases, zero network needed; 77 modules compiled in CI |
 
 ## How it works
 
@@ -294,7 +294,7 @@ VaultSeal + Good Repos state.
 | `app/gitcurator/tools/` | Golden runners · backfill · mirror · link-builder · safety scanners · `build_zip.py` |
 | `app/taxonomy/` | The Websites category file — **yours to edit**; the classifier may only use names from it |
 | `app/prompts/` | The pipeline prompts (w01 category · w02 subcategory · w03 analyze) |
-| `app/tests/` | 824 tests + `golden/websites.json` (the 30-link golden set) |
+| `app/tests/` | 826 tests + `golden/websites.json` (the 30-link golden set) |
 | `app/cloudflare-bot/` | The Telegram bot Worker — canonical deploy copy (D1 schema, migrations, deploy scripts) |
 | `app/cloudflare-bot/dashboard/` | The bot's web dashboard (stats · pending · dead letters · activity) |
 | `dashboard/` | The Next.js 16 verification console for the repo |
@@ -323,7 +323,7 @@ touch:
 
 ## Testing, CI & verification
 
-- **824 automated tests**, zero network at test time — the core is pure
+- **826 automated tests**, zero network at test time — the core is pure
   stdlib and the outside world is faked (fake Ollama, fake GitHub, a real
   fake SOCKS5 server, offscreen Qt). Exact command in
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (run from `app/`).
@@ -331,7 +331,7 @@ touch:
   in CI (`run_golden_websites.py --offline`), and `--live` against any
   backend for side-by-side comparison reports.
 - **CI** (`.github/workflows/ci.yml`) — requirements + Qt system libs,
-  77 modules compiled, the full 824 suite and the offline golden run on
+  77 modules compiled, the full 826 suite, the Worker's 31 Node tests and the offline golden run on
   every push/tag/PR. The repository is **public since 2026-09-30** (after a
   full history scrub), so Actions minutes are free; before that, a billing
   block on private-repo Actions was worked around with the

@@ -62,7 +62,7 @@ max_retries = 1
 # ========================================
 # BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET
 # These are set via: npx wrangler secret put <NAME>
-# or via the auto-installer: node install.js
+# or via the auto-installer: node install.cjs
 #
 # v30 — OPTIONAL webhook hardening (recommended):
 #   npx wrangler secret put WEBHOOK_SECRET        # any A-Za-z0-9_- string, 1-256 chars

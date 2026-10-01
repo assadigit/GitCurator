@@ -10,7 +10,7 @@ Cloudflare-edge backend for the GitHub Project Curator desktop app. Receives for
 > bot is older than the app expects.
 >
 > **Tests** (Node's built-in runner, no extra dependencies):
-> `npm test` — 32 cases covering link intake, dedup, the blocked/self
+> `npm test` — 31 cases covering link intake, dedup, the blocked/self
 > domain policy, the HMAC desktop contract (including the query-string
 > case), the `/api/pending` shape, and the dead-letter-queue drain.
 

@@ -567,6 +567,23 @@ class TestCheckWorkerVersion(unittest.TestCase):
         self.assertIn(cc.EXPECTED_WORKER_VERSION, r["detail"])
         self.assertIn("deploy-latest.sh", r["detail"])
 
+    def test_newer_deployed_worker_is_info_not_a_warning(self):
+        newer = cc.EXPECTED_WORKER_VERSION.split(".")
+        newer[1] = str(int(newer[1]) + 1)
+        newer = ".".join(newer)
+        r = cc.check_worker_version(
+            {"cloudflare_worker_url": "https://bot.example"},
+            http_get=lambda url, timeout_s=8.0: {"version": newer})
+        self.assertEqual(r["level"], "info")
+        self.assertIn("NEWER", r["detail"])
+
+    def test_version_cmp_directions(self):
+        self.assertEqual(cc._version_cmp("0.25.0", "0.25.0"), 0)
+        self.assertEqual(cc._version_cmp("0.22.0", "0.25.0"), -1)
+        self.assertEqual(cc._version_cmp("0.26.1", "0.25.0"), 1)
+        self.assertEqual(cc._version_cmp("v0.25.0", "0.25.0"), 0)
+        self.assertEqual(cc._version_cmp("0.25", "0.25.0"), 0)
+
     def test_unreachable_worker_warns_or_errors_by_enabled(self):
         def _boom(url, timeout_s=8.0):
             raise OSError("refused")

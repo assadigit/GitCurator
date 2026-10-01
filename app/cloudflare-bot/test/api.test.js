@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import worker from '../src/index.js';
 import { WORKER_VERSION } from '../src/version.js';
-import { makeEnv, FakeRequest } from './helpers/fake-db.mjs';
+import { makeEnv, FakeRequest } from '../test-helpers/fake-db.mjs';
 
 function sha256(s) { return createHash('sha256').update(s).digest('hex'); }
 

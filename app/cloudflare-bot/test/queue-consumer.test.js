@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleQueue, handleDeadLetterQueue } from '../src/queue-consumer.js';
-import { makeEnv, message } from './helpers/fake-db.mjs';
+import { makeEnv, message } from '../test-helpers/fake-db.mjs';
 
 // Zero-network rule (same as the Python suite): Telegram API calls are
 // intercepted and answered with a canned successful sendMessage result.

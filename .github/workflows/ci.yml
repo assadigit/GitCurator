@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 77 audited
-# Python modules and runs the full 818-case suite (34 core + 11 e2e +
+# Python modules and runs the full 826-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 60 connection + 47 detectset + 44 webproxy +
@@ -73,7 +73,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 818 tests + websites pipeline)
+    name: Python gate (compile + 826 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -183,6 +183,10 @@ jobs:
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
 
+      - name: Cloudflare bot Worker tests (Node built-in runner, no deps)
+        working-directory: app/cloudflare-bot
+        run: npm test
+
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 77 compiles + 818 tests + offline golden run (v0.25.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 77 compiles + 826 tests + worker 31 + offline golden run (v0.25.0)."
