@@ -38,6 +38,39 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.28.0 update pack — THE LAW at collection time (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-01** (worker version ID
+> `5ac70507-4d33-4eba-9c47-b9584c632456`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> Verified after the deploy: `/health` answers `"version":"0.28.0"`,
+> both queue consumers registered (ingest **and** DLQ), all four secrets
+> persisted (BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET), D1
+> row counts stable (385 ledger / 2 dead / 342 activity / 0 mirror).
+> The D1 export taken just before the deploy:
+> `/home/z/backups/d1-backup-20261001-pre-v028.sql` (belt-and-braces).
+
+The owner's law (2026-10-01): "EVERY X And GITHUB domain (all of its
+group) must be banned from showing on websites directory" — x/Twitter,
+the GitHub group, HuggingFace, Instagram, Facebook, LinkedIn. The
+Worker now enforces it at COLLECTION time (tested 40/40 with
+`npm test`; `wrangler deploy --dry-run` PASS first):
+
+1. **`DEFAULT_BLOCKED_DOMAINS` = the full 17-domain law** (same list as
+   the desktop's `links.LAW_BLOCKED_DOMAINS`). A NON-GitHub link on one
+   of them is dead-lettered (`reason: blocked_domain`, 🚫 reply) and
+   never reaches the desktop as a pending website.
+2. **GitHub REPO links still flow** — they are typed `github` before
+   the block check ever runs; only non-repo github.com paths (e.g.
+   `/features`) land in the law's net.
+3. **`BLOCKED_DOMAINS` env var is ADD-ONLY now** (`blockedDomainsFromEnv`
+   in `src/utils.js`): unset or empty = just the law; the var can only
+   append more domains. The law cannot be configured away.
+4. **Bare `owner.github.io` sites are dead-lettered** (GitHub group) —
+   the old "a bare Pages site is a real website" rule is superseded by
+   the law. `owner.github.io/<repo>` still maps to the repo (GitHub
+   pipeline), unchanged.
+
 ## 📦 v0.26.0 update pack — the bot must match the app (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-01** (worker version ID
