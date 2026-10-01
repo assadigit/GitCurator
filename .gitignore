@@ -15,7 +15,7 @@ app/error_outbox.db
 # Generated artifacts for the owner, never source code.
 app/reports/
 
-# ── Node / Next.js (dashboard/) ─────────────────────────────────
+# ── Node / Next.js (app/cloudflare-bot/dashboard) ───────────────
 node_modules/
 .next/
 out/
@@ -23,12 +23,7 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 
-# Dashboard runtime state
-dashboard/db/*.db
-dashboard/dev.log
-dashboard/server.log
-
-# Local env overrides (the dashboard ships a safe default .env)
+# Local env overrides
 .env*.local
 
 # ── OS / editor ─────────────────────────────────────────────────
@@ -65,3 +60,8 @@ app/app.lock
 .coverage
 # Release zip artifacts (built by tools/build_zip.py, never tracked)
 *.zip
+
+# ── v0.26.0 Tier B tidy ─────────────────────────────────────────
+# The owner's personal bookmark export — personal data, repo is public;
+# removed from the tree in v0.26.0. Never `git add` a local copy.
+unique_links.csv

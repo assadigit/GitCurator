@@ -8,8 +8,8 @@
 
 **Version:** `0.25.0` · **Suite:** 826 automated tests + a 30-link golden set ·
 **Releases:** every version since v0.14.1 ships a deterministic Windows zip ·
-**Status:** all six SPEC phases done and merged — see
-[STATUS.md](STATUS.md) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
+**Status:** all six SPEC phases done and merged — session history
+archived in [docs/history/](docs/history/) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
 
 > Public repository (since 2026-09-30, after a full history scrub — see
 > [Security](#security)).
@@ -57,7 +57,6 @@ are never rewritten, and every risky operation has a dry-run.**
 | LLM backends | Ollama · llama.cpp · Anthropic Claude · any OpenAI-compatible endpoint |
 | Storage | Obsidian vaults (Markdown) + `cache.db` (SQLite) |
 | Backup | private GitHub mirrors per vault (VaultSeal) + optional public directory (Good Repos) |
-| Verification console | Next.js 16 dashboard (`dashboard/`) — runs the real test suite, tracks history & drift |
 | Tests | 826 automated cases, zero network needed; 77 modules compiled in CI |
 
 ## How it works
@@ -273,16 +272,6 @@ Connection warns when the deployed bot is older than the app expects).
 Its web dashboard shows stats, pending links, dead letters and the
 activity log.
 
-### The verification dashboard (developer tool)
-```bash
-cd dashboard
-bun install && bun run db:push && bun run dev   # http://localhost:3000
-```
-A Next.js 16 console over the app: runs the **real test suite on demand**
-(`POST /api/verify`), persists every run (manual / startup / 6-hour
-scheduler), flags code drift, and reports live repository + release +
-VaultSeal + Good Repos state.
-
 ## Repository layout
 
 | Path | What it is |
@@ -297,12 +286,10 @@ VaultSeal + Good Repos state.
 | `app/tests/` | 826 tests + `golden/websites.json` (the 30-link golden set) |
 | `app/cloudflare-bot/` | The Telegram bot Worker — canonical deploy copy (D1 schema, migrations, deploy scripts) |
 | `app/cloudflare-bot/dashboard/` | The bot's web dashboard (stats · pending · dead letters · activity) |
-| `dashboard/` | The Next.js 16 verification console for the repo |
-| `docs/` | Phase reports, trial guides, kickoff notes |
+| `docs/history/` | The archived session history — STATUS, REFACTOR notes, phase reports, trials, kickoff |
 | `SPEC.md` | The agent briefing — mission, the six phases, the non-negotiables |
-| `STATUS.md` | The build memory between sessions — phases table + session log |
 | `CHANGELOG.md` | Every version, plain-language, owner-readable |
-| `unique_links.csv` | The owner's 784-link bookmark export (the backfill source) |
+| `SWOT-ANALYSIS.md` | The current engineering risk picture (SWE-focused, v0.26.0) |
 
 ## Configuration
 
@@ -337,8 +324,9 @@ touch:
   block on private-repo Actions was worked around with the
   [gitcurator-gate](https://github.com/assadigit/gitcurator-gate) mirror
   (latest mirror run: 772/772 + golden 30/30 on the v0.23.0 code).
-- **The dashboard** (`dashboard/`) is the human face of all of it — run
-  history, pass-rate streaks, drift detection, release + seal status.
+- The old Next.js verification console (`dashboard/`, v0.26.0) was removed —
+  CI runs the identical gate on every push, so the console duplicated it;
+  it remains recoverable from git history.
 
 ## Versioning & releases
 
@@ -349,8 +337,8 @@ touch:
   timestamps, tracked files only, secrets banned — byte-identical
   rebuilds). v0.23.0: 83 files, sha256
   `89e78290a4b9f45bf89f323bc82ecb92503b706b47a9ec6a4784a38f268bd04d`.
-- `CHANGELOG.md` holds the plain-language history; `STATUS.md` the phase
-  table and session log.
+- `CHANGELOG.md` holds the plain-language history; the old `STATUS.md`
+  phase table and session log are archived in `docs/history/`.
 
 ## Security
 
@@ -384,9 +372,9 @@ touch:
 | [app/WINDOWS-QUICKSTART.md](app/WINDOWS-QUICKSTART.md) | the 3-step Windows guide |
 | [app/cloudflare-bot/README.md](app/cloudflare-bot/README.md) | the bot Worker: deploy, env vars, dashboard |
 | [SPEC.md](SPEC.md) | the mission, the six phases, the non-negotiables |
-| [STATUS.md](STATUS.md) | live build state — phases, decisions, session log |
+| [SWOT-ANALYSIS.md](SWOT-ANALYSIS.md) | the current engineering risk picture |
 | [CHANGELOG.md](CHANGELOG.md) | every version in plain language |
-| [docs/reports/](docs/reports/) | the per-phase engineering reports |
+| [docs/history/](docs/history/) | the archived session history (STATUS, REFACTOR notes, phase reports, trials) |
 
 ## License
 

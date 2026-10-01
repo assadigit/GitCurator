@@ -1,4 +1,4 @@
-"""extract_github_urls, clean_url, normalize_url — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""extract_github_urls, clean_url, normalize_url — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os

@@ -189,4 +189,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 77 compiles + 826 tests + worker 31 + offline golden run (v0.25.0)."
+        run: echo "Gate: 77 compiles + 826 tests + worker 31 + offline golden run (v0.25.0). Mirrors the removed dashboard's POST /api/verify one-to-one."

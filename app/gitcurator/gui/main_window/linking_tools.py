@@ -1,7 +1,7 @@
 """MainWindow LinkingToolsMixin — the recall-hooks / link-suggestions tool
 launchers. (Was Phase6Mixin in gitcurator/gui/app.py, then
 main_window/phase6.py; renamed at v0.25.0 to say what it does. Bodies
-moved verbatim — see REFACTOR_PLAN.md at the repo root.)"""
+moved verbatim — see docs/history/REFACTOR_PLAN.md.)"""
 
 import sys as _sys
 import sys

@@ -1,4 +1,4 @@
-"""_run_telegram_worker, _telegram_test_job, _bot_queue_job, _connection_battery_job, _quick_detect_job — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""_run_telegram_worker, _telegram_test_job, _bot_queue_job, _connection_battery_job, _quick_detect_job — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os

@@ -4,7 +4,8 @@ You are an AI coding agent joining an existing project. This file is your briefi
 It is written to be read at the start of **every** session. Read all of it.
 
 - Spec written against **GitCurator v0.09.4**. Every file name, function name and line reference below was true at that time. **If reality differs, reality wins.** Do not force the code to match this file: note the difference in your report and in `STATUS.md`.
-- Current progress lives in `STATUS.md`. Read it right after this file.
+- *(Update, v0.26.0 hygiene pass: `STATUS.md` and the other session-history docs were archived to `docs/history/` — new differences go in the report and CHANGELOG, not a new STATUS.)*
+- Current progress lives in `STATUS.md`. Read it right after this file. *(Archived at `docs/history/STATUS.md` since v0.26.0 — `CHANGELOG.md` is the living history now.)*
 
 ---
 
@@ -39,7 +40,7 @@ The end goal is **recall**: when an idea arises, the owner can find the right pr
 6. **LLM output is untrusted input.** Everything that goes into YAML frontmatter, a filename, or a path passes through the sanitizers in `core/note_builder.py` and `core/storage.py` (`safe_filename`, `sanitize_*`). A security audit fixed this once; do not regress it.
 7. **Every network call and every LLM call has a timeout.** One failing item never stops the batch. One failing vault never stops the others.
 8. **Keep new logic out of the GUI.** `app/gitcurator/gui/app.py` is about 11,500 lines and also drives the headless CLI. Add new logic as plain modules under `app/gitcurator/core/` with **no PyQt imports**, and make only thin, surgical hooks in `app.py` and `cli.py`.
-9. **Do not touch:** `dashboard/`, `app/cloudflare-bot/`, `app/gitcurator/cloud/`, `app/_attic/`. Out of scope. *(Update, v0.25.0 hygiene pass: `app/_attic/` was removed — owner-directed Tier A cleanup; `app/cloudflare-bot/` was opened for this pass's contract fixes. Reality wins.)* *(Exception, owner-granted 2026-09-30: `app/cloudflare-bot/` was opened for v0.22.0 — the bot now accepts website links per §4.2/§4.3; see CHANGELOG [0.22.0]. The rest of the list stands.)*
+9. **Do not touch:** `dashboard/`, `app/cloudflare-bot/`, `app/gitcurator/cloud/`, `app/_attic/`. Out of scope. *(Update, v0.25.0 hygiene pass: `app/_attic/` was removed — owner-directed Tier A cleanup; `app/cloudflare-bot/` was opened for this pass's contract fixes. Reality wins.)* *(Update, v0.26.0 hygiene pass: the root `dashboard/` verification console was removed — it duplicated the CI gate; recoverable from git history. `app/gitcurator/cloud/` stays, dormant by owner decision "fixed, not deleted".)* *(Exception, owner-granted 2026-09-30: `app/cloudflare-bot/` was opened for v0.22.0 — the bot now accepts website links per §4.2/§4.3; see CHANGELOG [0.22.0]. The rest of the list stands.)*
 10. **Minimal dependencies.** Prefer the standard library plus what is already in `app/requirements.txt`. If you believe a new package is needed, stop and ask (section 3).
 11. **Atomic writes only** (`atomic_write_text` in `core/storage.py`) for anything written into a vault.
 12. **Do not merge to `main`.** Work on a branch. The owner merges.
@@ -53,7 +54,7 @@ The end goal is **recall**: when an idea arises, the owner can find the right pr
 5. **Test:** from the `app/` folder run the compile check and the test suite exactly as CI does (see `.github/workflows/ci.yml`). Headless Qt: set `QT_QPA_PLATFORM=offscreen`.
    - Add every new module to the compile list in `ci.yml`, every new test module to its `unittest` command, and update the test counts in its comments.
 6. **Version and docs:** bump `VERSION`, add a `CHANGELOG.md` entry in the existing prose style (what the owner would notice, and why), and update `app/README.md` for anything user-visible. Suggested versions are in section 6.
-7. **Report** (template below), update `STATUS.md`, and **stop**. Do not start the next phase.
+7. **Report** (template below), update `STATUS.md`, and **stop**. Do not start the next phase. *(v0.26.0: reports land in `docs/history/reports/` now; the phased era is complete.)*
 
 ### Stop and ask the owner when
 
@@ -305,7 +306,7 @@ Acceptance: a fixed test corpus shows sensible links; rejected pairs never reapp
 
 ## 7. Parked (do not build)
 
-Article and text summarization, podcast scripts, an Articles bot or vault, a Go/Rust port, automation inside Manual Notes, and changes to `dashboard/` or the Cloudflare bot. Keep the shared pipeline code generic so an article mode could be added later.
+Article and text summarization, podcast scripts, an Articles bot or vault, a Go/Rust port, automation inside Manual Notes, and changes to `dashboard/` or the Cloudflare bot. Keep the shared pipeline code generic so an article mode could be added later. *(The root `dashboard/` was removed in v0.26.0 — this entry now guards only the Cloudflare bot.)*
 
 ## Appendix A — Draft prompts
 

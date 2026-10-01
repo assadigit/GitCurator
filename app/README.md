@@ -57,7 +57,7 @@ python -m unittest tests.test_core -v
 ```cmd
 python gitcurator/tools/scan_vault_edits.py "C:\path\to\vault"   (read-only vault scan → report)
 python gitcurator/tools/snapshot_vault.py "C:\path\to\vault"      (zip backup, timestamped)
-python gitcurator/tools/pick_golden_links.py "C:\path\to\unique_links.csv"  (golden-set candidates)
+python gitcurator/tools/pick_golden_links.py "C:\path\to\bookmarks.csv"  (golden-set candidates)
 ```
 All three refuse to write anything inside the vault they are pointed at.
 Reports and snapshots land in `app/reports/` (scan/, snapshots/, dry-runs/).
@@ -161,9 +161,13 @@ shows baseline / corrections / dismissed counts per vault.
 safely:
 
 ```cmd
-python gitcurator/tools/backfill_websites.py ../unique_links.csv --dry-run
-python gitcurator/tools/backfill_websites.py ../unique_links.csv --limit 30
+python gitcurator/tools/backfill_websites.py "C:\path\to\bookmarks.csv" --dry-run
+python gitcurator/tools/backfill_websites.py "C:\path\to\bookmarks.csv" --limit 30
 ```
+
+(The path is any bookmarks CSV — the owner's original `unique_links.csv`
+is no longer tracked in the repo since v0.26.0; pass wherever your copy
+lives.)
 
 GitHub links are excluded by the same routing the app uses; the tool is
 resumable (per-URL checkpoint in `cache.db` — interrupt it any time,

@@ -44,20 +44,22 @@ test modules into the unittest line. Version bumps: `VERSION` file +
 | `core/` | Pure-stdlib, no-Qt pipeline logic: `links` (URL routing/identity), `storage` (atomic writes), `note_builder`, `llm_client` (Ollama/llama.cpp/cloud), `website_pipeline` (+ `website_state`), `note_state` (moves-as-corrections), `taxonomy`, `web_fetch`/`web_extract`, `mirror`, `linking`/`embeddings`/`recall` (Phase 6), `connection_check`, `dryrun` |
 | `integrations/` | Outside world: `telegram_fetch_worker` (Telethon subprocess), `telethon_fetcher`, `subprocess_runner`, `vaultseal` (private backups), `goodrepos` (public directory), `backfill_manager`, `error_reporter` |
 | `gui/` | PyQt6 app: `app.py` is the **facade** (every old import path still works — keep it that way); `processing_worker.py` (the batch worker + `gui/worker/` mixins), `worker_jobs`, `dialogs`, `headless`; `main_window/` = `window.py` shell + domain mixins (theme, ui, bot_queue, backup_seal, …) |
-| `cloud/` | Desktop↔Worker sync (`cloudflare_sync` — used by backfill_manager) + dormant GDrive/Cloudflare helpers |
-| `tools/` | Developer utilities (build_zip, golden runners, safety scanners, backfill, mirror, link-builder) |
+| `cloud/` | Desktop↔Worker sync (`cloudflare_sync` — used by backfill_manager) + dormant GDrive/Cloudflare helpers (`cloudflare_manager`, `cloudflare_gui`, `gdrive_backup`, `gdrive_gui` — **kept, not deleted, by owner decision "fixed, not deleted"**; nothing wires them into the UI today) |
+| `tools/` | Developer utilities, all classified v0.26.0: build_zip, golden runners (`pick_golden_links`, `run_golden_websites`), safety scanners (`scan_vault_edits`, `snapshot_vault`), backfill (`backfill_websites`), mirror, link-builder, `diagnose_code` (offline diagnostics), `integration_snippet` (the example in DEPLOYMENT.md), `test.py` (Telethon credential checker, manual) |
 | `cli.py` (+ `cli_terminal`, `cli_run`) | The visualized CLI; `main.py --cli` dispatches here |
-| `app/cloudflare-bot/` | The Telegram bot Worker (JS) — its own README + DEPLOYMENT.md |
-| `dashboard/` (repo root) | Next.js verification console (developer tool; not part of the app) |
+| `app/cloudflare-bot/` | The Telegram bot Worker (JS) — its own README + DEPLOYMENT.md. `app/cloudflare-bot/dashboard/` = the bot's live web dashboard (served by the worker) |
 
 ## DO NOT read these in full (huge history/data — search them only for a specific fact)
 
-- `CHANGELOG.md` (~170 KB) and `STATUS.md` (~106 KB) — history; read only the
-  newest entry or grep for a version number.
-- `unique_links.csv` — the owner's personal bookmark export (privacy data).
+- `CHANGELOG.md` (~170 KB) and `docs/history/STATUS.md` (~106 KB) — history;
+  read only the newest entry or grep for a version number.
+- `docs/history/` generally — archived session history (REFACTOR notes,
+  phase reports, trials, old SWOT).
+- `unique_links.csv` — the owner's personal bookmark export; **untracked
+  since v0.26.0** (privacy: personal data, repo is public). If it exists
+  locally, never `git add` it.
 - `app/tests/fixtures/` and `app/tests/golden/` — data files, read on demand.
-- `dashboard/` and `app/cloudflare-bot/dashboard/` — separate Node projects.
-- `docs/reports/`, `docs/trials/` — phase-history reports.
+- `app/cloudflare-bot/dashboard/` — a separate Node project.
 
 ## House rules for changes
 

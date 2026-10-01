@@ -1,4 +1,4 @@
-"""_GuiLogHandler, _install_gui_log_handler, _remove_gui_log_handler — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""_GuiLogHandler, _install_gui_log_handler, _remove_gui_log_handler — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os

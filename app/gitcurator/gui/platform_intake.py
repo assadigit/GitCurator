@@ -1,4 +1,4 @@
-"""PLATFORM_INFO, _inbox_table_vault, classify_platform, write_inbox_links_by_platform — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""PLATFORM_INFO, _inbox_table_vault, classify_platform, write_inbox_links_by_platform — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os
