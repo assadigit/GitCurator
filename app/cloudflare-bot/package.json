@@ -1,13 +1,14 @@
 {
   "name": "github-to-obsidian-bot",
-  "version": "0.22.0",
+  "version": "0.25.0",
   "description": "Cloudflare Worker backend for GitHub-to-Obsidian Bot",
   "main": "src/index.js",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "install": "node install.js",
+    "install": "node install.cjs",
+    "test": "node --test test/",
     "db:migrate": "wrangler d1 execute curator-bot --remote --file=schema.sql",
     "db:migrate:local": "wrangler d1 execute curator-bot --local --file=schema.sql",
     "kv:create": "wrangler kv namespace create CACHE",
@@ -21,5 +22,6 @@
   "dependencies": {},
   "devDependencies": {
     "wrangler": "^3.80.0"
-  }
+  },
+  "type": "module"
 }

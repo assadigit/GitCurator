@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * install.js — Auto-installer for GitHub-to-Obsidian Bot
+ * install.cjs (was install.js) — Auto-installer for GitHub-to-Obsidian Bot
  * ========================================================
  * Reads credentials from installer.config.json, then:
  *   1. Creates D1 database (if not exists)
@@ -20,7 +20,7 @@
  *   - Fill in installer.config.json with your credentials
  *
  * Usage:
- *   node install.js
+ *   node install.cjs
  */
 
 const fs = require('fs');
@@ -128,7 +128,7 @@ function loadConfig() {
   if (missing.length > 0) {
     error(`Missing or placeholder values in installer.config.json:`);
     missing.forEach(k => error(`  - ${k}`));
-    error('\nFill in your actual credentials, then run: node install.js');
+    error('\nFill in your actual credentials, then run: node install.cjs');
     process.exit(1);
   }
 

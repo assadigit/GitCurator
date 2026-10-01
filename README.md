@@ -264,7 +264,7 @@ python main.py --cli --list-dead / --reset-dead   :: 404 quarantine
 ```bash
 cd app/cloudflare-bot
 npm install && npx wrangler login
-node install.js                 # or: bash deploy-latest.sh (idempotent)
+node install.cjs                 # or: bash deploy-latest.sh (idempotent)
 ```
 Deployed at `github-to-obsidian-bot.aliassadi-plus.workers.dev`
 (currently **v0.22.0**). Its web dashboard shows stats, pending links,

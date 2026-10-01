@@ -481,7 +481,7 @@ npx wrangler login
 ```
 Edit `installer.config.json` with your credentials, then:
 ```cmd
-node install.js
+node install.cjs
 ```
 
 ### Dashboard (deploy from cloudflare-bot/dashboard/ folder)

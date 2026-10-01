@@ -7,7 +7,7 @@
 
 import {
   normalizeUrl, normalizeUrlTyped, isGitHubUrl, parseGitHubUrl, formatStars,
-  domainMatches, domainsFromEnv, scrubUrlToken,
+  domainMatches, domainsFromEnv, scrubUrlToken, extractUrls,
   DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS,
   truncate, now, uuid
 } from './utils.js';
@@ -41,6 +41,64 @@ export async function handleQueue(batch, env) {
       // After max_retries, it goes to the DLQ
       message.retry();
     }
+  }
+}
+
+// ========================================
+// DLQ drain — the "no link left behind" last leg (v0.25.0)
+// ========================================
+// Messages that exhausted their retries on curator-ingest land here.
+// The job is NOT to retry them (a poison message must never loop) — it
+// is to record every URL the message still carries into the permanent
+// dead_letters table (D1), best-effort notify the user, and ack.
+
+export async function handleDeadLetterQueue(batch, env) {
+  for (const message of batch.messages) {
+    try {
+      const data = JSON.parse(message.body);
+      const urls = (data.type === 'urls' && Array.isArray(data.urls)) ? data.urls : [];
+
+      for (const rawUrl of urls) {
+        const urlNorm = normalizeUrlTyped(rawUrl);
+        const urlOriginal = (rawUrl || '').replace(/[.,);]+$/, '');
+        try {
+          await deadLetterInsert(env.DB, {
+            url_normalized: urlNorm,
+            url_original: scrubUrlToken(urlOriginal),
+            reason: 'dlq_exhausted',
+            first_attempted_at: data.received_at || now(),
+            last_attempted_at: now(),
+            telegram_message_id: data.message_id || null
+          });
+        } catch (e) {
+          console.error('DLQ deadLetterInsert error:', e);
+        }
+      }
+
+      // Best-effort notice to the user (the link never got its
+      // 'Received' reply — the consumer kept failing). Never fatal.
+      if (urls.length > 0 && data.chat_id && env.BOT_TOKEN) {
+        try {
+          await sendMessage(env, data.chat_id,
+            `💀 <b>Recording problem</b> — I could not fully process ${urls.length === 1 ? 'this link' : `these ${urls.length} links`} after several tries.\n` +
+            `They are parked in the bot's dead letters (see the dashboard — nothing is lost).`);
+        } catch (e) {
+          console.error('DLQ notify error:', e);
+        }
+      }
+
+      try {
+        await activityLog(env.DB, 'dead_letter', null,
+          `DLQ drained: ${urls.length} link(s) recorded (reason dlq_exhausted)`);
+      } catch (e) {
+        console.error('DLQ activityLog error:', e);
+      }
+    } catch (err) {
+      // Unparseable body — nothing recordable; ack so it can never loop.
+      console.error('DLQ consumer (unparseable body, acking):', err);
+    }
+    // ALWAYS ack on the DLQ — there is no queue behind this queue.
+    if (typeof message.ack === 'function') message.ack();
   }
 }
 

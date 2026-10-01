@@ -2,6 +2,19 @@
 
 Cloudflare-edge backend for the GitHub Project Curator desktop app. Receives forwarded GitHub links via Telegram webhook, stores in D1 (SQLite) via Queue (7-day retry buffer), auto-replies with status, and syncs bidirectionally with the desktop app.
 
+> **Version staleness is detectable** (v0.25.0): `GET /health` reports the
+> Worker's version (`src/version.js` is the single source — keep it in
+> lockstep with the repo `VERSION` and
+> `gitcurator/constants.py::EXPECTED_WORKER_VERSION` at release time). The
+> desktop's Test Connection compares them and tells you when the deployed
+> bot is older than the app expects.
+>
+> **Tests** (Node's built-in runner, no extra dependencies):
+> `npm test` — 32 cases covering link intake, dedup, the blocked/self
+> domain policy, the HMAC desktop contract (including the query-string
+> case), the `/api/pending` shape, and the dead-letter-queue drain.
+
+
 ## Architecture
 
 ```

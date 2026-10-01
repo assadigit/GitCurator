@@ -36,6 +36,16 @@ dead_letter_queue = "curator-ingest-dlq"
 queue = "curator-ingest-dlq"
 binding = "DLQ"
 
+# v0.25.0 — the DLQ now HAS a consumer: exhausted-retry messages are
+# recorded into the dead_letters table (permanent D1) and acked, never
+# reprocessed. Before this, a link that failed 5 times sat in the queue
+# forever and never reached D1 — the one hole in "no link left behind".
+[[queues.consumers]]
+queue = "curator-ingest-dlq"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 1
+
 # ========================================
 # Cron Triggers (OPTIONAL — enable via Dashboard if needed)
 # ========================================

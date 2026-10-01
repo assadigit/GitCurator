@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
-from gitcurator.constants import APP_DIR
+from gitcurator.constants import APP_DIR, EXPECTED_WORKER_VERSION
 from gitcurator.core import llm_client as _llm
 
 # ---------------------------------------------------------------------------
@@ -524,6 +524,46 @@ def check_telegram_local(config: dict,
 
 
 # ---------------------------------------------------------------------------
+# The Cloudflare bot Worker version (staleness check, v0.25.0)
+# ---------------------------------------------------------------------------
+
+def check_worker_version(config: dict,
+                         http_get=None) -> Optional[Dict[str, str]]:
+    """When a Cloudflare Worker URL is configured, compare its deployed
+    version (``GET <url>/health`` → ``{"version": ...}``) with
+    ``EXPECTED_WORKER_VERSION`` so a stale bot is detectable from Test
+    Connection. Returns a result dict, or ``None`` when no worker URL is
+    configured (the sync is optional — nothing to check, nothing to say).
+    Never raises. ``http_get`` (url) → dict is injectable for tests."""
+    url = (config or {}).get("cloudflare_worker_url", "")
+    if not url:
+        return None
+    fetch = http_get or _http_get_json
+    try:
+        data = fetch(url.rstrip("/") + "/health", timeout_s=8.0)
+    except Exception as exc:
+        enabled = bool((config or {}).get("cloudflare_enabled", False))
+        level = LEVEL_ERROR if enabled else LEVEL_WARN
+        return _result("Bot Worker", level,
+                       "reachable check failed "
+                       f"({type(exc).__name__}) — {url.rstrip('/')}/health")
+    deployed = (data or {}).get("version", "")
+    if not deployed:
+        return _result("Bot Worker", LEVEL_WARN,
+                       "no version reported by /health — redeploy the "
+                       "Worker (bash deploy-latest.sh in app/cloudflare-bot)")
+    if str(deployed) == str(EXPECTED_WORKER_VERSION):
+        return _result("Bot Worker", LEVEL_OK,
+                       f"v{deployed} — matches this app "
+                       f"(expected v{EXPECTED_WORKER_VERSION})")
+    return _result(
+        "Bot Worker", LEVEL_WARN,
+        f"v{deployed} deployed, this app expects v{EXPECTED_WORKER_VERSION} "
+        "— an older bot may miss newer link handling; redeploy with: "
+        "cd app/cloudflare-bot && bash deploy-latest.sh")
+
+
+# ---------------------------------------------------------------------------
 # The battery + the verdict
 # ---------------------------------------------------------------------------
 
@@ -535,12 +575,26 @@ def run_local_checks(config: dict,
     sections as ``[[title, [result, …]], …]`` (mutable — orchestrators
     append the live-Telegram result to the last section). ``on_section``
     gets ``(title, index, total)``, ``on_result`` gets each result dict;
-    exceptions inside the callbacks are swallowed. Never raises."""
+    exceptions inside the callbacks are swallowed. Never raises.
+
+    v0.25.0: when a Cloudflare Worker URL is configured, its version check
+    joins the Telegram section as one extra line (a stale deployed bot is
+    a Telegram-side problem). Unchanged — all four sections — otherwise."""
+    def telegram_section():
+        results = check_telegram_local(config, session_file)
+        try:
+            worker_check = check_worker_version(config)
+        except Exception:
+            worker_check = None
+        if worker_check is not None:
+            results = list(results) + [worker_check]
+        return results
+
     groups = [
         ("Vaults", lambda: check_vaults(config)),
         ("LLM", lambda: check_llm(config)),
         ("GitHub", lambda: check_github(config)),
-        ("Telegram", lambda: check_telegram_local(config, session_file)),
+        ("Telegram", telegram_section),
     ]
     sections: List[List] = []
     total = len(groups)

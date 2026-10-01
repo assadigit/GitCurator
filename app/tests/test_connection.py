@@ -538,6 +538,67 @@ class TestTelegramLiveResult(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Bot Worker version (v0.25.0 staleness check)
+# ---------------------------------------------------------------------------
+
+class TestCheckWorkerVersion(unittest.TestCase):
+    """check_worker_version: the deployed Worker's /health version vs the
+    app's EXPECTED_WORKER_VERSION — injectable http_get, zero network."""
+
+    def test_no_worker_url_configured_returns_none(self):
+        self.assertIsNone(cc.check_worker_version({}))
+        self.assertIsNone(cc.check_worker_version(
+            {"cloudflare_worker_url": ""}))
+
+    def test_matching_version_is_ok(self):
+        r = cc.check_worker_version(
+            {"cloudflare_worker_url": "https://bot.example"},
+            http_get=lambda url, timeout_s=8.0: {
+                "version": cc.EXPECTED_WORKER_VERSION})
+        self.assertEqual(r["level"], "ok")
+        self.assertIn("matches", r["detail"])
+
+    def test_stale_version_warns_with_the_redeploy_remedy(self):
+        r = cc.check_worker_version(
+            {"cloudflare_worker_url": "https://bot.example"},
+            http_get=lambda url, timeout_s=8.0: {"version": "0.22.0"})
+        self.assertEqual(r["level"], "warn")
+        self.assertIn("0.22.0", r["detail"])
+        self.assertIn(cc.EXPECTED_WORKER_VERSION, r["detail"])
+        self.assertIn("deploy-latest.sh", r["detail"])
+
+    def test_unreachable_worker_warns_or_errors_by_enabled(self):
+        def _boom(url, timeout_s=8.0):
+            raise OSError("refused")
+        r = cc.check_worker_version(
+            {"cloudflare_worker_url": "https://bot.example"},
+            http_get=_boom)
+        self.assertEqual(r["level"], "warn")
+        r2 = cc.check_worker_version(
+            {"cloudflare_worker_url": "https://bot.example",
+             "cloudflare_enabled": True},
+            http_get=_boom)
+        self.assertEqual(r2["level"], "error")
+
+    def test_battery_appends_the_worker_line_to_the_telegram_section(self):
+        cfg = {"cloudflare_worker_url": "https://bot.example"}
+        with mock.patch.object(
+                cc, "_http_get_json",
+                return_value={"version": cc.EXPECTED_WORKER_VERSION}):
+            sections = cc.run_local_checks(cfg)
+        titles = [t for t, _ in sections]
+        self.assertEqual(titles,
+                         ["Vaults", "LLM", "GitHub", "Telegram"])
+        names = [r["name"] for r in sections[3][1]]
+        self.assertIn("Bot Worker", names)
+
+    def test_battery_without_worker_url_keeps_four_plain_sections(self):
+        sections = cc.run_local_checks({})
+        names = [r["name"] for r in sections[3][1]]
+        self.assertNotIn("Bot Worker", names)
+
+
+# ---------------------------------------------------------------------------
 # Battery + verdict
 # ---------------------------------------------------------------------------
 
