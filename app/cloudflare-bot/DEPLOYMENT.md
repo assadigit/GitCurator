@@ -38,9 +38,9 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
-## 📦 v0.25.0 update pack — the bot must match the app (prepare-only)
+## 📦 v0.26.0 update pack — the bot must match the app (prepare-only)
 
-This release changes the Worker (tested 31/31 with Node's built-in test
+This release changes the Worker (tested 37/37 with Node's built-in test
 runner — `npm test` — and validated with `wrangler deploy --dry-run` plus a
 local `wrangler dev` run: a forwarded GitHub link, a website link and an
 x.com link were recorded exactly as the app expects: ledger / ledger /
@@ -53,7 +53,12 @@ dead-letter). What's new on the Worker side:
 2. **HMAC fix** — `/api/decommissions?since=…` could never verify before
    (the worker stripped the query string when checking the signature);
    it now signs exactly what the desktop signs.
-3. **Version reporting** — `/health` reports `0.25.0`, and the desktop
+3. **Version reporting** — `/health` reports `0.26.0`, and the desktop
+4. **v0.26.0 contract fixes** — GitHub Pages links
+   (`owner.github.io/repo`) now get the same canonical identity on both
+   sides; a transiently-failed link (dlq_exhausted) stays visible in
+   /pending and can be re-sent (only the blocked-domain policy hides
+   links now); failed enrichments are audited in the activity log.
    app's Test Connection compares it with the version it expects and
    tells you when the deployed bot is older than the app.
 
@@ -79,8 +84,8 @@ to step 4.
    npx wrangler login
    ```
 3. **Apply the schema and deploy** (the schema is `IF NOT EXISTS` — safe
-   to run twice, existing data untouched; the only schema change in
-   v0.25.0 is a comment):
+   to run twice, existing data untouched; v0.25.0's only schema change
+   was a comment; v0.26.0 needs no schema change at all):
    ```bash
    npx wrangler d1 execute curator-bot --remote --file=schema.sql
    npx wrangler deploy
@@ -88,9 +93,9 @@ to step 4.
    (Or just: `bash deploy-latest.sh` — it does both plus a health check.)
 4. **Check it worked** — all three must pass:
    - `curl https://github-to-obsidian-bot.aliassadi-plus.workers.dev/health`
-     answers with `"version":"0.25.0"`.
+     answers with `"version":"0.26.0"`.
    - In the desktop app: **Test Connection** → the Telegram section shows
-     `✅ Bot Worker — v0.25.0 — matches this app`. (Needs the Worker URL
+     `✅ Bot Worker — v0.26.0 — matches this app`. (Needs the Worker URL
      in Settings; it is already in your config.example.)
    - Send **one test link** to @githubfetcherbot from Telegram — e.g.
      `https://github.com/torvalds/linux` — and watch for the usual

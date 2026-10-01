@@ -253,7 +253,7 @@ CONFIG_EXAMPLE = {
 # compares against it and warns when the deployed Worker is older, so a
 # stale bot is detectable from the app. Keep in lockstep with
 # app/cloudflare-bot/src/version.js (and its package.json) at release time.
-EXPECTED_WORKER_VERSION = "0.25.0"
+EXPECTED_WORKER_VERSION = "0.26.0"
 
 CATEGORY_FOLDERS = {
     "Agents": "AI-Domain/Agents",

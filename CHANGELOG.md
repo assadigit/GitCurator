@@ -1,3 +1,70 @@
+## [0.26.0] — the SWOT hardening pass: weaknesses found, fixed and locked by tests — 2026-10-01
+
+Owner ask (session): "do a SWOT analysis, and find threats and weaknesses of
+app, software-engineering wise and fix them" — plus approval to execute the
+pending Tier B tidy. Suite **826 → 837**, Worker tests **31 → 37**, all green.
+The new risk picture lives in `SWOT-ANALYSIS.md` (the v0.06-era one is archived
+in `docs/history/`).
+
+**1. Tier B tidy (owner-approved).** The root `dashboard/` verification
+console (79 files) is removed — it duplicated the CI gate one-to-one and
+nothing referenced it (recoverable from git history). `unique_links.csv`
+(your personal 784-link bookmark export) is removed from the tree and
+gitignored — personal data in a public repo; the golden-set candidates it
+produced stay committed, and the backfill tool takes any CSV path. The
+session-history docs (`STATUS.md`, the three `REFACTOR_*` notes, the old
+`SWOT-ANALYSIS.md`, `KICKOFF.md`, `docs/reports/`, `docs/trials/`) moved to
+`docs/history/` — `CHANGELOG.md` remains the living history. The `tools/`
+dev utilities are classified and documented in `AGENTS.md`; the dormant
+`cloud/` helpers stay (your "fixed, not deleted" decision).
+
+**2. The mirror⇄linking import cycle is gone.** `core/mirror.py` imports
+`linking` (the Phase 6 hook) while `linking` imported mirror's helpers
+*lazily inside a function* to dodge the cycle. The shared `mirror_of` key
++ its regex + `_unquote` now live in the leaf module `core/mirror_keys.py`;
+the import graph is one-way, proven by a fresh-process test (importing
+`linking` no longer even loads `mirror`).
+
+**3. No more bare `except:` anywhere.** All 12 sites (including the
+app-lock cleanup, the backfill and the backup paths) silently swallowed
+`KeyboardInterrupt`/`SystemExit` — a Ctrl+C landing inside one was eaten.
+All narrowed to `except Exception:` (same fallback behavior for ordinary
+errors), and an AST-based test keeps the package clean forever.
+
+**4. TLS verification is now an explicit `verify_ssl` config flag.** Four
+outbound paths silently hard-disabled certificate checks (cloud LLM calls,
+banner downloads, the sources fetch — the websites fetcher always
+verified). Default remains **off** (your censored-network setup, unchanged
+behavior); set `"verify_ssl": true` in config.json to enforce certificates.
+Documented in `config.example.json` and the README.
+
+**5. Worker contract fixes (deploy with the prepared v0.26.0 pack).**
+GitHub Pages links (`owner.github.io/repo`) now get the SAME identity on
+both sides — the Worker maps them to `github.com/owner/repo` exactly like
+the desktop (they used to be typed `non_github`, two identities for one
+link). A transiently-failed link (`dlq_exhausted` after e.g. a D1 hiccup)
+no longer disappears from `/pending` forever or earns re-sends a permanent
+💀 — only the policy reason (`blocked_domain`) hides/blocks now. And a
+failed repo-metadata enrichment is recorded in the activity log instead of
+being silently acked away. Six new Worker tests cover it all.
+
+**6. Run summaries are capped.** `processing_summary_*.txt` files used to
+accumulate in the vault root forever (and VaultSeal committed every one).
+Only the newest `summary_keep_last` (default 10, configurable) are kept —
+the matcher touches nothing else, and dry-run records removals instead of
+performing them. Also: `tools/diagnose_code.py` no longer reads config.json
+and prints a banner at *import* time (script behavior unchanged when run
+directly).
+
+**Reviewer-grade verification, twice.** Every commit gated by the full
+suite plus the fingerprint/surface/import net (the 26 intentional edits
+are allowlisted and itemized in the commit messages); Worker tests
+37/37; offline golden 30/30; `wrangler deploy --dry-run` valid; the
+per-module CI counts recomputed from the loader (837 = the real sum).
+**What you may want to do next** (P0/P1 in the SWOT): rotate the
+credentials (they were exposed in chat again), and deploy the prepared
+Worker — a 5-minute pack is in `app/cloudflare-bot/DEPLOYMENT.md`.
+
 ## [0.25.0] — the hygiene & modularization pass: the worker split, the dead-letter safety net, and a tidier repo — 2026-10-01
 
 Owner ask (session brief): "a hygiene and modularization pass" — split only

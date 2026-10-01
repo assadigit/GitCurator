@@ -1,4 +1,4 @@
-# GitHub-to-Obsidian v0.25.0 (hygiene & modularization — 826-test suite)
+# GitHub-to-Obsidian v0.26.0 (hygiene, modularization & SWOT hardening — 837-test suite)
 
 Latest user-visible change: Test Connection can now tell you when the
 deployed Telegram bot is older than the app expects (one extra line in

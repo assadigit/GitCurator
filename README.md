@@ -6,7 +6,7 @@
 > summarized, deduplicated, backed up to private GitHub mirrors, and
 > (optionally) published as a public directory.
 
-**Version:** `0.25.0` · **Suite:** 826 automated tests + a 30-link golden set ·
+**Version:** `0.26.0` · **Suite:** 837 automated tests + a 30-link golden set ·
 **Releases:** every version since v0.14.1 ships a deterministic Windows zip ·
 **Status:** all six SPEC phases done and merged — session history
 archived in [docs/history/](docs/history/) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
@@ -57,7 +57,7 @@ are never rewritten, and every risky operation has a dry-run.**
 | LLM backends | Ollama · llama.cpp · Anthropic Claude · any OpenAI-compatible endpoint |
 | Storage | Obsidian vaults (Markdown) + `cache.db` (SQLite) |
 | Backup | private GitHub mirrors per vault (VaultSeal) + optional public directory (Good Repos) |
-| Tests | 826 automated cases, zero network needed; 77 modules compiled in CI |
+| Tests | 837 automated cases, zero network needed; 79 modules compiled in CI |
 
 ## How it works
 
@@ -283,7 +283,7 @@ activity log.
 | `app/gitcurator/tools/` | Golden runners · backfill · mirror · link-builder · safety scanners · `build_zip.py` |
 | `app/taxonomy/` | The Websites category file — **yours to edit**; the classifier may only use names from it |
 | `app/prompts/` | The pipeline prompts (w01 category · w02 subcategory · w03 analyze) |
-| `app/tests/` | 826 tests + `golden/websites.json` (the 30-link golden set) |
+| `app/tests/` | 837 tests + `golden/websites.json` (the 30-link golden set) |
 | `app/cloudflare-bot/` | The Telegram bot Worker — canonical deploy copy (D1 schema, migrations, deploy scripts) |
 | `app/cloudflare-bot/dashboard/` | The bot's web dashboard (stats · pending · dead letters · activity) |
 | `docs/history/` | The archived session history — STATUS, REFACTOR notes, phase reports, trials, kickoff |
@@ -305,12 +305,14 @@ touch:
 | `llm_provider` | `ollama` · `llamacpp` · `cloud` |
 | `llm_num_ctx` / `llm_max_output_tokens` | the split context budget |
 | `web_blocked_domains` | never-fetched domains (default the x-family) |
+| `verify_ssl` | enforce TLS certificate checks on outbound calls (default `false` — the historical censored-network setting; the websites fetcher always verifies) |
+| `summary_keep_last` | run summaries kept in the vault root (default 10; `0` = keep all) |
 | `notfound_strike_threshold` | 404 quarantine threshold (default 3) |
 | `proxy.*` | SOCKS5/HTTP proxy — Telegram + web fetches |
 
 ## Testing, CI & verification
 
-- **826 automated tests**, zero network at test time — the core is pure
+- **837 automated tests**, zero network at test time — the core is pure
   stdlib and the outside world is faked (fake Ollama, fake GitHub, a real
   fake SOCKS5 server, offscreen Qt). Exact command in
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (run from `app/`).
@@ -318,7 +320,7 @@ touch:
   in CI (`run_golden_websites.py --offline`), and `--live` against any
   backend for side-by-side comparison reports.
 - **CI** (`.github/workflows/ci.yml`) — requirements + Qt system libs,
-  77 modules compiled, the full 826 suite, the Worker's 31 Node tests and the offline golden run on
+  79 modules compiled, the full 837 suite, the Worker's 37 Node tests and the offline golden run on
   every push/tag/PR. The repository is **public since 2026-09-30** (after a
   full history scrub), so Actions minutes are free; before that, a billing
   block on private-repo Actions was worked around with the
