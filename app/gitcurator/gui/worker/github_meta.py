@@ -31,6 +31,7 @@ from gitcurator.core import storage as _storage
 from gitcurator.core import note_builder as _note_builder
 from gitcurator.core import llm_client as _llm_client
 from gitcurator.core import dryrun as _dryrun
+from gitcurator.core import netctx as _netctx
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import connection_check as _connection_check
@@ -119,7 +120,6 @@ class WorkerGithubMetaMixin:
         failed downloads to avoid re-trying known failures.
         Returns the local file path if successful, None otherwise."""
         import urllib.request
-        import ssl
         import time as _time
 
         # v25 pre-flight: throttle banner downloads for large batches.
@@ -166,9 +166,7 @@ class WorkerGithubMetaMixin:
                 except OSError:
                     pass
 
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = _netctx.outbound_ssl_context(self.config)
 
         # Retry with backoff for rate limiting (429) and transient errors
         max_retries = 3

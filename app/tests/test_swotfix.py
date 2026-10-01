@@ -80,5 +80,41 @@ class TestNoBareExcept(unittest.TestCase):
             f"{bare}")
 
 
+class TestVerifySslFlag(unittest.TestCase):
+    """v0.26.0: TLS verification on the non-websites outbound paths is
+    the explicit ``verify_ssl`` config key (default False = the
+    historical censored-network behavior), via core.netctx."""
+
+    def test_flag_reader_defaults(self):
+        from gitcurator.core import netctx
+        self.assertFalse(netctx.verify_ssl_enabled(None))
+        self.assertFalse(netctx.verify_ssl_enabled({}))
+        self.assertFalse(netctx.verify_ssl_enabled({'verify_ssl': False}))
+        self.assertTrue(netctx.verify_ssl_enabled({'verify_ssl': True}))
+
+    def test_context_disabled_by_default(self):
+        import ssl
+        from gitcurator.core import netctx
+        ctx = netctx.outbound_ssl_context(None)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_NONE)
+        self.assertFalse(ctx.check_hostname)
+
+    def test_context_enabled_by_flag(self):
+        import ssl
+        from gitcurator.core import netctx
+        ctx = netctx.outbound_ssl_context({'verify_ssl': True})
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(ctx.check_hostname)
+
+    def test_config_example_documents_the_flag(self):
+        import json
+        example = json.load(open(os.path.join(APP_ROOT, "config.example.json"),
+                                 encoding="utf-8"))
+        self.assertIn('verify_ssl', example,
+                      "config.example.json must document verify_ssl")
+        self.assertIs(example['verify_ssl'], False,
+                      "default must preserve the historical behavior")
+
+
 if __name__ == "__main__":
     unittest.main()

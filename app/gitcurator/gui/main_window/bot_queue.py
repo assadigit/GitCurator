@@ -26,6 +26,7 @@ from gitcurator.core import storage as _storage
 from gitcurator.core import note_builder as _note_builder
 from gitcurator.core import llm_client as _llm_client
 from gitcurator.core import dryrun as _dryrun
+from gitcurator.core import netctx as _netctx
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import connection_check as _connection_check
@@ -71,7 +72,6 @@ class BotQueueMixin:
     def fetch_from_sources(self):
         """Fetch GitHub URLs from an RSS feed or Reddit .json endpoint."""
         import urllib.request
-        import ssl
         import xml.etree.ElementTree as ET
 
         url = self.sources_url.text().strip()
@@ -83,9 +83,7 @@ class BotQueueMixin:
         self.sources_results.clear()
 
         try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx = _netctx.outbound_ssl_context(self.config)
 
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:

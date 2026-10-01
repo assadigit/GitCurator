@@ -26,6 +26,7 @@ from gitcurator.core import storage as _storage
 from gitcurator.core import note_builder as _note_builder
 from gitcurator.core import llm_client as _llm_client
 from gitcurator.core import dryrun as _dryrun
+from gitcurator.core import netctx as _netctx
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import connection_check as _connection_check
@@ -522,7 +523,8 @@ class ConnectionTestsMixin:
             self.log_message(f"💬 Sending test prompt to '{model}' at {api_url}...", "info")
             response = ProcessingWorker._call_cloud_llm(
                 api_url, api_key, model,
-                [{"role": "user", "content": "Say hello"}]
+                [{"role": "user", "content": "Say hello"}],
+                verify_tls=_netctx.verify_ssl_enabled(self.config)
             )
             reply = (response or "").strip()
             if reply:

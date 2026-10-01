@@ -31,6 +31,7 @@ from gitcurator.core import storage as _storage
 from gitcurator.core import note_builder as _note_builder
 from gitcurator.core import llm_client as _llm_client
 from gitcurator.core import dryrun as _dryrun
+from gitcurator.core import netctx as _netctx
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import connection_check as _connection_check
@@ -197,7 +198,9 @@ class WorkerWebsitePhaseMixin:
                         self.config.get('cloud_api_key', ''),
                         model, messages,
                         json_mode=True, timeout_s=timeout_s,
-                        num_ctx=_num_ctx, on_warn=_warn)
+                        num_ctx=_num_ctx, on_warn=_warn,
+                        verify_tls=_netctx.verify_ssl_enabled(
+                            self.config))
                 if llm_provider == 'llamacpp':
                     # v0.15.0 — llama.cpp engine detection: same shared
                     # OpenAI-compatible path with the llamacpp_* keys.
@@ -210,7 +213,9 @@ class WorkerWebsitePhaseMixin:
                         self.config.get('llamacpp_api_key', ''),
                         model, messages,
                         json_mode=True, timeout_s=timeout_s,
-                        num_ctx=_num_ctx, on_warn=_warn)
+                        num_ctx=_num_ctx, on_warn=_warn,
+                        verify_tls=_netctx.verify_ssl_enabled(
+                            self.config))
                 model = _llm_client.resolve_task_model(
                     self.config, task, ollama_model)
                 return _llm_client.ollama_chat(

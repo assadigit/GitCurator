@@ -584,7 +584,8 @@ class TestWorkerRouters(unittest.TestCase):
 
         def recorder(api_url, api_key, model, messages,
                      json_mode=False, timeout_s=300, num_ctx=None,
-                     max_output_tokens=None, on_warn=None):
+                     max_output_tokens=None, on_warn=None,
+                     verify_tls=False):
             seen.append((model, json_mode))
             return json.dumps({
                 'summary': 'ok', 'how_it_works': 'ok',
@@ -609,7 +610,7 @@ class TestWorkerRouters(unittest.TestCase):
 
         def recorder(api_url, api_key, model, messages,
                      json_mode=False, timeout_s=300, num_ctx=None,
-                     on_warn=None):
+                     on_warn=None, verify_tls=False):
             text = messages[0]['content'] if messages else ''
             seen.append((model, json_mode))
             if 'filing a website into a personal library' in text:
