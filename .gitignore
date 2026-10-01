@@ -55,3 +55,13 @@ app/app.lock
 
 # ── Cloudflare wrangler local cache (never commit account cache) ──────────────
 .wrangler/
+
+# ── v0.25.0 hygiene pass ─────────────────────────────────────────
+# Agent working notes + refactor tooling (see AGENTS.md) — never source.
+.agent-notes/
+.refactor-scratch/
+# Python test tooling caches
+.pytest_cache/
+.coverage
+# Release zip artifacts (built by tools/build_zip.py, never tracked)
+*.zip
