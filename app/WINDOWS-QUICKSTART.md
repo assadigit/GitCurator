@@ -50,11 +50,9 @@ shows IN THE LOG, one line each: **vaults** (found + writable), **LLM**
 (Ollama / llama.cpp / API — whichever is active), **GitHub** (token +
 backup repos) and **Telegram** (bot + account login, with a LIVE
 connection test). Ends with `🏁 ALL SYSTEMS READY` or a list of what
-needs attention. Same thing in a terminal — double-click
+needs attention. Same thing in a terminal:
 
-**`GitCurator-TEST-CONNECTION.bat`**
-
-(or `python main.py --cli --test-connection`)
+`python main.py --cli --test-connection`
 
 ## Your vault paths (from the build notes)
 
@@ -77,8 +75,8 @@ the mirror tool yourself.
 | `GitCurator.bat` | **the desktop app** |
 | `GitCurator-DRY-RUN.bat` | full automatic run, writes nothing |
 | `GitCurator-CLI.bat` | full automatic run (real) |
-| `GitCurator-TEST-CONNECTION.bat` | is everything up and ready? (vaults · LLM · GitHub · Telegram live) |
 | `GitCurator-CLI-Setup.bat` | first-run credential wizard |
+| *(is everything ready?)* | `python main.py --cli --test-connection` — same check as the app's Test Connection button |
 | `Start-GitCurator-CLI.bat` | same as GitCurator-CLI.bat (kept for muscle memory) |
 | `config.json` | created when you save settings — your credentials, keep it private |
 | `config.example.json` | the settings template (safe to look at) |

@@ -1,1 +1,0 @@
-python main.py --headless --from-id 123 --to-id 456 --vault "/path/to/vault" --config "config.json"

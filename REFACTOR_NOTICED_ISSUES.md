@@ -37,3 +37,6 @@ for the owner to triage later.
    instead of its smoke config. It is NOT part of the CI test gate
    (compiled only), so it was left untouched per the zero-change rule.
    Fix idea for later: aim it at the owning module like the tests do.
+   *(RESOLVED at v0.25.0: the tool was removed in the hygiene pass —
+   zero functional references and the stale patch target made it unsafe
+   to run; recoverable from git history if ever needed.)*
