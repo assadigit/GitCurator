@@ -112,36 +112,34 @@ class VaultConfigMixin:
             self._save_vault_page()
 
     def _vault_path_status(self, path, kind):
-        """(text, color) for a vault path — the live status line under each
+        """(text, state) for a vault path — the live status line under each
         picker. Websites folders that don't exist yet are 'will be created'
-        (its pipeline creates them); the GitHub vault must exist; the Manual
-        vault is the owner's to create."""
-        colors = self._status_colors()
+        (its pipeline creates them); the GitHub vault must exist; the
+        Manual vault is the owner's to create. The state feeds _set_status
+        (the theme kit paints the semantic color)."""
         path = (path or '').strip()
         if not path:
-            return "● not set", colors['warning']
+            return "● not set", 'warning'
         if os.path.isdir(path):
-            return "● found", colors['success']
+            return "● found", 'success'
         if kind == 'websites':
-            return "● will be created (folder does not exist yet)", colors['warning']
+            return "● will be created (folder does not exist yet)", 'warning'
         if kind == 'github':
-            return "● missing on disk", colors['error']
-        return "● not found — you create this vault yourself", colors['warning']
+            return "● missing on disk", 'error'
+        return "● not found — you create this vault yourself", 'warning'
 
     def _refresh_vault_page_status(self, *args):
         """Update the two live status labels (no saving — cheap, per keystroke)."""
         if not hasattr(self, 'website_vault_status'):
             return
-        text, color = self._vault_path_status(
+        text, state = self._vault_path_status(
             self.website_vault_input.text(), 'websites')
         self.website_vault_status.setText(text)
-        self.website_vault_status.setStyleSheet(
-            f"font-size: 12px; font-weight: bold; color: {color};")
-        text, color = self._vault_path_status(
+        self._set_status(self.website_vault_status, state, strong=True)
+        text, state = self._vault_path_status(
             self.manual_vault_input.text(), 'manual')
         self.manual_vault_status.setText(text)
-        self.manual_vault_status.setStyleSheet(
-            f"font-size: 12px; font-weight: bold; color: {color};")
+        self._set_status(self.manual_vault_status, state, strong=True)
 
     def _save_vault_page(self, *args):
         """Commit the Vault page (paths + repo + switches) via the ONE

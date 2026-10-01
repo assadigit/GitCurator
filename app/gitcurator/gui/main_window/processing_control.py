@@ -513,34 +513,14 @@ class ProcessingControlMixin:
         )
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("🤖 LLM Analysis Failed")
+        dialog.setWindowTitle("LLM Analysis Failed")
         dialog.setModal(True)
         dialog.setMinimumWidth(460)
 
-        # Theme-aware colors (matches _show_custom_message_box)
-        is_dark = getattr(self, '_dark_mode', False)
-        if is_dark:
-            bg_color = "#2B2639"
-            text_color = "#F2EEE7"
-            border_color = "#3B344F"
-            input_bg = "#241F31"
-        else:
-            bg_color = "#FFFFFF"
-            text_color = "#423A52"
-            border_color = "#F2EEE7"
-            input_bg = "#FDFCF8"
-
-        dialog.setStyleSheet(f"""
-            QDialog {{ background-color: {bg_color}; }}
-            QLabel {{ color: {text_color}; background: transparent; }}
-            QComboBox, QComboBox QAbstractItemView {{
-                background-color: {input_bg};
-                color: {text_color};
-                border: 1px solid {border_color};
-                border-radius: 4px;
-                padding: 6px 10px;
-            }}
-        """)
+        # v0.30.0 (audit): DE-STYLED — the themed app QSS paints this dialog
+        # (QDialog surface + QWidget text + combo rules); the glyph/heading
+        # wear message-box roles, the buttons ride the design-system
+        # variants. No per-dialog stylesheet, no hand-picked colors.
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -549,11 +529,11 @@ class ProcessingControlMixin:
         # Header
         header = QHBoxLayout()
         icon_label = QLabel("🤖")
-        icon_label.setStyleSheet("font-size: 28px; background: transparent;")
+        icon_label.setObjectName("msg_glyph")
         header.addWidget(icon_label)
         title_label = QLabel(f" LLM Failed: {repo_name}")
-        title_color = "#DC2626" if not is_dark else "#F87171"
-        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {title_color}; background: transparent;")
+        title_label.setObjectName("msg_heading")
+        title_label.setProperty("tone", "error")
         header.addWidget(title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -564,7 +544,6 @@ class ProcessingControlMixin:
             f"Failed model: <b>{failed_model or 'unknown'}</b>\n"
             "Choose how to proceed:"
         )
-        desc.setStyleSheet(f"font-size: 13px; color: {text_color}; background: transparent;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -612,12 +591,7 @@ class ProcessingControlMixin:
                 "'ollama serve' in a terminal), then choose Retry."
             )
             server_hint.setWordWrap(True)
-            server_hint.setStyleSheet(
-                f"font-size: 12px; color: {'#B45309' if not is_dark else '#F2DCA8'}; "
-                f"background: transparent; border: 1px solid "
-                f"{'#F5E3C0' if not is_dark else '#4A3F28'}; border-radius: 6px; "
-                f"padding: 8px;"
-            )
+            server_hint.setObjectName("warn_box")
             layout.addWidget(server_hint)
 
         # Model dropdown
@@ -643,19 +617,19 @@ class ProcessingControlMixin:
         # what users expect: pick once, keep going.
         remember_check = QCheckBox("Remember this model (apply to the rest of the batch and save to Settings)")
         remember_check.setChecked(True)
-        remember_check.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 12px;")
         layout.addWidget(remember_check)
 
-        # Buttons
+        # Buttons (v0.30.0: design-system variants — retry is the one
+        # primary, stop is the destructive danger, the rest secondary)
         btn_row = QHBoxLayout()
-        skip_btn = QPushButton("⏭️ Skip")
-        skip_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='outline'))
-        retry_same_btn = QPushButton("🔁 Retry Same")
-        retry_same_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
-        retry_with_btn = QPushButton("🔁 Retry With ▾")
-        retry_with_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], text=COLORS['cta_text']))
-        stop_btn = QPushButton("⏹ Stop Batch")
-        stop_btn.setStyleSheet(self._btn_style(COLORS['error_deep'], '#8F1B2E', variant='outline'))
+        skip_btn = QPushButton("Skip")
+        self._style_btn(skip_btn, 'secondary')
+        retry_same_btn = QPushButton("Retry Same")
+        self._style_btn(retry_same_btn, 'primary')
+        retry_with_btn = QPushButton("Retry With ▾")
+        self._style_btn(retry_with_btn, 'secondary')
+        stop_btn = QPushButton("Stop Batch")
+        self._style_btn(stop_btn, 'danger')
         btn_row.addWidget(skip_btn)
         btn_row.addWidget(retry_same_btn)
         btn_row.addWidget(retry_with_btn)

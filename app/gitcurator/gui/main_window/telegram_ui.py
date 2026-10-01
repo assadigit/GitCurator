@@ -127,40 +127,25 @@ class TelegramUiMixin:
 
     def _on_telegram_code_requested(self, prompt_type: str, worker: TestWorker):
         """Called when the Telegram worker needs a login code or 2FA password.
-        Shows a theme-aware modal dialog with clear instructions."""
+        Shows a themed modal dialog with clear instructions.
+
+        v0.30.0 (audit): DE-STYLED — the themed app QSS paints the dialog
+        (QDialog surface + QWidget text + the QLineEdit rules); the help
+        callout wears the ``help_box`` role; the buttons ride the
+        design-system variants. No per-dialog stylesheet."""
         dialog = QDialog(self)
         dialog.setModal(True)
         dialog.raise_()
         dialog.activateWindow()
 
-        # Theme-aware colors
-        is_dark = getattr(self, '_dark_mode', False)
-        if is_dark:
-            bg_color = "#2B2639"
-            text_color = "#F2EEE7"
-            help_bg = "#2E2A3C"
-            border_color = "#4A4263"
-            focus_color = "#C4BCF5"
-        else:
-            bg_color = "#FFFFFF"
-            text_color = "#423A52"
-            help_bg = "#F2EDE3"
-            border_color = "#D8D0BE"
-            focus_color = "#5F54B4"  # v32 pastel: violet accent
-
-        dialog.setStyleSheet(f"""
-            QDialog {{ background-color: {bg_color}; }}
-            QLabel {{ color: {text_color}; background: transparent; }}
-        """)
-
         if prompt_type == "PASSWORD":
-            dialog.setWindowTitle("🔒 Telegram 2FA Password")
+            dialog.setWindowTitle("Telegram 2FA Password")
             label_text = "Enter your Telegram cloud password (2FA):"
             echo_mode = QLineEdit.EchoMode.Password
             placeholder = ""
             help_text = ""
         else:
-            dialog.setWindowTitle("📲 Telegram Login Code")
+            dialog.setWindowTitle("Telegram Login Code")
             label_text = "Telegram has sent a login code to your account."
             echo_mode = QLineEdit.EchoMode.Normal
             placeholder = "e.g. 12345"
@@ -178,30 +163,22 @@ class TelegramUiMixin:
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
-        # Title label
+        # Title label (plain — the themed QWidget rule colors the text)
         title_label = QLabel(label_text)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {text_color}; background: transparent;")
         title_label.setWordWrap(True)
         layout.addWidget(title_label)
 
-        # Input field
+        # Input field (global QLineEdit rule themes it)
         input_field = QLineEdit()
         input_field.setEchoMode(echo_mode)
         input_field.setPlaceholderText(placeholder)
         input_field.setMinimumWidth(360)
-        input_field.setStyleSheet(
-            f"QLineEdit {{ padding: 8px; border: 2px solid {border_color}; border-radius: 6px; font-size: 14px; background: {bg_color}; color: {text_color}; }}"
-            f"QLineEdit:focus {{ border-color: {focus_color}; }}"
-        )
         layout.addWidget(input_field)
 
-        # Help text for code input
+        # Help text for code input (the themed help-box role)
         if help_text:
             help_label = QLabel(help_text)
-            help_label.setStyleSheet(
-                f"font-size: 11px; color: {text_color}; background-color: {help_bg}; "
-                f"padding: 10px; border-radius: 4px; font-family: Consolas, monospace;"
-            )
+            help_label.setObjectName("help_box")
             help_label.setWordWrap(True)
             layout.addWidget(help_label)
 
@@ -210,13 +187,11 @@ class TelegramUiMixin:
         button_row.addStretch()
 
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(
-            "padding: 8px 20px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;"
-        )
+        self._style_btn(cancel_btn, 'secondary')
 
-        ok_btn = QPushButton("✓ Submit Code")
+        ok_btn = QPushButton("Submit Code")
         ok_btn.setDefault(True)
-        ok_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        self._style_btn(ok_btn, 'primary')
 
         button_row.addWidget(cancel_btn)
         button_row.addWidget(ok_btn)

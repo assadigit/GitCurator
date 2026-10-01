@@ -120,7 +120,7 @@ class UiMixin:
         # (expired/rotated token) BEFORE a batch burns its repos on 401s.
         # Reads the field as typed (test before Save), reports the account
         # login on success or an actionable message on 401/403.
-        self.test_github_btn = QPushButton("🔑 Test GitHub Token")
+        self.test_github_btn = QPushButton("Test GitHub Token")
         self.test_github_btn.setToolTip("Validate the token and show the GitHub account it belongs to")
         self.test_github_btn.clicked.connect(self.test_github_token)
         self._style_btn(self.test_github_btn, 'secondary')
@@ -131,13 +131,13 @@ class UiMixin:
         # recategorize / test).
 
         # About Me Wizard button — generates about_me.md to give the LLM context
-        about_me_btn = QPushButton("📝 About Me Wizard")
+        about_me_btn = QPushButton("About Me Wizard")
         about_me_btn.clicked.connect(self.show_about_me_wizard)
         about_me_btn.setToolTip("Generate about_me.md to give the LLM context about who you are")
         self._style_btn(about_me_btn, 'secondary')
         creds_layout.addRow("", about_me_btn)
 
-        self._settings_pages.append((self._wrap_scroll(creds_tab), "🔑 Credentials"))
+        self._settings_pages.append((self._wrap_scroll(creds_tab), "Credentials"))
 
         # ---- Tab 2: Proxy ----
         proxy_tab = QWidget()
@@ -174,7 +174,7 @@ class UiMixin:
 
         # v31.1: '🌐 Test Proxy Connection' moved to the global 'More' menu.
 
-        self._settings_pages.append((self._wrap_scroll(proxy_tab), "🌐 Proxy"))
+        self._settings_pages.append((self._wrap_scroll(proxy_tab), "Proxy"))
 
         # ---- Tab 3: Vault ----
         vault_tab = QWidget()
@@ -191,10 +191,10 @@ class UiMixin:
         self.populate_vaults()
 
         vault_buttons = QHBoxLayout()
-        browse_btn = QPushButton("📂 Browse...")
+        browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self.browse_vault)
         self._style_btn(browse_btn, 'secondary')
-        remove_btn = QPushButton("🗑️ Remove")
+        remove_btn = QPushButton("Remove")
         remove_btn.clicked.connect(self.remove_vault)
         self._style_btn(remove_btn, 'danger')
         vault_buttons.addWidget(browse_btn)
@@ -215,7 +215,7 @@ class UiMixin:
         # anywhere until the pipeline owning that vault is switched ON.
 
         # --- Websites vault (the Phase 2 pipeline; folder may not exist yet) ---
-        web_group = QGroupBox("🌐 Websites vault (new — the Phase 2 pipeline)")
+        web_group = QGroupBox("Websites vault (new — the Phase 2 pipeline)")
         web_layout = QVBoxLayout(web_group)
         web_layout.setSpacing(6)
         web_row = QHBoxLayout()
@@ -224,14 +224,13 @@ class UiMixin:
         self.website_vault_input.setPlaceholderText(
             "path to the Websites vault — the folder does not need to exist yet")
         web_row.addWidget(self.website_vault_input, 1)
-        web_browse = QPushButton("📂 Browse...")
+        web_browse = QPushButton("Browse...")
         self._style_btn(web_browse, 'secondary')
         web_browse.clicked.connect(self.browse_website_vault)
         web_row.addWidget(web_browse)
         web_layout.addLayout(web_row)
         self.website_vault_status = QLabel("● —")
-        self.website_vault_status.setStyleSheet(
-            "font-size: 12px; font-weight: bold;")
+        self._set_status(self.website_vault_status, 'muted', strong=True)
         web_layout.addWidget(self.website_vault_status)
         web_repo_row = QHBoxLayout()
         web_repo_row.addWidget(QLabel("Backup repo:"))
@@ -250,7 +249,7 @@ class UiMixin:
             "🔒 Always banned (the law — cannot be removed): "
             + ', '.join(_links.LAW_BLOCKED_DOMAINS))
         web_law_label.setWordWrap(True)
-        web_law_label.setStyleSheet("font-size: 11px; color: #8A5B0B;")
+        web_law_label.setObjectName("law_note")
         web_law_label.setToolTip(
             "Links on these domains never enter the Websites vault: never "
             "fetched, never noted, never retried. Existing notes for them "
@@ -297,7 +296,7 @@ class UiMixin:
 
         # --- Manual Notes vault (owner-owned; the app writes only the
         #     read-only Library/ mirror there — v0.14.0 Phase 5) ---
-        manual_group = QGroupBox("✍️ Manual Notes vault (yours — the app writes only its Library/ mirror)")
+        manual_group = QGroupBox("Manual Notes vault (yours — the app writes only its Library/ mirror)")
         manual_layout = QVBoxLayout(manual_group)
         manual_layout.setSpacing(6)
         manual_row = QHBoxLayout()
@@ -306,25 +305,24 @@ class UiMixin:
         self.manual_vault_input.setPlaceholderText(
             "path to your Manual Notes vault (receives the read-only Library/ mirror)")
         manual_row.addWidget(self.manual_vault_input, 1)
-        manual_browse = QPushButton("📂 Browse...")
+        manual_browse = QPushButton("Browse...")
         self._style_btn(manual_browse, 'secondary')
         manual_browse.clicked.connect(self.browse_manual_vault)
         manual_row.addWidget(manual_browse)
         manual_layout.addLayout(manual_row)
         self.manual_vault_status = QLabel("● —")
-        self.manual_vault_status.setStyleSheet(
-            "font-size: 12px; font-weight: bold;")
+        self._set_status(self.manual_vault_status, 'muted', strong=True)
         manual_layout.addWidget(self.manual_vault_status)
         self.manual_mirror_hint = QLabel(
             "Library mirror: run tools/mirror_manual.py — dry-run first, "
             "then --apply. Only Library/ is ever touched.")
         self.manual_mirror_hint.setWordWrap(True)
-        self.manual_mirror_hint.setStyleSheet("font-size: 11px; color: gray;")
+        self.manual_mirror_hint.setObjectName("muted_note")
         manual_layout.addWidget(self.manual_mirror_hint)
         vault_layout.addWidget(manual_group)
 
         # --- Pipeline switches ---
-        pipes_group = QGroupBox("⚙️ Pipelines")
+        pipes_group = QGroupBox("Pipelines")
         pipes_layout = QVBoxLayout(pipes_group)
         pipes_layout.setSpacing(6)
         _pipes_cfg = self.config.get('pipelines') or {}
@@ -360,27 +358,73 @@ class UiMixin:
         self.pipeline_websites_check.toggled.connect(self._save_vault_page)
         self._refresh_vault_page_status()
 
-        self._settings_pages.append((self._wrap_scroll(vault_tab), "📁 Vault"))
+        self._settings_pages.append((self._wrap_scroll(vault_tab), "Vault"))
 
-        # ---- Tab 4: LLM (local engines + cloud API) ----
-        # v0.23.0 — owner-spec redesign. TWO top-level radios:
-        #   🖥️ Locally hosted LLM model  → shows the engine choice
-        #       (🧠 Ollama / 🦙 llama.cpp) with their Detect & Set buttons
-        #   ☁️ Cloud API model           → shows API URL / API key / Model
-        #       (any OpenAI-compatible endpoint AND Anthropic Claude —
-        #        the URL decides the wire format, llm_client.cloud_chat)
-        # The stored config['llm_provider'] keeps its three values
-        # ('ollama' | 'llamacpp' | 'cloud') so old configs load unchanged:
-        # the local radio maps to the checked engine, the cloud radio to
-        # 'cloud'.
+        # ---- Tab 4: LLM — three flat cards: provider · limits · engine ----
+        # v0.30.0 (external Settings-UI audit, presentation-only). The
+        # v0.23.0 semantics are UNCHANGED — still the two-level choice
+        # (host: locally-hosted vs cloud; engine inside local: Ollama vs
+        # llama.cpp) and the same three-value config['llm_provider'] —
+        # but the stacked QGroupBox zoo is now three flat cards:
+        #   1. LLM provider — the host radios + one muted caption
+        #   2. Limits — the token budget as a form with spanning captions
+        #   3. Local engine — heading + engine radios on ONE row, the
+        #      quick-switch fast lane, a 1px divider, then the active
+        #      engine's fields (or the Cloud API card when cloud is picked)
+        # Every widget attribute keeps its name (local_llm_group /
+        # ollama_group / llamacpp_group / cloud_group …) so the toggle
+        # logic, save path and tests keep working untouched.
         ollama_tab = QWidget()
         ollama_layout = QVBoxLayout(ollama_tab)
-        ollama_layout.setSpacing(8)
+        ollama_layout.setSpacing(10)
 
-        # --- Host selector — the owner's two options ---
+        # -- card helpers (the audit's flat-card vocabulary) --
+        def _card():
+            card = QWidget()
+            card.setObjectName("card")
+            lay = QVBoxLayout(card)
+            lay.setContentsMargins(14, 12, 14, 12)
+            lay.setSpacing(8)
+            return card, lay
+
+        def _heading(text):
+            lbl = QLabel(text)
+            lbl.setObjectName("card_heading")
+            return lbl
+
+        def _subhead(text):
+            # a section heading INSIDE a card's form — spans both columns
+            lbl = QLabel(text)
+            lbl.setObjectName("card_subhead")
+            return lbl
+
+        def _form_label(text):
+            # the audit's fixed 96px label column — every form in the app
+            # aligns its labels at the same x, card after card
+            lbl = QLabel(text)
+            lbl.setProperty("role", "form_label")
+            lbl.setMinimumWidth(96)
+            return lbl
+
+        def _muted(text):
+            lbl = QLabel(text)
+            lbl.setProperty("role", "muted")
+            lbl.setWordWrap(True)
+            return lbl
+
+        def _divider():
+            line = QFrame()
+            line.setObjectName("divider")
+            line.setFixedHeight(1)
+            return line
+
+        # === Card 1 — LLM provider (the host choice) ===
+        provider_card, provider_lay = _card()
         provider_row = QHBoxLayout()
-        provider_row.addWidget(QLabel("<b>LLM Provider:</b>"))
-        self.llm_host_local = QRadioButton("🖥️ Locally hosted LLM model")
+        provider_row.setSpacing(14)
+        provider_row.addWidget(_heading("LLM provider"))
+        provider_row.addStretch(1)
+        self.llm_host_local = QRadioButton("Locally hosted LLM model")
         self.llm_host_local.setToolTip(
             "Run the model on YOUR machine — no data leaves it.\n"
             "Two engines: Ollama (http://localhost:11434) or a llama.cpp\n"
@@ -388,7 +432,7 @@ class UiMixin:
             "the Detect & Set buttons find the running server, list its\n"
             "models and configure everything in one click."
         )
-        self.llm_host_cloud = QRadioButton("☁️ Cloud API model")
+        self.llm_host_cloud = QRadioButton("Cloud API model")
         self.llm_host_cloud.setToolTip(
             f"Any {_llm_client.CLOUD_PROVIDER_LABEL}: OpenAI, OpenRouter,\n"
             "Together, vLLM, LM Studio, Cloudflare Workers AI…\n"
@@ -404,109 +448,89 @@ class UiMixin:
             self.llm_host_local.setChecked(True)
         provider_row.addWidget(self.llm_host_local)
         provider_row.addWidget(self.llm_host_cloud)
-        provider_row.addStretch()
-        ollama_layout.addLayout(provider_row)
+        provider_lay.addLayout(provider_row)
+        provider_lay.addWidget(_muted(
+            "Where the model runs. Local engines keep every byte on your "
+            "machine; the cloud API reaches any OpenAI-compatible endpoint "
+            "or Anthropic Claude — the URL decides the wire format."))
+        ollama_layout.addWidget(provider_card)
 
-        # --- Context budget (v0.23.0 — TWO parameters) ---
+        # === Card 2 — Limits (the v0.23.0 token budget, code-accurate) ===
         # The total window is split: what the model can READ (max context)
-        # and what it can WRITE (output tokens). Example: a 160k-total model
-        # with a 32k output cap → "160000" + "32000".
-        # Ollama: num_ctx + num_predict on every call (its defaults are
-        # small and truncate silently). OpenAI-compatible: max_tokens is
-        # sent when set (the window itself is fixed at server launch and
-        # this value only powers the over-budget warning). Claude:
-        # max_tokens is REQUIRED — the configured value is sent, with a
-        # 4096 fallback when unset.
-        ctx_row = QHBoxLayout()
-        ctx_row.setSpacing(6)
-        ctx_label = QLabel("Model max context window (tokens):")
-        ctx_label.setToolTip(
-            "The TOTAL context window of the model — what it can read.\n"
-            "Ollama: sent as num_ctx with every call — long prompts are\n"
-            "never silently truncated.\n"
-            "OpenAI-compatible endpoints: the window is set when the server\n"
-            "starts (llama.cpp -c 8192 / vLLM --max-model-len); this value\n"
-            "is used to WARN when a prompt may not fit.\n"
-            "Claude: powers the same warning.\n"
-            "0 = leave the window to the server."
-        )
+        # and what it can WRITE (output tokens). The captions spell the
+        # exact 0 semantics read from llm_client (verified against the
+        # wire calls, not the old tooltips):
+        #   ctx 0  → num_ctx NOT sent → Ollama's own default window;
+        #            cloud: the over-budget warning is simply skipped.
+        #   out 0  → max_tokens NOT sent → the server's default cap;
+        #            Claude always sends SOMETHING (4096 fallback).
+        limits_card, limits_lay = _card()
+        limits_lay.addWidget(_heading("Limits"))
+        limits_form = QFormLayout()
+        limits_form.setVerticalSpacing(6)
+        limits_form.setHorizontalSpacing(8)
         self.llm_num_ctx = QLineEdit(
             str(self.config.get('llm_num_ctx',
                                 _llm_client.DEFAULT_NUM_CTX)))
         self.llm_num_ctx.setPlaceholderText(
             str(_llm_client.DEFAULT_NUM_CTX))
-        self.llm_num_ctx.setMaximumWidth(120)
-        ctx_row.addWidget(ctx_label)
-        ctx_row.addWidget(self.llm_num_ctx)
-        out_label = QLabel("Output max tokens:")
-        out_label.setToolTip(
-            "The OUTPUT half of the context budget — the cap on the model's\n"
-            "answer (e.g. 32k output on a 160k-total model).\n"
-            "Ollama: sent as options.num_predict.\n"
-            "OpenAI-compatible: sent as max_tokens.\n"
-            "Claude: REQUIRED by the API — your value is sent, with a\n"
-            f"{_llm_client.ANTHROPIC_FALLBACK_MAX_TOKENS}-token fallback when unset.\n"
-            "0 = leave the cap to the server's default."
-        )
+        self.llm_num_ctx.setFixedWidth(160)
+        limits_form.addRow(
+            _form_label("Model max context window (tokens):"),
+            self.llm_num_ctx)
+        limits_form.addRow(_muted(
+            "What the model can READ — the total context window. Ollama: "
+            "sent as num_ctx with every call (its defaults are small and "
+            "truncate silently). OpenAI-compatible servers: the window is "
+            "fixed at server launch (llama.cpp -c / vLLM --max-model-len) — "
+            "this value only powers the over-budget warning; Claude: the "
+            "same warning. 0 = not sent — the server's own window is used."))
         self.llm_max_output_tokens = QLineEdit(
             str(self.config.get('llm_max_output_tokens',
                                 _llm_client.DEFAULT_MAX_OUTPUT_TOKENS)))
         self.llm_max_output_tokens.setPlaceholderText(
             str(_llm_client.DEFAULT_MAX_OUTPUT_TOKENS))
-        self.llm_max_output_tokens.setMaximumWidth(120)
-        ctx_row.addWidget(out_label)
-        ctx_row.addWidget(self.llm_max_output_tokens)
-        ctx_row.addStretch()
-        ollama_layout.addLayout(ctx_row)
+        self.llm_max_output_tokens.setFixedWidth(160)
+        limits_form.addRow(
+            _form_label("Output max tokens:"),
+            self.llm_max_output_tokens)
+        limits_form.addRow(_muted(
+            "What the model can WRITE — the cap on the model's answer. "
+            "Ollama: sent as options.num_predict. OpenAI-compatible: sent "
+            "as max_tokens. Claude: max_tokens is REQUIRED — the configured "
+            f"value is sent, with a {_llm_client.ANTHROPIC_FALLBACK_MAX_TOKENS}-token "
+            "fallback when unset. 0 = not sent — the server's default cap "
+            "is used."))
+        limits_lay.addLayout(limits_form)
+        ollama_layout.addWidget(limits_card)
 
-        # --- The LOCAL host group (engine choice + fields) ---
-        self.local_llm_group = QGroupBox("🖥️ Locally hosted LLM model")
+        # === Card 3 — Local engine (self.local_llm_group) ===
+        # The heading and the engine radios share ONE row (the audit's
+        # compact heading pattern); below them the quick-switch fast lane,
+        # a 1px divider, then the active engine's fields.
+        self.local_llm_group = QWidget()
+        self.local_llm_group.setObjectName("card")
         local_layout = QVBoxLayout(self.local_llm_group)
+        local_layout.setContentsMargins(14, 12, 14, 12)
         local_layout.setSpacing(8)
-
-        # Quick switch — v0.23.0: the two fast-lane buttons now live HERE
-        # (exclusively — the main view's copy was removed at the owner's
-        # request). One click per engine: probe → model menu when several →
-        # provider + engine + model + URL set AND saved.
-        quick_row = QHBoxLayout()
-        quick_row.setSpacing(6)
-        quick_lbl = QLabel("⚡ Quick switch:")
-        quick_row.addWidget(quick_lbl)
-        quick_ollama_btn = QPushButton("🧠 Detect & Set Ollama")
-        quick_ollama_btn.setToolTip(
-            "Probe the Ollama server, pick the model when several are "
-            "installed, set the provider + model + URL and save")
-        quick_ollama_btn.clicked.connect(self.quick_detect_set_ollama)
-        self._style_btn(quick_ollama_btn, 'secondary')
-        quick_row.addWidget(quick_ollama_btn)
-        quick_llamacpp_btn = QPushButton("🦙 Detect & Set llama.cpp")
-        quick_llamacpp_btn.setToolTip(
-            "Find the running llama-server (process ports + common ports), "
-            "pick the model when several are advertised, set the provider "
-            "+ model + URL and save")
-        quick_llamacpp_btn.clicked.connect(self.quick_detect_set_llamacpp)
-        self._style_btn(quick_llamacpp_btn, 'secondary')
-        quick_row.addWidget(quick_llamacpp_btn)
-        quick_row.addStretch()
-        local_layout.addLayout(quick_row)
 
         # Engine radios (the local sub-choice; same button group — the
         # stored llm_provider value 'ollama' / 'llamacpp').
         engine_row = QHBoxLayout()
-        engine_row.setSpacing(6)
-        engine_lbl = QLabel("Engine:")
-        engine_row.addWidget(engine_lbl)
-        self.llm_provider_ollama = QRadioButton("🧠 Ollama")
+        engine_row.setSpacing(14)
+        engine_row.addWidget(_heading("Local engine"))
+        engine_row.addStretch(1)
+        self.llm_provider_ollama = QRadioButton("Ollama")
         self.llm_provider_ollama.setToolTip(
             "Use a local Ollama server (http://localhost:11434 by default).\n"
             "No API key required — runs entirely on your machine."
         )
         # v0.15.0 — llama.cpp engine detection: llama-server as its own
         # DETECTED provider (like Ollama), not a hand-configured URL.
-        self.llm_provider_llamacpp = QRadioButton("🦙 llama.cpp")
+        self.llm_provider_llamacpp = QRadioButton("llama.cpp")
         self.llm_provider_llamacpp.setToolTip(
             "A local llama.cpp server (llama-server, http://127.0.0.1:8080\n"
-            "by default). Detected like Ollama: '🔍 Detect' finds the server\n"
+            "by default). Detected like Ollama: 'Detect' finds the server\n"
             "and its loaded model automatically (llama.cpp /props + /v1/models).\n"
             "No API key unless the server was started with --api-key."
         )
@@ -516,17 +540,47 @@ class UiMixin:
             self.llm_provider_ollama.setChecked(True)
         engine_row.addWidget(self.llm_provider_ollama)
         engine_row.addWidget(self.llm_provider_llamacpp)
-        engine_row.addStretch()
         local_layout.addLayout(engine_row)
 
-        # --- Local Ollama group (existing fields, now inside the local
-        # host group) ---
-        self.ollama_group = QGroupBox("🧠 Ollama")
+        # Quick switch — v0.23.0: the two fast-lane buttons live HERE
+        # (exclusively — the main view's copy was removed at the owner's
+        # request). One click per engine: probe → model menu when several →
+        # provider + engine + model + URL set AND saved. ('&&' renders as
+        # a literal '&' — a single & would become a mnemonic underscore.)
+        local_layout.addWidget(_muted(
+            "Quick switch — one click per engine: probe the running server, "
+            "pick the model when several are installed, set the provider + "
+            "model + URL and save."))
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(6)
+        quick_ollama_btn = QPushButton("Detect && Set Ollama")
+        quick_ollama_btn.setToolTip(
+            "Probe the Ollama server, pick the model when several are "
+            "installed, set the provider + model + URL and save")
+        quick_ollama_btn.clicked.connect(self.quick_detect_set_ollama)
+        self._style_btn(quick_ollama_btn, 'secondary')
+        quick_row.addWidget(quick_ollama_btn)
+        quick_llamacpp_btn = QPushButton("Detect && Set llama.cpp")
+        quick_llamacpp_btn.setToolTip(
+            "Find the running llama-server (process ports + common ports), "
+            "pick the model when several are advertised, set the provider "
+            "+ model + URL and save")
+        quick_llamacpp_btn.clicked.connect(self.quick_detect_set_llamacpp)
+        self._style_btn(quick_llamacpp_btn, 'secondary')
+        quick_row.addWidget(quick_llamacpp_btn)
+        quick_row.addStretch()
+        local_layout.addLayout(quick_row)
+        local_layout.addWidget(_divider())
+
+        # --- Ollama section (existing fields, inside the local card) ---
+        self.ollama_group = QWidget()
         ollama_form = QFormLayout(self.ollama_group)
+        ollama_form.setContentsMargins(0, 0, 0, 0)
         ollama_form.setVerticalSpacing(6)
         ollama_form.setHorizontalSpacing(8)
+        ollama_form.addRow(_subhead("Ollama"))
         self.ollama_url = QLineEdit(self.config.get('ollama', {}).get('base_url', 'http://localhost:11434'))
-        ollama_form.addRow("Ollama URL:", self.ollama_url)
+        ollama_form.addRow(_form_label("Ollama URL:"), self.ollama_url)
 
         # Model dropdown (editable combo so user can type a custom model name
         # OR pick from the list of available models pulled from the server).
@@ -546,7 +600,7 @@ class UiMixin:
         self.ollama_model.setCurrentText(saved_model)
         model_row.addWidget(self.ollama_model, 1)
 
-        refresh_models_btn = QPushButton("🔄 Refresh")
+        refresh_models_btn = QPushButton("Refresh")
         refresh_models_btn.setToolTip("Reload the model list from the Ollama server")
         refresh_models_btn.clicked.connect(self.refresh_ollama_models)
         self._style_btn(refresh_models_btn, 'secondary')
@@ -554,63 +608,38 @@ class UiMixin:
 
         # v33.1 compact: Start Server shares the Model row (it was a row of
         # its own — same signal, same behavior, one row less).
-        start_ollama_btn = QPushButton("🚀 Start Server")
+        start_ollama_btn = QPushButton("Start Server")
         start_ollama_btn.setToolTip("Start the local Ollama server (ollama serve)")
         start_ollama_btn.clicked.connect(self.start_ollama_server)
         self._style_btn(start_ollama_btn, 'secondary')
         model_row.addWidget(start_ollama_btn)
-        ollama_form.addRow("Model:", model_row)
+        ollama_form.addRow(_form_label("Model:"), model_row)
         local_layout.addWidget(self.ollama_group)
 
-        # --- Cloud API group (v26 — Fix 4; v0.23.0 — the owner's second
-        # top-level option, now covering BOTH cloud wire formats) ---
-        self.cloud_group = QGroupBox(
-            f"☁️ Cloud API model — {_llm_client.CLOUD_PROVIDER_LABEL}")
-        cloud_form = QFormLayout(self.cloud_group)
-        self.cloud_api_url = QLineEdit(self.config.get('cloud_api_url', 'https://api.openai.com/v1'))
-        self.cloud_api_url.setPlaceholderText("https://api.openai.com/v1 — or https://api.anthropic.com/v1 for Claude")
-        self.cloud_api_url.setToolTip(
-            "OpenAI-compatible: https://api.openai.com/v1, OpenRouter,\n"
-            "Together, vLLM, LM Studio, a local server…\n"
-            "Claude: https://api.anthropic.com/v1 — the URL decides the\n"
-            "wire format automatically (Messages API, x-api-key header).")
-        cloud_form.addRow("API URL:", self.cloud_api_url)
-
-        self.cloud_api_key = QLineEdit(self.config.get('cloud_api_key', ''))
-        self.cloud_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.cloud_api_key.setPlaceholderText("sk-… / sk-ant-… (kept locally in config.json)")
-        cloud_form.addRow("API Key:", self.cloud_api_key)
-
-        self.cloud_model = QLineEdit(self.config.get('cloud_model', 'gpt-4o-mini'))
-        self.cloud_model.setPlaceholderText("gpt-4o-mini / claude-sonnet-4-5 / …")
-        cloud_form.addRow("Model:", self.cloud_model)
-
-        # v31.1: '🔌 Test Connection' moved to the global 'More' menu.
-        ollama_layout.addWidget(self.cloud_group)
-
-        # --- llama.cpp group (v0.15.0 — engine detection) ---
+        # --- llama.cpp section (v0.15.0 — engine detection) ---
         # The DETECTED local provider: the URL defaults to llama-server's
-        # own default and '🔍 Detect' scans the common ports (/props
+        # own default and 'Detect' scans the common ports (/props
         # positively identifies llama.cpp), fills the URL and auto-selects
         # the model. Chat rides the OpenAI-compatible path underneath.
-        self.llamacpp_group = QGroupBox(
-            f"🦙 {_llm_client.LLAMACPP_PROVIDER_LABEL}")
+        self.llamacpp_group = QWidget()
         llamacpp_form = QFormLayout(self.llamacpp_group)
+        llamacpp_form.setContentsMargins(0, 0, 0, 0)
         llamacpp_form.setVerticalSpacing(6)
         llamacpp_form.setHorizontalSpacing(8)
+        llamacpp_form.addRow(_subhead(_llm_client.LLAMACPP_PROVIDER_LABEL))
         self.llamacpp_api_url = QLineEdit(self.config.get(
             'llamacpp_api_url',
             _llm_client.LLAMACPP_DEFAULT_BASE + '/v1'))
         self.llamacpp_api_url.setPlaceholderText(
             _llm_client.LLAMACPP_DEFAULT_BASE + '/v1')
-        llamacpp_form.addRow("Server URL:", self.llamacpp_api_url)
+        llamacpp_form.addRow(_form_label("Server URL:"), self.llamacpp_api_url)
 
         self.llamacpp_api_key = QLineEdit(self.config.get(
             'llamacpp_api_key', ''))
         self.llamacpp_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.llamacpp_api_key.setPlaceholderText(
             "(empty — only needed when llama-server was started with --api-key)")
-        llamacpp_form.addRow("API key:", self.llamacpp_api_key)
+        llamacpp_form.addRow(_form_label("API key:"), self.llamacpp_api_key)
 
         llamacpp_model_row = QHBoxLayout()
         llamacpp_model_row.setSpacing(6)
@@ -632,26 +661,68 @@ class UiMixin:
                 "(auto-detected from the server)")
         llamacpp_model_row.addWidget(self.llamacpp_model, 1)
 
-        llamacpp_detect_btn = QPushButton("🔍 Detect")
+        llamacpp_detect_btn = QPushButton("Detect")
         llamacpp_detect_btn.setToolTip(
             "Find the running llama-server automatically: its PROCESS's\n"
             "listening ports first (any --port), then the common ports\n"
             "(8080 first). Positively identifies llama.cpp, then fills\n"
             "this URL and the model automatically.")
         llamacpp_detect_btn.clicked.connect(self.detect_llamacpp_service)
-        self._style_btn(llamacpp_detect_btn, 'secondary')
+        # v0.30.0 (audit): Detect is the LLM tab's ONE primary button —
+        # the single most characteristic action on the page.
+        self._style_btn(llamacpp_detect_btn, 'primary')
         llamacpp_model_row.addWidget(llamacpp_detect_btn)
 
-        llamacpp_refresh_btn = QPushButton("🔄 Refresh")
+        llamacpp_refresh_btn = QPushButton("Refresh")
         llamacpp_refresh_btn.setToolTip(
             "Reload the model list from the llama.cpp server at the URL above")
         llamacpp_refresh_btn.clicked.connect(self.refresh_llamacpp_models)
         self._style_btn(llamacpp_refresh_btn, 'secondary')
         llamacpp_model_row.addWidget(llamacpp_refresh_btn)
-        llamacpp_form.addRow("Model:", llamacpp_model_row)
+        llamacpp_form.addRow(_form_label("Model:"), llamacpp_model_row)
         local_layout.addWidget(self.llamacpp_group)
-        # The assembled local host group joins the page AFTER its children.
+        # The assembled local engine card joins the page AFTER its children.
         ollama_layout.addWidget(self.local_llm_group)
+
+        # === The Cloud API card (shown when the cloud host radio is picked;
+        # v26 — Fix 4; v0.23.0 — the owner's second top-level option, now
+        # covering BOTH cloud wire formats) ===
+        self.cloud_group = QWidget()
+        self.cloud_group.setObjectName("card")
+        cloud_lay = QVBoxLayout(self.cloud_group)
+        cloud_lay.setContentsMargins(14, 12, 14, 12)
+        cloud_lay.setSpacing(8)
+        cloud_head = QHBoxLayout()
+        cloud_head.addWidget(_heading(
+            f"Cloud API — {_llm_client.CLOUD_PROVIDER_LABEL}"))
+        cloud_head.addStretch(1)
+        cloud_lay.addLayout(cloud_head)
+        cloud_form = QFormLayout()
+        cloud_form.setVerticalSpacing(6)
+        cloud_form.setHorizontalSpacing(8)
+        self.cloud_api_url = QLineEdit(self.config.get('cloud_api_url', 'https://api.openai.com/v1'))
+        self.cloud_api_url.setPlaceholderText("https://api.openai.com/v1 — or https://api.anthropic.com/v1 for Claude")
+        self.cloud_api_url.setToolTip(
+            "OpenAI-compatible: https://api.openai.com/v1, OpenRouter,\n"
+            "Together, vLLM, LM Studio, a local server…\n"
+            "Claude: https://api.anthropic.com/v1 — the URL decides the\n"
+            "wire format automatically (Messages API, x-api-key header).")
+        cloud_form.addRow(_form_label("API URL:"), self.cloud_api_url)
+
+        self.cloud_api_key = QLineEdit(self.config.get('cloud_api_key', ''))
+        self.cloud_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.cloud_api_key.setPlaceholderText("sk-… / sk-ant-… (kept locally in config.json)")
+        cloud_form.addRow(_form_label("API Key:"), self.cloud_api_key)
+
+        self.cloud_model = QLineEdit(self.config.get('cloud_model', 'gpt-4o-mini'))
+        self.cloud_model.setPlaceholderText("gpt-4o-mini / claude-sonnet-4-5 / …")
+        cloud_form.addRow(_form_label("Model:"), self.cloud_model)
+        cloud_lay.addLayout(cloud_form)
+        cloud_lay.addWidget(_muted(
+            "Any OpenAI-compatible endpoint (OpenAI, OpenRouter, Together, "
+            "vLLM, LM Studio, Cloudflare Workers AI…) or Anthropic Claude — "
+            "the URL decides the wire format."))
+        ollama_layout.addWidget(self.cloud_group)
 
         # --- Toggle visibility based on the host + engine radios ---
         def _toggle_llm_provider(*_args):
@@ -673,7 +744,7 @@ class UiMixin:
 
         # v31.1: no filler stretch — content keeps its natural height at the
         # top of the scrollable tab; the window never resizes.
-        self._settings_pages.append((self._wrap_scroll(ollama_tab), "🧠 LLM"))
+        self._settings_pages.append((self._wrap_scroll(ollama_tab), "LLM"))
 
         # ---- Tab: Input (Import txt file — the sole input mode) ----
         # v0.23.0 — owner-spec redesign: the ID Range / Markers / Single
@@ -705,7 +776,7 @@ class UiMixin:
             "(reported); lines with no address are listed in the log.\n"
             "GitHub repos go to the GitHub pipeline, every other website\n"
             "to the Websites pipeline — exactly like a fetched batch.")
-        import_btn = QPushButton("📄 Select…")
+        import_btn = QPushButton("Select…")
         import_btn.setToolTip("Pick the .txt / .md file to import")
         import_btn.clicked.connect(self.select_import_file)
         self._style_btn(import_btn, 'secondary')
@@ -727,14 +798,14 @@ class UiMixin:
 
         # v31.1: every tab scrolls independently inside the fixed window.
         input_scroll = self._wrap_scroll(input_tab)
-        self._settings_pages.append((input_scroll, "📥 Input"))
+        self._settings_pages.append((input_scroll, "Input"))
 
         # ---- Tab: Dashboard (added last; remains the last tab after Input is moved to 0) ----
         dash_tab = QWidget()
         dash_layout = QVBoxLayout(dash_tab)
 
         dash_btn_row = QHBoxLayout()
-        self.refresh_dash_btn = QPushButton("🔄 Refresh Dashboard")
+        self.refresh_dash_btn = QPushButton("Refresh Dashboard")
         # v31.1: the Dashboard tab's ONE filled primary button.
         self._style_btn(self.refresh_dash_btn, 'primary')
         self.refresh_dash_btn.clicked.connect(self.update_dashboard)
@@ -742,7 +813,7 @@ class UiMixin:
 
         # v22 Feature 6: Batch Undo — deletes the .md files written by the
         # most recent batch (listed in `<vault>/_undo_last_batch.txt`).
-        self.undo_batch_btn = QPushButton("↩️ Undo Last Batch")
+        self.undo_batch_btn = QPushButton("Undo Last Batch")
         # v31.1: filled danger — destructive action (deletes the last
         # batch's note files).
         self._style_btn(self.undo_batch_btn, 'danger')
@@ -796,13 +867,13 @@ class UiMixin:
         quarantine_ctrl_row.addWidget(QLabel("consecutive 404s"))
         quarantine_ctrl_row.addStretch()
 
-        refresh_quarantine_btn = QPushButton("🔄 Refresh")
+        refresh_quarantine_btn = QPushButton("Refresh")
         refresh_quarantine_btn.setToolTip("Reload the 404 quarantine table from cache.db")
         refresh_quarantine_btn.clicked.connect(self.refresh_quarantine_view)
         self._style_btn(refresh_quarantine_btn, 'secondary')
         quarantine_ctrl_row.addWidget(refresh_quarantine_btn)
 
-        clear_quarantine_btn = QPushButton("♻️ Reset Quarantine")
+        clear_quarantine_btn = QPushButton("Reset Quarantine")
         clear_quarantine_btn.setToolTip(
             "Reset ALL 404 attempt counters — quarantined repos are "
             "re-checked on the next run instead of being auto-ignored.")
@@ -827,7 +898,7 @@ class UiMixin:
         self.quarantine_threshold_spin.valueChanged.connect(
             self._save_quarantine_threshold)
 
-        self._settings_pages.append((self._wrap_scroll(dash_tab), "📊 Dashboard"))
+        self._settings_pages.append((self._wrap_scroll(dash_tab), "Dashboard"))
 
         # ---- Tab: Bot Queue ----
         # Dedicated Telegram bot inbox — forward repos to your bot, the app
@@ -862,7 +933,7 @@ class UiMixin:
         self.bot_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.bot_token.setPlaceholderText("e.g. 123456789:AAF... (optional)")
         token_row2.addWidget(self.bot_token, 1)
-        save_token_btn = QPushButton("💾 Save")
+        save_token_btn = QPushButton("Save")
         save_token_btn.clicked.connect(self.save_config)
         self._style_btn(save_token_btn, 'secondary')  # v33: joins the design system
         token_row2.addWidget(save_token_btn)
@@ -872,7 +943,7 @@ class UiMixin:
         # (Process All) + outlined secondary actions. Infrequent actions
         # (export / verify / retry) moved to the global 'More' menu.
         queue_btn_row = QHBoxLayout()
-        self.check_queue_btn = QPushButton("📬 Check Queue")
+        self.check_queue_btn = QPushButton("Check Queue")
         self._style_btn(self.check_queue_btn, 'secondary')
         self.check_queue_btn.clicked.connect(self.check_bot_queue)
         queue_btn_row.addWidget(self.check_queue_btn)
@@ -881,14 +952,12 @@ class UiMixin:
         # the vault). v31.1: zinc — a pending COUNT is not an error; red is
         # reserved for actual failures (WCAG-safe neutral).
         self.pending_badge = QLabel("")
-        self.pending_badge.setStyleSheet(
-            "background-color: #6C6480; color: white; padding: 4px 8px; "
-            "border-radius: 10px; font-size: 12px; font-weight: bold;"
-        )
+        self.pending_badge.setObjectName("pending_badge")
+        self._set_badge_state(self.pending_badge, 'pending')
         self.pending_badge.setVisible(False)
         queue_btn_row.addWidget(self.pending_badge)
 
-        process_queue_btn = QPushButton("🚀 Process All")
+        process_queue_btn = QPushButton("Process All")
         # v31.1: the Bot tab's ONE filled primary button.
         self._style_btn(process_queue_btn, 'primary')
         process_queue_btn.clicked.connect(self.process_bot_queue)
@@ -898,7 +967,7 @@ class UiMixin:
         # the last successfully-processed message ID (saved to config.json
         # after each verified-clean batch). Lets the user run incremental
         # batches without re-processing already-handled repos.
-        process_new_btn = QPushButton("📬 Process New")
+        process_new_btn = QPushButton("Process New")
         self._style_btn(process_new_btn, 'secondary')
         process_new_btn.setToolTip(
             "Fetch only messages newer than the last successfully-processed batch.\n"
@@ -908,7 +977,7 @@ class UiMixin:
         queue_btn_row.addWidget(process_new_btn)
 
         # Mark All Read — hidden by default, appears only after verify passes
-        self.mark_all_read_btn = QPushButton("✓ Mark All as Read")
+        self.mark_all_read_btn = QPushButton("Mark All as Read")
         self._style_btn(self.mark_all_read_btn, 'secondary')
         self.mark_all_read_btn.clicked.connect(self.clear_bot_queue)
         self.mark_all_read_btn.setVisible(False)
@@ -935,7 +1004,7 @@ class UiMixin:
         bot_layout.addWidget(self.queue_display)
         bot_layout.setStretchFactor(self.queue_display, 1)
 
-        self._settings_pages.append((self._wrap_scroll(bot_tab), "🤖 Bot"))
+        self._settings_pages.append((self._wrap_scroll(bot_tab), "Bot"))
 
         # ---- Tab: Sources (RSS/Reddit) ----
         # Lets the user fetch GitHub URLs from RSS feeds or Reddit .json
@@ -961,7 +1030,7 @@ class UiMixin:
         self.sources_url.setPlaceholderText("https://reddit.com/r/programming.json  OR  https://hnrss.org/frontpage")
         url_row.addWidget(self.sources_url, 1)
 
-        fetch_sources_btn = QPushButton("🔍 Fetch URLs")
+        fetch_sources_btn = QPushButton("Fetch URLs")
         self._style_btn(fetch_sources_btn, 'secondary')
         fetch_sources_btn.clicked.connect(self.fetch_from_sources)
         url_row.addWidget(fetch_sources_btn)
@@ -977,14 +1046,14 @@ class UiMixin:
         sources_layout.setStretchFactor(self.sources_results, 1)
 
         # Process button — the Sources tab's ONE filled primary button.
-        process_sources_btn = QPushButton("🚀 Process Fetched URLs")
+        process_sources_btn = QPushButton("Process Fetched URLs")
         self._style_btn(process_sources_btn, 'primary')
         process_sources_btn.clicked.connect(self.process_sources_urls)
         sources_layout.addWidget(process_sources_btn)
 
         # v31.1: 📡 (feeds) — Proxy keeps 🌐. Two different destinations no
         # longer share one icon.
-        self._settings_pages.append((self._wrap_scroll(sources_tab), "📡 Sources"))
+        self._settings_pages.append((self._wrap_scroll(sources_tab), "Sources"))
 
         # ---- Tab: Backup (local folder + timestamped zip) ----
         # v32.2: wrap in the scroll area like every other tab — the four
@@ -992,7 +1061,7 @@ class UiMixin:
         # previously clipped each section's lower rows (buttons, toggles,
         # the dashboard link).
         backup_tab = self._create_backup_tab()
-        self._settings_pages.append((self._wrap_scroll(backup_tab), "💾 Backup"))
+        self._settings_pages.append((self._wrap_scroll(backup_tab), "Backup"))
 
         # v33: the Bot-tab reorder block below was dead code (findChild never
         # matched) and is removed with the tab strip itself — every page now

@@ -304,9 +304,9 @@ activity log.
 ## Configuration
 
 Everything lives in `app/config.json` (template committed; your real file is
-untracked) and is edited from the GUI's Settings pages — 📁 Vault · 🧠 LLM ·
-✈️ Telegram · 🌐 Proxy · 🐙 GitHub · 💾 Backup. The keys you'll actually
-touch:
+untracked) and is edited from the GUI's Settings pages — Credentials ·
+Proxy · Vault · LLM · Input · Dashboard · Bot · Sources · Backup. The
+keys you'll actually touch:
 
 | Key | Meaning |
 |---|---|

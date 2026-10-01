@@ -59,13 +59,45 @@ class SettingsDialog(QDialog):
 
     The dialog is NON-MODAL (show/raise from the main window's ⚙️ button):
     batch runs, the proxy monitor and worker dialogs keep working while it
-    is open. It inherits the main window's theme QSS (objectName-scoped
-    rules in apply_light_theme/apply_dark_theme re-style it on toggle).
+    is open. It inherits the main window's theme QSS (the app-wide rules
+    in gui.theme re-style it on toggle).
+
+    v0.30.0 (Settings-UI audit): the sidebar rows carry real Lucide icons
+    (two-mode: white/plum on the selected fill) and one-line descriptions;
+    the header hint follows the selected section, and every nav item has a
+    tooltip. Emoji were purged from the nav labels — the icons carry the
+    meaning now.
     """
+
+    # One icon + one-line description per section (the audit's TAB_INFO).
+    TAB_INFO = {
+        'Credentials': ('key-round',
+                        "API keys and tokens — Telegram, GitHub, the worker URL"),
+        'Proxy':       ('globe',
+                        "The SOCKS/HTTP proxy for Telegram and web fetches"),
+        'Vault':       ('folder',
+                        "Vault folders, backup repos, the law and pipeline switches"),
+        'LLM':         ('brain',
+                        "Local engines or any cloud API — provider, limits, detection"),
+        'Input':       ('inbox',
+                        "Import a .txt or .md file of links, one address per line"),
+        'Dashboard':   ('bar-chart-3',
+                        "Vault statistics, the 404 quarantine and batch undo"),
+        'Bot':         ('bot',
+                        "The Telegram bot queue — check, process, verify"),
+        'Sources':     ('satellite-dish',
+                        "GitHub links from RSS feeds and Reddit, no API key needed"),
+        'Backup':      ('archive',
+                        "Folder backups, VaultSeal and Good Repos publishing"),
+    }
+    _DEFAULT_HINT = "Pick a section — every former tab lives here"
 
     def __init__(self, main_window: 'MainWindow'):
         super().__init__(main_window)
         self.main = main_window
+        # sidebar labels (filled when the nav is built below; the header
+        # hint reads them through _hint_for, so they must exist first)
+        self._nav_labels: List[str] = []
         self.setObjectName("settings_dialog")
         self.setWindowTitle("Settings — GitCurator")
         self.setModal(False)
@@ -86,10 +118,10 @@ class SettingsDialog(QDialog):
         title_col.setSpacing(1)
         title = QLabel("Settings")
         title.setObjectName("settings_title")
-        hint = QLabel("Credentials · proxy · vault · LLM · input · bot · sources · dashboard · backup")
-        hint.setObjectName("settings_hint")
+        self.hint = QLabel(self._hint_for(0))
+        self.hint.setObjectName("settings_hint")
         title_col.addWidget(title)
-        title_col.addWidget(hint)
+        title_col.addWidget(self.hint)
         header_lay.addLayout(title_col)
         header_lay.addStretch()
 
@@ -97,7 +129,7 @@ class SettingsDialog(QDialog):
         # same actions — tests, verification, export, retry, theme).
         header_lay.addWidget(main_window.more_btn)
 
-        close_btn = QPushButton("✕  Close")
+        close_btn = QPushButton("Close")
         close_btn.setToolTip("Close Settings and return to the main view")
         close_btn.clicked.connect(self.close)
         main_window._style_btn(close_btn, 'secondary')
@@ -113,18 +145,61 @@ class SettingsDialog(QDialog):
         self.nav.setObjectName("settings_nav")
         self.nav.setFixedWidth(190)
         for _page, label in main_window._settings_pages:
-            self.nav.addItem(label)
+            self._nav_labels.append(label)
+            item = QListWidgetItem(label)
+            icon_name, desc = self.TAB_INFO.get(label, (None, ''))
+            if icon_name:
+                item.setIcon(self._nav_icon(icon_name))
+            if desc:
+                item.setToolTip(desc)
+            self.nav.addItem(item)
 
         self.stack = QStackedWidget()
         for page, _label in main_window._settings_pages:
             self.stack.addWidget(page)  # reparents the scroll area here
 
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.currentRowChanged.connect(self._on_nav_changed)
         self.nav.setCurrentRow(0)
 
         body.addWidget(self.nav)
         body.addWidget(self.stack, 1)
         root.addLayout(body, 1)
+
+    # -- sidebar helpers (two-mode icons + the following hint) ------------
+
+    def _nav_icon(self, icon_name: str):
+        """One sidebar icon in the active mode's two-mode form: muted glyph
+        on the plain row, white (light) / plum (dark) on the selected fill."""
+        dark = bool(getattr(self.main, '_dark_mode', False))
+        base = '#B7AFC9' if dark else '#6C6480'
+        selected = '#221E2E' if dark else '#FFFFFF'
+        return _icons.nav_icon(icon_name, base, selected, 16)
+
+    def refresh_nav_icons(self):
+        """Re-tint every sidebar icon after a theme flip (called by
+        MainWindow.toggle_theme — duck-typed, so a closed dialog is a
+        no-op)."""
+        for row in range(self.nav.count()):
+            item = self.nav.item(row)
+            icon_name, _desc = self.TAB_INFO.get(
+                self._nav_labels[row] if row < len(self._nav_labels) else '',
+                (None, ''))
+            if icon_name:
+                item.setIcon(self._nav_icon(icon_name))
+
+    def _hint_for(self, row: int) -> str:
+        """The header hint names the SELECTED section's purpose."""
+        if 0 <= row < len(self._nav_labels):
+            _icon_name, desc = self.TAB_INFO.get(self._nav_labels[row],
+                                                 (None, ''))
+            if desc:
+                return desc
+        return self._DEFAULT_HINT
+
+    def _on_nav_changed(self, row: int):
+        """Master-detail: switch the page AND follow with the hint."""
+        self.stack.setCurrentIndex(row)
+        self.hint.setText(self._hint_for(row))
 
 class ConnectionTestDialog(QDialog):
     """v0.23.0 — Test Connection as a MODAL with live per-subsystem status.
@@ -155,7 +230,7 @@ class ConnectionTestDialog(QDialog):
         super().__init__(main_window)
         self.main = main_window
         self.setObjectName("connection_test_dialog")
-        self.setWindowTitle("🔍 Test Connection")
+        self.setWindowTitle("Test Connection")
         self.setModal(True)
         self.setMinimumWidth(560)
 
@@ -215,13 +290,13 @@ class ConnectionTestDialog(QDialog):
         # ---- Buttons: Close (always) + Start Syncing (gated) ----
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.close_btn = QPushButton("✕  Close")
+        self.close_btn = QPushButton("Close")
         self.close_btn.setToolTip("Close this dialog (the checks keep running in the log)")
         self.close_btn.clicked.connect(self.reject)
         main_window._style_btn(self.close_btn, 'secondary')
         btn_row.addWidget(self.close_btn)
 
-        self.start_sync_btn = QPushButton("🚀 Start Syncing")
+        self.start_sync_btn = QPushButton("Start Syncing")
         self.start_sync_btn.setToolTip(
             "Enabled when every subsystem is connected — starts the main "
             "view's SYNC flow (fetch the bot queue, then PROCESS).")

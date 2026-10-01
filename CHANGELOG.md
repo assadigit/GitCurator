@@ -1,3 +1,76 @@
+## [0.30.0] — The Settings-UI audit: one theme kit, three flat cards, real sidebar icons — 2026-10-02
+
+Owner ask (session): implement the external Settings-UI audit (Settings ›
+LLM tab, PyQt6) per its paste-ready presentation-only instructions
+("Do these."). Desktop-only release — the Worker stays at 0.28.0
+(`EXPECTED_WORKER_VERSION` unchanged). Suite stays **900** (five
+presentation-referencing tests updated with intent intact), worker 40,
+offline golden 30/30 + 0 invalid, CI compiles the 81 audited modules.
+
+**1. One theme kit (new `gui/theme.py`).** The old theming — two
+~90-rule objectName stylesheets duplicated inside
+`ThemeMixin.apply_light_theme/apply_dark_theme`, eight kinds of
+per-widget `setStyleSheet` button rules, and 45+ scattered inline style
+calls — is now ONE module: a token table per mode (LIGHT / DARK; the
+plum dark palette ported verbatim, the warning tone added), a single
+structural stylesheet builder (`build_qss`: app rules + cards-and-nav +
+button variants + the audit's literal extras), and `apply_app()`. The
+ThemeMixin is a thin router — its public surface is unchanged, so every
+caller in every mixin keeps working. Audit extras: placeholder text
+tinted via QSS as well as the palette (supported on Qt 6.11, ignored
+harmlessly on older builds), a CSS-triangle combo chevron (no dark-edge
+artifact), and hover states that DARKEN (`shade(color, 0.9)` — audit
+#20), never a new hue.
+
+**2. Buttons wear properties, not stylesheets.** `_style_btn` now sets
+a `btn_kind` dynamic property (+ repolish) resolved by QSS selectors —
+all eight variants (primary / secondary / danger / ghost / icon /
+hero_primary / hero_danger / hero_secondary), both modes, zero
+per-widget stylesheets. New `_set_status` / `_set_badge_state` helpers
+replace every hand-computed status color: the vault pickers, the three
+Backup-tab status dots, the proxy health line and the Bot pending badge
+now carry `role`/`state` properties the kit paints.
+
+**3. The LLM tab is three flat cards.** Provider (the host radios + a
+muted caption) · Limits (the token budget as a form — 160px fields,
+96px fixed label column, spanning captions with the CODE-ACCURATE 0
+semantics read from `llm_client`: ctx 0 = not sent → the server's own
+window; out 0 = not sent → the server's cap, Claude always sends
+something) · Local engine (heading + engine radios on ONE row, the
+quick-switch caption + buttons, a 1px divider, then the active engine's
+fields — `Detect` is the tab's one primary). The Cloud API card appears
+when that host is picked. Every widget attribute keeps its name
+(`local_llm_group` / `ollama_group` / `llamacpp_group` / `cloud_group`)
+— the two-level toggle logic, save path and tests are untouched.
+
+**4. Real icons in the Settings sidebar.** Nine Lucide glyphs
+(key-round, globe, folder, brain, inbox, bar-chart-3, bot,
+satellite-dish, archive — verbatim `lucide-static@0.544.0`, ISC) with a
+two-mode `nav_icon()` helper: the selected row renders its
+`QIcon.Mode.Selected` pixmap — white on the violet fill (light), plum
+on the lavender fill (dark). A `TAB_INFO` map gives every section a
+one-line description; the header hint follows the selection, every nav
+item carries a tooltip, and a theme flip re-tints the icons live.
+
+**5. Emoji purged from the Settings chrome.** 40+ button, group and
+nav labels across the app (ui, backup_seal, bot_queue, dashboard,
+telegram_ui, processing_control, lifecycle, dialogs) lost their emoji —
+the icons carry the meaning now. Log messages and content glyphs (the
+Test Connection rows, message-box glyphs) are untouched by design.
+"Detect && Set" labels render a literal ampersand (a single `&` was
+rendering as a mnemonic underscore: "Detect _Set").
+
+**6. Every dialog themed structurally.** The Telegram login dialog, the
+manual-resolve dialog, the backup-restore dialog and the LLM retry
+dialog are DE-STYLED — no per-dialog stylesheets or hand-picked colors;
+the app QSS paints them (QDialog surface, a new generic QListWidget
+rule, message-box roles: `msg_glyph` + `msg_heading` with a `tone`
+property, a `warn_box` and a `help_box` role). Their buttons ride the
+design-system variants (one primary per dialog, danger for the
+destructive answer). The only remaining `setStyleSheet` in the main
+window is the wizard intro's font-only call that a test pins as the
+"no hardcoded color" contract.
+
 ## [0.29.0] — Faithful batch imports: every address in a .txt/.md file is processed or accounted — 2026-10-01
 
 Owner ask (session): "test the ability of batch-processing of the app.

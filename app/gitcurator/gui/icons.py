@@ -70,6 +70,18 @@ ICONS: dict = {
     'search': '<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />',  # official lucide-static 'search'
     'trash': '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',  # official lucide-static 'trash-2'
     'dot': '<circle cx="12" cy="12" r="10" fill="{color}" stroke="none"/>',  # official lucide-static 'circle' (solid render of official geometry)
+    # v0.30.0 (Settings-UI audit) — the Settings sidebar's nine section
+    # glyphs, same verbatim lucide-static v0.544.0 set ('currentColor'
+    # fills swapped for the render-time {color} tint).
+    'key-round': '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /> <circle cx="16.5" cy="7.5" r=".5" fill="{color}" stroke="none" />',  # official lucide-static 'key-round'
+    'globe': '<circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" />',  # official lucide-static 'globe'
+    'folder': '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />',  # official lucide-static 'folder'
+    'brain': '<path d="M12 18V5" /> <path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" /> <path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" /> <path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" /> <path d="M18 18a4 4 0 0 0 2-7.464" /> <path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" /> <path d="M6 18a4 4 0 0 1-2-7.464" /> <path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" />',  # official lucide-static 'brain'
+    'inbox': '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /> <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />',  # official lucide-static 'inbox'
+    'bar-chart-3': '<path d="M3 3v16a2 2 0 0 0 2 2h16" /> <path d="M18 17V9" /> <path d="M13 17V5" /> <path d="M8 17v-3" />',  # official lucide-static 'bar-chart-3'
+    'bot': '<path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" />',  # official lucide-static 'bot'
+    'satellite-dish': '<path d="M4 10a7.31 7.31 0 0 0 10 10Z" /> <path d="m9 15 3-3" /> <path d="M17 13a6 6 0 0 0-6-6" /> <path d="M21 13A10 10 0 0 0 11 3" />',  # official lucide-static 'satellite-dish'
+    'archive': '<rect width="20" height="5" x="2" y="3" rx="1" /> <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /> <path d="M10 12h4" />',  # official lucide-static 'archive'
 }
 
 
@@ -126,3 +138,21 @@ def set_btn_icon(btn, name: str, color: str, size: int = 18) -> None:
     """Apply a tinted icon (plus icon size) to a QPushButton/QToolButton."""
     btn.setIcon(icon(name, color, size))
     btn.setIconSize(QSize(size, size))
+
+
+def nav_icon(name: str, color: str, selected: str = '#FFFFFF',
+             size: int = 16) -> QIcon:
+    """v0.30.0 (Settings-UI audit): TWO-MODE navigation icon.
+
+    ``color`` paints the plain row; ``selected`` paints the row while it
+    is selected — QSS-selected QListWidget items render the QIcon's
+    QIcon.Mode.Selected pixmap (verified on Qt 6.11), which is how the
+    filled sidebar row keeps a legible glyph: white on the violet fill in
+    light mode, plum on the lavender fill in dark mode. Both pixmaps are
+    registered for State.On/Off so check-state never blanks the icon.
+    """
+    ic = icon(name, color, size)
+    for state in (QIcon.State.On, QIcon.State.Off):
+        ic.addPixmap(pixmap(name, selected, size),
+                     QIcon.Mode.Selected, state)
+    return ic

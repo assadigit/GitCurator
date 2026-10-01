@@ -782,11 +782,11 @@ class TestLabel(unittest.TestCase):
     def test_gui_uses_the_constant(self):
         src = self._gui_sources()
         # v0.23.0 — the two-level radios: the llama.cpp ENGINE radio is the
-        # short plain label ("🦙 llama.cpp") and the provider constant names
-        # the settings group box.
+        # short plain label ("llama.cpp", emoji purged by the v0.30.0
+        # audit) and the provider constant names the settings sub-heading.
         self.assertGreaterEqual(
             src.count('_llm_client.LLAMACPP_PROVIDER_LABEL'), 1)
-        self.assertIn('QRadioButton("🦙 llama.cpp")', src)
+        self.assertIn('QRadioButton("llama.cpp")', src)
         # the three provider values persist through save_config
         self.assertIn('"llamacpp"', src)
 

@@ -58,7 +58,7 @@ class LifecycleMixin:
     def show_about_me_wizard(self):
         """Show a multi-step interview wizard to generate about_me.md."""
         dialog = QDialog(self)
-        dialog.setWindowTitle("📝 About Me Wizard")
+        dialog.setWindowTitle("About Me Wizard")
         
         dialog.setModal(True)
         dialog.setMinimumWidth(600)
@@ -70,7 +70,7 @@ class LifecycleMixin:
 
         # Intro
         intro = QLabel(
-            "📝 About Me Wizard\n\n"
+            "About Me Wizard\n\n"
             "This generates an 'about_me.md' file that gives the LLM context about you.\n"
             "The LLM uses this to personalize its analysis and explain how each project\n"
             "might specifically help YOU.\n\n"
@@ -122,7 +122,7 @@ class LifecycleMixin:
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(dialog.reject)
         self._style_btn(cancel_btn, 'secondary')
-        generate_btn = QPushButton("✓ Generate about_me.md")
+        generate_btn = QPushButton("Generate about_me.md")
         self._style_btn(generate_btn, 'primary')
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(generate_btn)

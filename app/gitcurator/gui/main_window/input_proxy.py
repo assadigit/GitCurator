@@ -161,6 +161,5 @@ class InputProxyMixin:
             'Idle':      'muted',
             'Checking…': 'muted',
         }.get(state, 'muted')
-        self.proxy_status_text.setStyleSheet(
-            f"color: {self._status_colors()[semantic]}; font-size: 12px;")
+        self._set_status(self.proxy_status_text, semantic)
 

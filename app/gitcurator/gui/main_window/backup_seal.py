@@ -73,7 +73,7 @@ class BackupSealMixin:
         layout.setSpacing(8)
 
         # ---- 💾 Vault Backup (local zip + FIFO rotation) ----
-        status_group = QGroupBox("💾 Vault Backup")
+        status_group = QGroupBox("Vault Backup")
         status_layout = QVBoxLayout(status_group)
         status_layout.setSpacing(6)
 
@@ -85,7 +85,7 @@ class BackupSealMixin:
         self.backup_folder_input.setText(self.config.get('backup_folder', ''))
         folder_row.addWidget(self.backup_folder_input, 1)
 
-        browse_btn = QPushButton("📂 Browse")
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._backup_browse_folder)
         folder_row.addWidget(browse_btn)
         status_layout.addLayout(folder_row)
@@ -101,7 +101,7 @@ class BackupSealMixin:
         keep_row.addWidget(QLabel("backups (FIFO rotation)"))
         keep_row.addStretch()
         self.backup_status_label = QLabel("● Disabled")
-        self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
+        self._set_status(self.backup_status_label, 'error', strong=True)
         keep_row.addWidget(self.backup_status_label)
         status_layout.addLayout(keep_row)
 
@@ -111,12 +111,12 @@ class BackupSealMixin:
         # global 'More' overflow menu (export = infrequent action).
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self.backup_now_btn = QPushButton("💾 Backup Now")
+        self.backup_now_btn = QPushButton("Backup Now")
         self._style_btn(self.backup_now_btn, 'primary')
         self.backup_now_btn.clicked.connect(self._backup_now)
         btn_row.addWidget(self.backup_now_btn)
 
-        self.backup_restore_btn = QPushButton("📂 Restore")
+        self.backup_restore_btn = QPushButton("Restore")
         self._style_btn(self.backup_restore_btn, 'secondary')
         self.backup_restore_btn.clicked.connect(self._backup_restore)
         btn_row.addWidget(self.backup_restore_btn)
@@ -141,7 +141,7 @@ class BackupSealMixin:
         layout.addWidget(status_group)
 
         # ---- VaultSeal (v31): automatic GitHub mirror ----
-        seal_group = QGroupBox("🛡️ VaultSeal — GitHub Mirror")
+        seal_group = QGroupBox("VaultSeal — GitHub Mirror")
         seal_layout = QVBoxLayout(seal_group)
         seal_layout.setSpacing(6)
 
@@ -173,7 +173,7 @@ class BackupSealMixin:
 
         # Action + status dot on ONE row (v32.2 compaction).
         seal_btn_row = QHBoxLayout()
-        self.vaultseal_now_btn = QPushButton("🛡️ Seal Now")
+        self.vaultseal_now_btn = QPushButton("Seal Now")
         # v31.1: Backup Now is the Backup tab's ONE filled primary — Seal Now
         # is the outlined secondary path.
         self._style_btn(self.vaultseal_now_btn, 'secondary')
@@ -182,7 +182,7 @@ class BackupSealMixin:
         seal_btn_row.addStretch()
 
         self.vaultseal_status_label = QLabel("● —")
-        self.vaultseal_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
+        self._set_status(self.vaultseal_status_label, 'muted', strong=True)
         seal_btn_row.addWidget(self.vaultseal_status_label)
         seal_layout.addLayout(seal_btn_row)
 
@@ -202,7 +202,7 @@ class BackupSealMixin:
         self._vaultseal_refresh_status()
 
         # ---- GoodRepos (v32): public curated directory ----
-        good_group = QGroupBox("🌟 Good Repos — Public Directory")
+        good_group = QGroupBox("Good Repos — Public Directory")
         good_layout = QVBoxLayout(good_group)
         good_layout.setSpacing(6)
 
@@ -234,7 +234,7 @@ class BackupSealMixin:
 
         # Action + status dot on ONE row (v32.2 compaction).
         good_btn_row = QHBoxLayout()
-        self.goodrepos_now_btn = QPushButton("🌟 Publish Now")
+        self.goodrepos_now_btn = QPushButton("Publish Now")
         # v32: outlined secondary — Backup Now stays this tab's one filled primary.
         self._style_btn(self.goodrepos_now_btn, 'secondary')
         self.goodrepos_now_btn.clicked.connect(self._goodrepos_now)
@@ -242,7 +242,7 @@ class BackupSealMixin:
         good_btn_row.addStretch()
 
         self.goodrepos_status_label = QLabel("● —")
-        self.goodrepos_status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6C6480;")
+        self._set_status(self.goodrepos_status_label, 'muted', strong=True)
         good_btn_row.addWidget(self.goodrepos_status_label)
         good_layout.addLayout(good_btn_row)
 
@@ -262,7 +262,7 @@ class BackupSealMixin:
         self._goodrepos_refresh_status()
 
         # ---- Dashboard Link ----
-        dash_group = QGroupBox("📊 Dashboard")
+        dash_group = QGroupBox("Dashboard")
         dash_layout = QVBoxLayout(dash_group)
         dash_layout.setSpacing(6)
 
@@ -274,7 +274,7 @@ class BackupSealMixin:
         self.dash_worker_url_input.setText(self.config.get('cloudflare_worker_url', ''))
         dash_row.addWidget(self.dash_worker_url_input, 1)
 
-        open_dash_btn = QPushButton("📊 Open Dashboard")
+        open_dash_btn = QPushButton("Open Dashboard")
         self._style_btn(open_dash_btn, 'secondary')
         open_dash_btn.clicked.connect(self._open_dashboard_from_backup_tab)
         dash_row.addWidget(open_dash_btn)
@@ -346,16 +346,16 @@ class BackupSealMixin:
         if backup_enabled and backup_folder:
             if os.path.isdir(backup_folder):
                 self.backup_status_label.setText("● Ready")
-                self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['success']};")
+                self._set_status(self.backup_status_label, 'success', strong=True)
             else:
                 self.backup_status_label.setText("● Folder not found")
-                self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
+                self._set_status(self.backup_status_label, 'error', strong=True)
         elif backup_enabled:
             self.backup_status_label.setText("● No folder selected")
-            self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['warning']};")
+            self._set_status(self.backup_status_label, 'warning', strong=True)
         else:
             self.backup_status_label.setText("● Disabled")
-            self.backup_status_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {self._status_colors()['error']};")
+            self._set_status(self.backup_status_label, 'error', strong=True)
 
     def _backup_now(self):
         """Create a local backup now."""
@@ -559,16 +559,15 @@ class BackupSealMixin:
         has_vault = bool(self.config.get('vault_path'))
         has_token = bool((self.config.get('github_token') or '').strip())
         if not enabled:
-            text, color = "● Disabled", self._status_colors()['error']
+            text, state = "● Disabled", 'error'
         elif not has_vault:
-            text, color = "● No vault selected", self._status_colors()['warning']
+            text, state = "● No vault selected", 'warning'
         elif not has_token:
-            text, color = "● Local-only (no GitHub token — commits, no push)", self._status_colors()['warning']
+            text, state = "● Local-only (no GitHub token — commits, no push)", 'warning'
         else:
-            text, color = "● Ready — auto-seal after every run", self._status_colors()['success']
+            text, state = "● Ready — auto-seal after every run", 'success'
         self.vaultseal_status_label.setText(text)
-        self.vaultseal_status_label.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {color};")
+        self._set_status(self.vaultseal_status_label, state, strong=True)
 
     def _start_goodrepos_publish(self):
         """Publish the public directory in a background thread (never blocks).
@@ -638,16 +637,15 @@ class BackupSealMixin:
         has_vault = bool(self.config.get('vault_path'))
         has_token = bool((self.config.get('github_token') or '').strip())
         if not enabled:
-            text, color = "● Disabled", self._status_colors()['error']
+            text, state = "● Disabled", 'error'
         elif not has_vault:
-            text, color = "● No vault selected", self._status_colors()['warning']
+            text, state = "● No vault selected", 'warning'
         elif not has_token:
-            text, color = "● Local-only (no GitHub token — README built, no push)", self._status_colors()['warning']
+            text, state = "● Local-only (no GitHub token — README built, no push)", 'warning'
         else:
-            text, color = "● Ready — auto-publish after every run", self._status_colors()['success']
+            text, state = "● Ready — auto-publish after every run", 'success'
         self.goodrepos_status_label.setText(text)
-        self.goodrepos_status_label.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {color};")
+        self._set_status(self.goodrepos_status_label, state, strong=True)
 
     def _backup_export_zip(self):
         """Export a timestamped ZIP to a user-chosen location."""
@@ -735,21 +733,12 @@ class BackupSealMixin:
             self._show_custom_message_box("No Backups", "No backups found yet.\n\nClick 'Backup Now' first.", success=True)
             return
 
-        # Theme-aware restore dialog
-        is_dark = getattr(self, '_dark_mode', False)
-        if is_dark:
-            bg = "#2B2639"; text_color = "#F2EEE7"; border = "#3B344F"; input_bg = "#241F31"
-        else:
-            bg = "#FFFFFF"; text_color = "#241F31"; border = "#F2EEE7"; input_bg = "#FDFCF8"
-
+        # v0.30.0 (audit): DE-STYLED — the themed app QSS paints the dialog
+        # (QDialog surface + QWidget text + the generic QListWidget rule);
+        # no per-dialog stylesheet, no hand-picked colors.
         dialog = QDialog(self)
-        dialog.setWindowTitle("📂 Restore from Backup")
+        dialog.setWindowTitle("Restore from Backup")
         dialog.setMinimumWidth(450)
-        dialog.setStyleSheet(
-            f"QDialog {{ background-color: {bg}; }} "
-            f"QLabel {{ color: {text_color}; }} "
-            f"QListWidget {{ background-color: {input_bg}; color: {text_color}; border: 1px solid {border}; border-radius: 4px; }}"
-        )
         layout = QVBoxLayout(dialog)
 
         layout.addWidget(QLabel(f"Found {len(backups)} backup(s):"))
@@ -801,13 +790,16 @@ class BackupSealMixin:
                     self._show_custom_message_box("Error", str(e), success=False)
 
         btn_row = QHBoxLayout()
-        restore_btn = QPushButton("📂 Restore to New Folder")
+        restore_btn = QPushButton("Restore to New Folder")
+        self._style_btn(restore_btn, 'primary')
         restore_btn.clicked.connect(do_restore)
         btn_row.addWidget(restore_btn)
-        copy_btn = QPushButton("⬇️ Copy ZIP to...")
+        copy_btn = QPushButton("Copy ZIP to...")
+        self._style_btn(copy_btn, 'secondary')
         copy_btn.clicked.connect(do_copy)
         btn_row.addWidget(copy_btn)
         close_btn = QPushButton("Close")
+        self._style_btn(close_btn, 'secondary')
         close_btn.clicked.connect(dialog.accept)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)

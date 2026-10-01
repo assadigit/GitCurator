@@ -533,12 +533,10 @@ class DashboardMixin:
         # Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        apply_btn = QPushButton("✓ Apply Changes")
-        apply_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], text=COLORS['cta_text']))
+        apply_btn = QPushButton("Apply Changes")
+        self._style_btn(apply_btn, 'primary')
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(
-            "padding: 8px 20px; border: 1px solid #ccc; border-radius: 5px;"
-        )
+        self._style_btn(cancel_btn, 'secondary')
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(apply_btn)
         layout.addLayout(btn_row)

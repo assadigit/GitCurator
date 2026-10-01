@@ -373,17 +373,11 @@ class BotQueueMixin:
                 # v0.24.1: the count now includes pending WEBSITES too.
                 if _total_pending:
                     self.pending_badge.setText(f"⏳ {_total_pending} pending")
-                    self.pending_badge.setStyleSheet(
-                        "background-color: #6C6480; color: white; padding: 4px 8px; "
-                        "border-radius: 10px; font-size: 12px; font-weight: bold;"
-                    )
+                    self._set_badge_state(self.pending_badge, 'pending')
                     self.pending_badge.setVisible(True)
                 else:
                     self.pending_badge.setText("✅ 0 pending")
-                    self.pending_badge.setStyleSheet(
-                        "background-color: #B9E3C9; color: #17402B; padding: 4px 8px; "
-                        "border-radius: 10px; font-size: 12px; font-weight: bold;"
-                    )
+                    self._set_badge_state(self.pending_badge, 'ok')
                     self.pending_badge.setVisible(True)
 
                 # Build display (Q6: show vault-dedup count)
@@ -1091,22 +1085,13 @@ class BotQueueMixin:
     def _show_manual_resolve_dialog(self, missing_urls):
         """v29.11 — Manual resolve dialog for missing links.
         Lets user: mark as processed, decommission, or process each URL."""
-        is_dark = getattr(self, '_dark_mode', False)
-        if is_dark:
-            bg = "#2B2639"; text_color = "#F2EEE7"; border = "#3B344F"; input_bg = "#241F31"; alt_bg = "#352F4A"
-        else:
-            bg = "#FFFFFF"; text_color = "#423A52"; border = "#EAE3D6"; input_bg = "#FDFCF8"; alt_bg = "#F2EDE3"
-
+        # v0.30.0 (audit): DE-STYLED — the themed app QSS paints the dialog
+        # (QDialog surface + QWidget text + the generic QListWidget rule);
+        # the buttons ride the design-system variants.
         dialog = QDialog(self)
-        dialog.setWindowTitle("🔧 Manual Resolve — Missing Links")
+        dialog.setWindowTitle("Manual Resolve — Missing Links")
         dialog.setMinimumWidth(700)
         dialog.setMinimumHeight(500)
-        dialog.setStyleSheet(
-            f"QDialog {{ background-color: {bg}; }} "
-            f"QLabel {{ color: {text_color}; }} "
-            f"QListWidget {{ background-color: {input_bg}; color: {text_color}; border: 1px solid {border}; border-radius: 4px; }} "
-            f"QPushButton {{ padding: 6px 12px; border-radius: 4px; }}"
-        )
         layout = QVBoxLayout(dialog)
         layout.setSpacing(10)
 
@@ -1131,8 +1116,8 @@ class BotQueueMixin:
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        process_btn = QPushButton("🚀 Process Selected")
-        process_btn.setStyleSheet(self._btn_style(COLORS['cta'], COLORS['cta_hover'], text=COLORS['cta_text']))
+        process_btn = QPushButton("Process Selected")
+        self._style_btn(process_btn, 'primary')
         def do_process():
             if url_list.currentRow() < 0:
                 return
@@ -1142,8 +1127,8 @@ class BotQueueMixin:
         process_btn.clicked.connect(do_process)
         btn_row.addWidget(process_btn)
 
-        mark_processed_btn = QPushButton("✅ Mark as Processed")
-        mark_processed_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover'], variant='outline'))
+        mark_processed_btn = QPushButton("Mark as Processed")
+        self._style_btn(mark_processed_btn, 'secondary')
         def do_mark_processed():
             if url_list.currentRow() < 0:
                 return
@@ -1166,8 +1151,8 @@ class BotQueueMixin:
         mark_processed_btn.clicked.connect(do_mark_processed)
         btn_row.addWidget(mark_processed_btn)
 
-        decomm_btn = QPushButton("🗑️ Decommission")
-        decomm_btn.setStyleSheet(self._btn_style(COLORS['error'], COLORS['error_hover'], text=COLORS['error_text']))
+        decomm_btn = QPushButton("Decommission")
+        self._style_btn(decomm_btn, 'danger')
         def do_decomm():
             if url_list.currentRow() < 0:
                 return
@@ -1187,8 +1172,8 @@ class BotQueueMixin:
         btn_row.addWidget(decomm_btn)
 
         # Mark all as processed
-        mark_all_btn = QPushButton("✅ Mark ALL as Processed")
-        mark_all_btn.setStyleSheet(self._btn_style(COLORS['primary'], COLORS['primary_hover']))
+        mark_all_btn = QPushButton("Mark ALL as Processed")
+        self._style_btn(mark_all_btn, 'secondary')
         def do_mark_all():
             try:
                 cache = CacheDB()
@@ -1210,7 +1195,7 @@ class BotQueueMixin:
 
         # Close button
         close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(self._btn_style(COLORS['neutral'], COLORS['neutral_hover'], variant='outline'))
+        self._style_btn(close_btn, 'secondary')
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
 

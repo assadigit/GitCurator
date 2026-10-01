@@ -527,7 +527,7 @@ class TestThemedDialogs(_GuiCase):
             win.show_about_me_wizard()   # must NOT raise in light mode
         finally:
             QDialog.exec = orig
-        self.assertEqual(opened, ["📝 About Me Wizard"])
+        self.assertEqual(opened, ["About Me Wizard"])
 
     def test_wizard_no_hardcoded_dark_text(self):
         import inspect
@@ -623,8 +623,8 @@ class TestLlmTabStructure(_GuiCase):
     def test_two_host_radios(self):
         win = self._window()
         self.assertEqual(win.llm_host_local.text(),
-                         "🖥️ Locally hosted LLM model")
-        self.assertEqual(win.llm_host_cloud.text(), "☁️ Cloud API model")
+                         "Locally hosted LLM model")
+        self.assertEqual(win.llm_host_cloud.text(), "Cloud API model")
         # the old three-way provider radio row is gone
         self.assertFalse(hasattr(win, "llm_provider_cloud"))
 

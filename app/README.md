@@ -69,7 +69,7 @@ unzipping over the vault folder.
 
 ### Vault settings & pipelines (v0.10.0 / v0.11.0)
 
-The app now knows **three vaults** (Settings → 📁 Vault in the GUI, or
+The app now knows **three vaults** (Settings → Vault in the GUI, or
 `--cli --status`):
 
 | Vault | Who writes it | Backup | Status today |
@@ -180,7 +180,7 @@ batch report (`--report`).
 
 The option previously called "Cloud API" is now labeled what it always
 was under the hood: an **OpenAI-compatible endpoint (llama.cpp, vLLM,
-LM Studio, cloud)** — Settings → 🧠 LLM in the GUI, or choice 2 in
+LM Studio, cloud)** — Settings → LLM in the GUI, or choice 2 in
 `--cli --init`. The config value stays `cloud`; old configs load
 unchanged.
 
@@ -193,7 +193,7 @@ unchanged.
   parameter gets one retry without it and the rejection is remembered
   (one doomed attempt per run, never one per call).
 - **The context window is explicit** (`llm_num_ctx`, default 8192 —
-  Settings → 🧠 LLM → *Context window*): sent as `num_ctx` with every
+  Settings → LLM → *Limits*): sent as `num_ctx` with every
   Ollama call (Ollama's own default is small and truncates long prompts
   from the front **silently** — that can no longer happen); for
   OpenAI-compatible endpoints it powers an over-budget warning (the
@@ -253,7 +253,7 @@ manager, the app must automatically catch that!"):
   `"owned_by": "llama.cpp"` entries, `.gguf` model ids). vLLM / LM
   Studio / plain OpenAI proxies match none of these — still never
   misreported.
-- Settings → 🧠 LLM → radio **🦙 llama.cpp (local)** → **🔍 Detect**
+- Settings → LLM → radio **llama.cpp** → **Detect**
   does the same on demand (the running process's ports first, then the
   common llama-server ports — 8080 first) and fills the URL + model.
 - **The model is detected automatically**: the loaded model's id comes
@@ -288,7 +288,7 @@ Three owner-directed fixes after the first proxied batch, plus the law:
   (2026-10-01): x/Twitter, the whole GitHub group (github.com, gists,
   `*.github.io`, githubusercontent.com), HuggingFace, Instagram,
   Facebook and LinkedIn can NEVER appear in the Websites vault
-  (`links.LAW_BLOCKED_DOMAINS` — a hard floor; Settings → 📁 Vault can
+  (`links.LAW_BLOCKED_DOMAINS` — a hard floor; Settings → Vault can
   only ADD domains). Links on these domains are recorded as rows in the
   `_inbox` platform tables ONLY — never fetched, never turned into
   notes, never retried; previously-queued ones are purged and dismissed
@@ -316,7 +316,7 @@ The owner's first v0.18.0 batch exposed the blocked-web pattern: every
 fetched fine, because the Websites pipeline fetched DIRECT and never
 rode the app's proxy. v0.19.0 routes it:
 
-- **Settings → 🌐 Proxy** grows "Use this proxy for web fetches too
+- **Settings → Proxy** grows "Use this proxy for web fetches too
   (Websites pipeline — x.com / YouTube need it)" — **on by default**, so
   an existing config gets the fix with no Settings visit.
 - Every website fetch of a batch rides the proxy with **DNS resolved at
@@ -339,10 +339,10 @@ rode the app's proxy. v0.19.0 routes it:
 
 ### Detect & Set — the LLM quick-switch (v0.18.0)
 
-Two buttons — **🧠 Detect & Set Ollama** and **🦙 Detect & Set
+Two buttons — **Detect & Set Ollama** and **Detect & Set
 llama.cpp** — in a compact `LLM:` row on the main screen right under
-the SYNC / Test Connection hero row (and again as a `⚡ Quick switch:`
-row in Settings → 🧠 LLM). The owner runs BOTH local engines and
+the SYNC / Test Connectivity hero row (and again as a Quick switch
+row in Settings → LLM). The owner runs BOTH local engines and
 switches between them ("sometimes I use llama.cpp model, sometimes
 ollama") — one click per engine now does the whole switch:
 
@@ -489,7 +489,7 @@ python gitcurator/tools/mirror_manual.py --apply
 - **Idempotent**: a second run over unchanged vaults performs zero
   writes.
 - **Refuses to run** if the manual vault overlaps either machine vault
-  (either direction). The manual vault path comes from the GUI 📁 Vault
+  (either direction). The manual vault path comes from the GUI Vault
   page / `config.json` (`manual_vault_path`); `--manual-vault` points
   at a copy for a safe rehearsal.
 - Mirror copies drop the GitHub notes' banner-image references

@@ -549,15 +549,18 @@ class TestGuiWiring(unittest.TestCase):
     def test_settings_llm_page_quick_switch_row(self):
         import gitcurator.gui.app as gui_app
         src = inspect.getsource(gui_app.MainWindow.initUI)
-        self.assertIn("⚡ Quick switch:", src)
-        # v0.23.0 — the quick row lives ONLY in Settings → 🧠 LLM (the
+        # v0.30.0 (audit): emoji purged from the chrome — the quick row is
+        # introduced by its muted caption now, still wired once, still
+        # inside the local engine card (local_layout).
+        self.assertIn("Quick switch", src)
+        # v0.23.0 — the quick row lives ONLY in Settings → LLM (the
         # main-view copies are gone), so initUI wires each handler once.
         self.assertEqual(src.count("quick_detect_set_ollama"), 1)
         self.assertEqual(src.count("quick_detect_set_llamacpp"), 1)
-        # …and the quick row sits INSIDE the local host group so the
+        # …and the quick row sits INSIDE the local engine card so the
         # buttons appear when "Locally hosted LLM model" is selected.
         self.assertIn('local_layout.addLayout(quick_row)', src)
-        self.assertIn('"🖥️ Locally hosted LLM model"', src)
+        self.assertIn('"Locally hosted LLM model"', src)
 
     def test_handlers_and_runner_exist(self):
         import gitcurator.gui.app as gui_app
