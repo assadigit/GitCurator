@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
-from gitcurator.constants import APP_DIR
+from gitcurator.constants import APP_DIR, EXPECTED_WORKER_VERSION
 from gitcurator.core import llm_client as _llm
 
 # ---------------------------------------------------------------------------
@@ -524,6 +524,94 @@ def check_telegram_local(config: dict,
 
 
 # ---------------------------------------------------------------------------
+# The Cloudflare bot Worker version (staleness check, v0.25.0)
+# ---------------------------------------------------------------------------
+
+def _version_cmp(a: str, b: str) -> int:
+    """Compare two dotted version strings numerically (0.22.0 vs 0.25.0).
+    Non-numeric segments compare equal to 0; returns -1/0/1."""
+    def parts(v):
+        out = []
+        for chunk in str(v).strip().lstrip("v").split("."):
+            digits = "".join(ch for ch in chunk if ch.isdigit())
+            out.append(int(digits) if digits else 0)
+        while len(out) < 3:
+            out.append(0)
+        return out[:3]
+    pa, pb = parts(a), parts(b)
+    return (pa > pb) - (pa < pb)
+
+
+def check_worker_version(config: dict,
+                         http_get=None) -> Optional[Dict[str, str]]:
+    """When a Cloudflare Worker URL is configured, compare its deployed
+    version (``GET <url>/health`` → ``{"version": ...}``) with
+    ``EXPECTED_WORKER_VERSION`` so a stale bot is detectable from Test
+    Connection. Returns a result dict, or ``None`` when no worker URL is
+    configured (the sync is optional — nothing to check, nothing to say).
+    Never raises. ``http_get`` (url) → dict is injectable for tests.
+
+    The fetch deliberately BYPASSES the system proxy, exactly like the
+    sync client it mirrors (``cloud/cloudflare_sync.py``): owners behind
+    an intercepting proxy (v2rayN & co.) would otherwise see a false
+    ⚠️/❌ for a Worker that works."""
+    url = (config or {}).get("cloudflare_worker_url", "")
+    if not url:
+        return None
+
+    def _direct_get(u, timeout_s=8.0):
+        req = urllib.request.Request(
+            u, headers={"User-Agent": "GitCurator-connection-check"})
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}))  # no proxy, like cloudflare_sync
+        with opener.open(req, timeout=timeout_s) as resp:
+            try:
+                raw = resp.read().decode("utf-8") or "{}"
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("non-dict /health payload")
+        return payload
+
+    fetch = http_get or _direct_get
+    try:
+        data = fetch(url.rstrip("/") + "/health", timeout_s=8.0)
+    except Exception as exc:
+        enabled = bool((config or {}).get("cloudflare_enabled", False))
+        level = LEVEL_ERROR if enabled else LEVEL_WARN
+        return _result("Bot Worker", level,
+                       "reachable check failed "
+                       f"({type(exc).__name__}) — {url.rstrip('/')}/health")
+    deployed = (data or {}).get("version", "")
+    if not deployed:
+        return _result("Bot Worker", LEVEL_WARN,
+                       "no version reported by /health — redeploy the "
+                       "Worker (deploy-latest.sh / deploy-latest.ps1 in "
+                       "app/cloudflare-bot)")
+    cmp = _version_cmp(str(deployed), str(EXPECTED_WORKER_VERSION))
+    if cmp == 0:
+        return _result("Bot Worker", LEVEL_OK,
+                       f"v{deployed} — matches this app "
+                       f"(expected v{EXPECTED_WORKER_VERSION})")
+    if cmp < 0:
+        return _result(
+            "Bot Worker", LEVEL_WARN,
+            f"v{deployed} deployed, this app expects v{EXPECTED_WORKER_VERSION} "
+            "— an older bot may miss newer link handling; update it: "
+            "cd app/cloudflare-bot && bash deploy-latest.sh "
+            "(Windows: .\\deploy-latest.ps1)")
+    return _result(
+        "Bot Worker", LEVEL_INFO,
+        f"v{deployed} deployed is NEWER than this app expects "
+        f"(v{EXPECTED_WORKER_VERSION}) — update the desktop app when "
+        "convenient; the bot stays backward compatible")
+
+
+# ---------------------------------------------------------------------------
 # The battery + the verdict
 # ---------------------------------------------------------------------------
 
@@ -535,12 +623,26 @@ def run_local_checks(config: dict,
     sections as ``[[title, [result, …]], …]`` (mutable — orchestrators
     append the live-Telegram result to the last section). ``on_section``
     gets ``(title, index, total)``, ``on_result`` gets each result dict;
-    exceptions inside the callbacks are swallowed. Never raises."""
+    exceptions inside the callbacks are swallowed. Never raises.
+
+    v0.25.0: when a Cloudflare Worker URL is configured, its version check
+    joins the Telegram section as one extra line (a stale deployed bot is
+    a Telegram-side problem). Unchanged — all four sections — otherwise."""
+    def telegram_section():
+        results = check_telegram_local(config, session_file)
+        try:
+            worker_check = check_worker_version(config)
+        except Exception:
+            worker_check = None
+        if worker_check is not None:
+            results = list(results) + [worker_check]
+        return results
+
     groups = [
         ("Vaults", lambda: check_vaults(config)),
         ("LLM", lambda: check_llm(config)),
         ("GitHub", lambda: check_github(config)),
-        ("Telegram", lambda: check_telegram_local(config, session_file)),
+        ("Telegram", telegram_section),
     ]
     sections: List[List] = []
     total = len(groups)

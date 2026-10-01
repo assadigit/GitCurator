@@ -248,6 +248,13 @@ CONFIG_EXAMPLE = {
 }
 
 # Category folder mapping
+# v0.25.0 — the Cloudflare bot Worker version this app expects to find
+# deployed (GET <worker_url>/health -> {"version": ...}). Test Connection
+# compares against it and warns when the deployed Worker is older, so a
+# stale bot is detectable from the app. Keep in lockstep with
+# app/cloudflare-bot/src/version.js (and its package.json) at release time.
+EXPECTED_WORKER_VERSION = "0.26.0"
+
 CATEGORY_FOLDERS = {
     "Agents": "AI-Domain/Agents",
     "Agents/Frameworks": "AI-Domain/Agents/Frameworks",

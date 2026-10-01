@@ -6,10 +6,10 @@
 > summarized, deduplicated, backed up to private GitHub mirrors, and
 > (optionally) published as a public directory.
 
-**Version:** `0.23.0` · **Suite:** 772 automated tests + a 30-link golden set ·
+**Version:** `0.26.0` · **Suite:** 837 automated tests + a 30-link golden set ·
 **Releases:** every version since v0.14.1 ships a deterministic Windows zip ·
-**Status:** all six SPEC phases done and merged — see
-[STATUS.md](STATUS.md) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
+**Status:** all six SPEC phases done and merged — session history
+archived in [docs/history/](docs/history/) · [CHANGELOG.md](CHANGELOG.md) · [app/README.md](app/README.md)
 
 > Public repository (since 2026-09-30, after a full history scrub — see
 > [Security](#security)).
@@ -57,8 +57,7 @@ are never rewritten, and every risky operation has a dry-run.**
 | LLM backends | Ollama · llama.cpp · Anthropic Claude · any OpenAI-compatible endpoint |
 | Storage | Obsidian vaults (Markdown) + `cache.db` (SQLite) |
 | Backup | private GitHub mirrors per vault (VaultSeal) + optional public directory (Good Repos) |
-| Verification console | Next.js 16 dashboard (`dashboard/`) — runs the real test suite, tracks history & drift |
-| Tests | 772 automated cases, zero network needed; 38 modules compiled in CI |
+| Tests | 837 automated cases, zero network needed; 79 modules compiled in CI |
 
 ## How it works
 
@@ -264,21 +263,14 @@ python main.py --cli --list-dead / --reset-dead   :: 404 quarantine
 ```bash
 cd app/cloudflare-bot
 npm install && npx wrangler login
-node install.js                 # or: bash deploy-latest.sh (idempotent)
+node install.cjs                 # or: bash deploy-latest.sh (idempotent)
 ```
 Deployed at `github-to-obsidian-bot.aliassadi-plus.workers.dev`
-(currently **v0.22.0**). Its web dashboard shows stats, pending links,
-dead letters and the activity log.
-
-### The verification dashboard (developer tool)
-```bash
-cd dashboard
-bun install && bun run db:push && bun run dev   # http://localhost:3000
-```
-A Next.js 16 console over the app: runs the **real test suite on demand**
-(`POST /api/verify`), persists every run (manual / startup / 6-hour
-scheduler), flags code drift, and reports live repository + release +
-VaultSeal + Good Repos state.
+(currently **v0.22.0** — v0.25.0 is prepared, see
+`app/cloudflare-bot/DEPLOYMENT.md` for the 5-minute update pack; Test
+Connection warns when the deployed bot is older than the app expects).
+Its web dashboard shows stats, pending links, dead letters and the
+activity log.
 
 ## Repository layout
 
@@ -287,19 +279,17 @@ VaultSeal + Good Repos state.
 | `app/` | **The application** — start with [app/README.md](app/README.md) |
 | `app/gitcurator/core/` | Pure-stdlib testable core — links · storage · note_builder · llm_client · website_pipeline · taxonomy · web_fetch/extract · note_state (moves-as-corrections) · mirror · linking · embeddings · dryrun |
 | `app/gitcurator/integrations/` | Telethon fetchers · `vaultseal` (private backup) · `goodrepos` (public directory) · subprocess_runner · backfill_manager |
-| `app/gitcurator/gui/` | `app.py` (MainWindow, workers) · `icons.py` (the bundled Lucide pack) · themed dialogs |
+| `app/gitcurator/gui/` | `app.py` (the facade) · `main_window/` (window + mixins) · `processing_worker.py` + `gui/worker/` (the batch worker) · `icons.py` · themed dialogs |
 | `app/gitcurator/tools/` | Golden runners · backfill · mirror · link-builder · safety scanners · `build_zip.py` |
 | `app/taxonomy/` | The Websites category file — **yours to edit**; the classifier may only use names from it |
 | `app/prompts/` | The pipeline prompts (w01 category · w02 subcategory · w03 analyze) |
-| `app/tests/` | 772 tests + `golden/websites.json` (the 30-link golden set) |
+| `app/tests/` | 837 tests + `golden/websites.json` (the 30-link golden set) |
 | `app/cloudflare-bot/` | The Telegram bot Worker — canonical deploy copy (D1 schema, migrations, deploy scripts) |
 | `app/cloudflare-bot/dashboard/` | The bot's web dashboard (stats · pending · dead letters · activity) |
-| `dashboard/` | The Next.js 16 verification console for the repo |
-| `docs/` | Phase reports, trial guides, kickoff notes |
+| `docs/history/` | The archived session history — STATUS, REFACTOR notes, phase reports, trials, kickoff |
 | `SPEC.md` | The agent briefing — mission, the six phases, the non-negotiables |
-| `STATUS.md` | The build memory between sessions — phases table + session log |
 | `CHANGELOG.md` | Every version, plain-language, owner-readable |
-| `unique_links.csv` | The owner's 784-link bookmark export (the backfill source) |
+| `SWOT-ANALYSIS.md` | The current engineering risk picture (SWE-focused, v0.26.0) |
 
 ## Configuration
 
@@ -315,12 +305,14 @@ touch:
 | `llm_provider` | `ollama` · `llamacpp` · `cloud` |
 | `llm_num_ctx` / `llm_max_output_tokens` | the split context budget |
 | `web_blocked_domains` | never-fetched domains (default the x-family) |
+| `verify_ssl` | enforce TLS certificate checks on outbound calls (default `false` — the historical censored-network setting; the websites fetcher always verifies) |
+| `summary_keep_last` | run summaries kept in the vault root (default 10; `0` = keep all) |
 | `notfound_strike_threshold` | 404 quarantine threshold (default 3) |
 | `proxy.*` | SOCKS5/HTTP proxy — Telegram + web fetches |
 
 ## Testing, CI & verification
 
-- **772 automated tests**, zero network at test time — the core is pure
+- **837 automated tests**, zero network at test time — the core is pure
   stdlib and the outside world is faked (fake Ollama, fake GitHub, a real
   fake SOCKS5 server, offscreen Qt). Exact command in
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (run from `app/`).
@@ -328,14 +320,15 @@ touch:
   in CI (`run_golden_websites.py --offline`), and `--live` against any
   backend for side-by-side comparison reports.
 - **CI** (`.github/workflows/ci.yml`) — requirements + Qt system libs,
-  38 modules compiled, the full 772 suite and the offline golden run on
+  79 modules compiled, the full 837 suite, the Worker's 37 Node tests and the offline golden run on
   every push/tag/PR. The repository is **public since 2026-09-30** (after a
   full history scrub), so Actions minutes are free; before that, a billing
   block on private-repo Actions was worked around with the
   [gitcurator-gate](https://github.com/assadigit/gitcurator-gate) mirror
   (latest mirror run: 772/772 + golden 30/30 on the v0.23.0 code).
-- **The dashboard** (`dashboard/`) is the human face of all of it — run
-  history, pass-rate streaks, drift detection, release + seal status.
+- The old Next.js verification console (`dashboard/`, v0.26.0) was removed —
+  CI runs the identical gate on every push, so the console duplicated it;
+  it remains recoverable from git history.
 
 ## Versioning & releases
 
@@ -346,8 +339,8 @@ touch:
   timestamps, tracked files only, secrets banned — byte-identical
   rebuilds). v0.23.0: 83 files, sha256
   `89e78290a4b9f45bf89f323bc82ecb92503b706b47a9ec6a4784a38f268bd04d`.
-- `CHANGELOG.md` holds the plain-language history; `STATUS.md` the phase
-  table and session log.
+- `CHANGELOG.md` holds the plain-language history; the old `STATUS.md`
+  phase table and session log are archived in `docs/history/`.
 
 ## Security
 
@@ -381,9 +374,9 @@ touch:
 | [app/WINDOWS-QUICKSTART.md](app/WINDOWS-QUICKSTART.md) | the 3-step Windows guide |
 | [app/cloudflare-bot/README.md](app/cloudflare-bot/README.md) | the bot Worker: deploy, env vars, dashboard |
 | [SPEC.md](SPEC.md) | the mission, the six phases, the non-negotiables |
-| [STATUS.md](STATUS.md) | live build state — phases, decisions, session log |
+| [SWOT-ANALYSIS.md](SWOT-ANALYSIS.md) | the current engineering risk picture |
 | [CHANGELOG.md](CHANGELOG.md) | every version in plain language |
-| [docs/reports/](docs/reports/) | the per-phase engineering reports |
+| [docs/history/](docs/history/) | the archived session history (STATUS, REFACTOR notes, phase reports, trials) |
 
 ## License
 

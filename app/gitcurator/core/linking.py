@@ -39,6 +39,10 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from gitcurator.constants import APP_DIR
 from gitcurator.core.links import normalize_url
+# v0.26.0 — the mirror_of key parsers come from the shared leaf module
+# mirror_keys (top-level now; the old lazy in-function import was the
+# mirror <-> linking cycle workaround).
+from gitcurator.core.mirror_keys import _MIRROR_RE, _unquote
 from gitcurator.core.note_state import (VAULT_GITHUB, VAULT_WEBSITES,
                                         scan_vault)
 from gitcurator.core.prompts import load_prompt
@@ -500,7 +504,6 @@ def apply_related_blocks(library_root: str, approved: Dict[str, List[Dict]],
     owner's notes (tested). Mirror copies are found by their
     ``mirror_of`` frontmatter value (the linking layer's key). Returns
     the relative paths updated/added."""
-    from gitcurator.core.mirror import _MIRROR_RE, _unquote     # noqa: PLC2701
     write = writer or atomic_write_text
     updated: List[str] = []
     if not library_root or not os.path.isdir(library_root):

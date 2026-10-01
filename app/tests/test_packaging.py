@@ -6,7 +6,7 @@ test locally"):
 - the zip builds from tracked files ONLY (git ls-files) — local junk,
   cache.db, reports/ and any live credential store can never ship;
 - developer-only / optional-infra trees are excluded (tests/, _attic/,
-  cloudflare-bot/, list of changes.txt);
+  cloudflare-bot/);
 - a tracked secret-bearing file under app/ refuses the build outright;
 - every .bat in the zip is pure ASCII with CRLF endings (the v0.09.1
   codepage bug class can never ship again);
@@ -41,7 +41,6 @@ _BATS = [
     "GitCurator-CLI.bat",
     "GitCurator-CLI-Setup.bat",
     "Start-GitCurator-CLI.bat",
-    "GitCurator-TEST-CONNECTION.bat",
 ]
 
 
@@ -73,8 +72,7 @@ class PolicyTables(unittest.TestCase):
     def test_excluded_trees(self):
         for rel in ("app/tests/test_core.py", "app/_attic/README.md",
                     "app/cloudflare-bot/src/index.js",
-                    "app/cloudflare-bot/dashboard/package.json",
-                    "app/list of changes.txt"):
+                    "app/cloudflare-bot/dashboard/package.json"):
             self.assertTrue(is_excluded(rel), rel)
 
     def test_shipped_files_not_excluded(self):
@@ -83,8 +81,7 @@ class PolicyTables(unittest.TestCase):
                     "app/requirements.txt", "app/config.example.json",
                     "app/taxonomy/website-library-categories.md",
                     "app/prompts/w01_category.txt", "app/about_me.md",
-                    "app/system_prompt.txt",
-                    "app/headless mode command.txt"):
+                    "app/system_prompt.txt", "app/gitcurator-cli.sh"):
             self.assertFalse(is_excluded(rel), rel)
 
     def test_banned_secrets(self):
@@ -205,6 +202,7 @@ class RealRepoBuild(unittest.TestCase):
                    if n.startswith(f"{ZIP_ROOT}/{prefix}")]
             self.assertEqual(bad, [], f"{prefix} leaked: {bad}")
         self.assertNotIn(f"{ZIP_ROOT}/list of changes.txt", self.names)
+        self.assertNotIn(f"{ZIP_ROOT}/GitCurator-TEST-CONNECTION.bat", self.names)
         # no live session files anywhere in the zip
         sessions = [n for n in self.names if ".session" in n]
         self.assertEqual(sessions, [])

@@ -1,116 +1,122 @@
-# GitCurator — SWOT Analysis (v0.06 review)
+# GitCurator — SWOT Analysis (v0.26.0, software-engineering focus)
 
-**Scope:** full review of the v0.05 upload (Python app + Cloudflare worker
-+ Next.js dashboard), the owner-reported failure ("it just says another
-project is running, but does nothing"), the fixes shipped in v0.06, and the
-resulting risk picture. Evidence: 92 automated tests green, offscreen GUI
-smoke, end-to-end forever-bug reproduction (fast-fail / hung-child /
-zombie-process scenarios), plus a static audit of all 18.9k LOC.
+**Scope:** the full engineering picture after the v0.25.0 hygiene &
+modularization pass and the v0.26.0 SWOT hardening pass. The previous
+SWOT (v0.06 era) is archived at `docs/history/SWOT-ANALYSIS.md`.
+**Evidence:** 837 Python tests + 37 Worker Node tests + the 30-link
+offline golden set, all green; the AST fingerprint / public-surface /
+fresh-import safety net over 94 modules; `wrangler deploy --dry-run`;
+an adversarial review pass (worklog, Task 14) that independently
+reproduced the v0.25.0 gates.
 
 ---
 
+## What v0.26.0 already fixed (found by this analysis, each locked by tests)
+
+| # | Was | Fix (commit) |
+|---|-----|--------------|
+| 1 | `mirror.py` ⇄ `linking.py` import **cycle** (a lazy in-function import dodged it) | shared leaf module `core/mirror_keys.py`; the package import graph is one-way (`7d64c1e`) |
+| 2 | **12 bare `except:`** blocks silently swallowing KeyboardInterrupt/SystemExit | all narrowed to `except Exception:`; AST-based test keeps the package clean (`5547aa8`) |
+| 3 | TLS verification **silently hard-disabled** on 4 outbound paths (cloud LLM ×2, banner, sources) | explicit `verify_ssl` config flag via `core/netctx.py` (default off = historical behavior; the websites fetcher always verified) (`d771985`) |
+| 4 | `owner.github.io/<repo>` typed `non_github` by the Worker but routed to the GitHub pipeline by the desktop — **two identities for one link** | Worker ports the desktop's mapping exactly; one canonical ledger identity (`ec2e5ff`) |
+| 5 | A **transient** `dlq_exhausted` dead letter permanently hid a ledgered link from `/pending` and earned re-sends a permanent 💀 | only the POLICY reason (`blocked_domain`) hides/blocks now; transient failures stay visible + re-sendable (`ec2e5ff`) |
+| 6 | Failed `enrich` messages **acked silently** in the DLQ | recorded to the activity log (audit), then acked (`ec2e5ff`) |
+| 7 | Run summaries **accumulated forever** in the vault root (and VaultSeal committed them all) | capped to `summary_keep_last` (default 10; exact-pattern matcher, dry-run aware) (`5cb739c`) |
+| 8 | `tools/diagnose_code.py` **executed at import** (read config.json, printed, leaked module attrs) | work moved behind `load_credentials()` + the `__main__` guard (`5cb739c`) |
+| 9 | 79-file root `dashboard/` duplicated the CI gate; `unique_links.csv` (personal bookmarks) sat in a **public** repo | both removed from the tree (owner-approved Tier B); the CSV is gitignored — history purge is a separate owner operation (`bb5cf35`) |
+
 ## Strengths
 
-1. **Genuinely valuable, well-scoped product idea.** Telegram → local-LLM
-   curation → Obsidian vault → automatic private backup (VaultSeal) → public
-   directory (GoodRepos) is a complete, differentiated pipeline that solves
-   a real personal-workflow problem end to end.
-2. **Disciplined testable core.** `gitcurator/core/` (links, storage,
-   note_builder, llm_client) is pure stdlib and covered by 73 tests that
-   run in <1s with zero pip installs — an intentional, enforced boundary
-   most hobby projects never establish.
-3. **Hard-won operational resilience documented in code.** The comment
-   trail (401 fallback, Windows filename sanitization, atomic writes,
-   graceful degradation when Ollama/Cloudflare/Drive are absent) shows real
-   failure modes were encountered and fixed, not theorized.
-4. **v0.06 reliability architecture is now sound.** Owner-scoped
-   `TelegramLockManager`, a subprocess runner with real deadlines
-   (idle + hard cap + auth grace + process registry), guaranteed
-   finished-signals on every worker, a lock watchdog, and guarded shutdown
-   — each fix is regression-tested (`tests/test_reliability.py`).
-5. **Performance fundamentals upgraded.** O(n) link dedup, SQLite WAL +
-   hot-column indexes, vault filtering off the GUI thread, no per-link
-   manifest rewrites, lazy telethon import.
-6. **Strong security posture for secrets at rest** (never written to
-   `.git/config`, sessions gitignored, atomic writes), and — as of v0.06 —
-   live credential stores are gitignored with a masked template
-   (`config.example.json`).
+1. **Test discipline that survives refactors.** 837 zero-network tests
+   (23 modules) + 37 Worker tests + a 30-link offline golden set run on
+   every push; the v0.25.0 splits were proven byte-for-byte by an AST
+   fingerprint net (1,047 hashes), a public-surface check and a
+   fresh-process import check — the same net now guards every future
+   change (allowlists decode to documented intentional edits only).
+2. **Modular, one-way architecture.** `gui/app.py` 13.8k → a ~470-line
+   facade; `main_window/` = shell + 15 domain mixins; the batch worker =
+   shell + 6 domain mixins; the CLI = commands + terminal + run engine;
+   `WebsiteStateDB` extracted; no import cycles (fresh-import proven).
+3. **The app⇄Worker contract is now specified and tested on both
+   sides.** HMAC (incl. query strings), `/api/pending` shape, dedup,
+   blocked/self-domain policy, the DLQ drain, GitHub-Pages identity and
+   worker-version staleness all have Node tests; the desktop has the
+   matching check in Test Connection.
+4. **Safety properties are design invariants, not habits.** Dry-run
+   everywhere, atomic writes, moves-are-corrections, sealed-vault
+   reconciliation (main never force-pushed), secrets never in
+   `.git/config`, the taxonomy may only file names the owner wrote.
+5. **Reproducible releases.** The Windows zip is built deterministically
+   from the tag (byte-identical rebuilds, verified across the public
+   history scrub).
+6. **Agent-ready.** `AGENTS.md` briefing, an architecture map, and a
+   do-not-read list keep future sessions effective from minute one.
 
-## Weaknesses
+## Weaknesses (remaining)
 
-1. **The 10.4k-line `gui/app.py` monolith is the structural debt.**
-   MainWindow + ProcessingWorker + CacheDB + VaultIndex + LinkTracker +
-   headless CLI in one file. v0.06 extracted the two most failure-prone
-   pieces; the rest (CacheDB, VaultIndex, LinkTracker, ProcessingWorker)
-   still deserves its own modules. Mega-methods remain:
-   `_run_impl` (~860 lines), `initUI` (~830), `verify_all_bot_links` (~260).
-2. **Three wildcard Qt imports** (`from PyQt6.QtWidgets import *` etc.)
-   pollute the namespace and silence undefined-name linting across the
-   largest file in the project.
-3. **~240 broad `except Exception` blocks (12 bare `except:`)** — several
-   in critical paths (cache writes, inbox reads). The v0.06 wrapper around
-   the batch worker mitigates the worst, but a logging pass over the rest
-   is overdue.
-4. **SSL verification is disabled in three places** (banner download,
-   source fetch, cloud-LLM path). Acceptable for a personal tool on a
-   censored network, but it should be an explicit config flag, not silent.
-5. **Remaining GUI-thread blockers:** the Ollama test chat call (up to
-   120s), inline GitHub token test (~15s), `verify_all_bot_links`'s full
-   vault reindex + O(B×V) fuzzy match. v0.06 removed the worst
-   (queue-check reindex); these three are the next felt freezes.
-6. **Unbounded report-file accumulation** — every batch drops
-   `processing_summary_*.txt` + a report into the vault root, which
-   VaultSeal then commits forever.
-7. **Inline class definitions and `worker._fn` monkey-patching** in
-   handlers (BackupWorker/VaultSealWorker/GoodReposWorker defined inside
-   methods) — untestable and rebuilt per call.
+1. **~410 broad `except Exception` blocks**, several silent in
+   non-critical paths. The dangerous bare forms are gone (fixed above),
+   but a logging pass is still owed so failures leave a trace.
+2. **Two deliberately-unsplit files remain large:** `main_window/ui.py`
+   (initUI ≈ 1,240 lines — cohesive but big) and `core/llm_client.py`
+   (1,381 — kept flat because 7 test files patch its module attributes;
+   splitting would silently break those patches).
+3. **~3k lines of dormant cloud/ modules** (`cloudflare_manager`,
+   `cloudflare_gui`, `gdrive_backup`, `gdrive_gui`) kept by owner
+   decision ("fixed, not deleted") with no test coverage — the one part
+   of the tree the suite does not exercise.
+4. **The deployed Worker lags the repo** (v0.22.0 live vs v0.26.0
+   prepared). The staleness check warns, but the DLQ drain, HMAC
+   query fix and the identity fixes only take effect after the owner
+   runs the 5-minute deploy pack (`app/cloudflare-bot/DEPLOYMENT.md`).
+5. **Single-maintainer bus factor** — concentrated session knowledge
+   (proxy quirks, the Telethon auth dance) that AGENTS.md only partly
+   captures.
 
 ## Opportunities
 
-1. **Modularization roadmap (natural next 2–3 sessions):** extract
-   CacheDB → `core/cache.py`, VaultIndex → `core/vault_index.py`,
-   LinkTracker → `core/link_tracker.py`, ProcessingWorker →
-   `gui/pipeline.py`, the settings pages → `gui/pages/*.py`. Each is a
-   mechanical move now that the lock/subprocess pieces are out.
-2. **Queue-based processing for the GUI:** move the remaining inline
-   network tests onto the existing TestWorker pattern for a fully
-   never-freezing UI.
-3. **Incremental vault indexing:** the index is rebuilt (full walk) up to
-   six times per batch flow; an mtime-based cache would make verify-all
-   and queue-checks near-instant on large vaults.
-4. **The Cloudflare worker + dashboard** are well-positioned to become the
-   always-on fetcher (bot webhook → D1 queue) with the desktop app as the
-   curation console — the architecture already half-supports it.
-5. **Config schema + validation:** a single typed config loader (with the
-   masked example as the schema) would kill the shallow-copy shared-nested-
-   dict hazard and make migrations explicit.
-6. **Coverage win:** the reliability suite pattern (fake worker scripts in
-   tempdir) extends naturally to Telethon-free tests of the whole fetch →
-   dedup → pending-classification path.
+1. **Deploy the prepared Worker** — the single highest-value 5 minutes
+   available (closes weakness 4 and activates fix 4/5/6 in production).
+2. **A dead-letter resolve endpoint** on the Worker dashboard: the
+   `resolved` column exists but nothing can set it; an owner-facing
+   "resolve" button would clear transient dead letters without
+   re-sending.
+3. **mtime-cached vault index** shared by all flows (the index walk
+   still repeats per batch flow; verify-all on large vaults pays it).
+4. **Coverage measurement** on the existing suite (`.coverage` is
+   gitignored but never collected) to aim the logging pass of W-1.
+5. **Retire the gitcurator-gate mirror** — the repo is public with free
+   Actions minutes; the mirror is dead weight.
+6. **Type-check `core/`** (pure stdlib, best typed-first candidate)
+   with mypy/pyright in strict-per-module mode.
 
 ## Threats
 
-1. **Credential exposure is the standing P0.** Five live secrets ship in
-   `app/config.json` + `installer.config.json` (and were pasted in chat
-   during development). v0.06 gitignores them and provides the masked
-   template, but **rotation is still mandatory** — the Telegram bot token,
-   api_id/api_hash, both Cloudflare tokens, and the GitHub PAT must be
-   rotated and re-entered. Git history predating v0.0.10 still holds old
-   blobs; run `git filter-repo` before any visibility change.
-2. **Single-maintainer bus factor.** The monolith + deep session-specific
-   knowledge (proxy quirks, Telethon auth dance) is a key-person risk.
-3. **Telegram/Telethon platform drift:** Telethon sessions break
-   periodically (server-side changes); the v0.06 timeouts convert
-   permanent hangs into clean errors, but the app still depends on a
-   session file that can expire at any time.
-4. **Local-LLM coupling:** Ollama model churn (renamed/retired models)
-   has already produced owner-facing failures (v0.05's auto-start work).
-   The model-adaptation logic helps; a "known-good model" pin would help
-   more.
-5. **Proxy fragility (v2rayN/SOCKS):** the entire fetch path assumes a
-   working local proxy; every failure mode here degrades to user-visible
-   stalls. The new idle-timeout makes them self-healing, but a
-   pre-flight proxy probe before long batches would fail faster.
+1. **Credential rotation is still pending (P0).** Every secret was
+   exposed in chat during development — including again in the session
+   that produced this document. Rotate the Telegram bot token +
+   api_id/hash, both Cloudflare tokens and the GitHub PAT, then update
+   the app (Settings → Credentials) and the Worker
+   (`npx wrangler secret put BOT_TOKEN`). Nothing else in the tree
+   holds live secrets (history was scrubbed pre-public; verified again
+   this pass).
+2. **`unique_links.csv` remains in git history** (public repo). Removed
+   from the tree in v0.26.0, but a true purge needs a history rewrite
+   (`git filter-repo` + force-push) — a separate owner decision with a
+   known playbook from the 2026-09-30 scrub.
+3. **Telegram/Telethon platform drift** — sessions break server-side
+   periodically; timeouts convert hangs into clean errors, but the
+   fetch path depends on a session file that can expire any time.
+4. **Proxy fragility (v2rayN/SOCKS)** — the whole fetch path assumes a
+   working local proxy; failures degrade to user-visible stalls despite
+   the pre-flight probe.
+5. **Local-LLM coupling** — Ollama model churn (renames/retirements)
+   has produced owner-facing failures before; the 3-layer picker
+   mitigates, a known-good model pin would remove the class.
+6. **Platform quota drift** (Cloudflare D1/Queues, GitHub API rate
+   limits) — mitigated by dedup, backoff and throttles, but unbounded
+   growth anywhere upstream would surface as dead letters (now visible
+   + auditable, fix 5/6).
 
 ---
 
@@ -118,25 +124,20 @@ zombie-process scenarios), plus a static audit of all 18.9k LOC.
 
 | # | Item | Why first |
 |---|------|-----------|
-| P0 | **Rotate every credential** (Telegram bot token + api_id/hash, CF tokens ×2, GitHub PAT), update app + worker, then `git filter-repo` if ever going public | Live secrets in tree + chat history |
-| P1 | Extract CacheDB / VaultIndex / LinkTracker / ProcessingWorker from the monolith (mechanical, test-covered moves) | Unblocks all further work on the file |
-| P2 | Background the remaining GUI-thread network calls (Ollama test, GitHub token test, verify-all reindex+fuzzy) | Last felt UI freezes |
-| P3 | Cap/prune per-run report files in the vault root (keep last N, or move under `_reports/`) | Unbounded growth + seal noise |
-| P4 | mtime-cached vault index shared by all flows | 6 walks/batch → 1 |
+| P0 | **Rotate every credential** (owner action, 15 min) | Live exposure in chat history |
+| P1 | **Deploy the prepared v0.26.0 Worker** (owner action, 5 min — DEPLOYMENT.md) | Activates the DLQ drain + identity fixes in production |
+| P2 | Logging pass over the broad excepts (start where coverage is thinnest) | Silent failures leave no trace today |
+| P3 | Dead-letter resolve endpoint + dashboard button | Owner self-service for transient dead letters |
+| P4 | mtime-cached vault index | Felt speed on large vaults |
+| P5 | Decide the dormant cloud/ modules' fate (delete = one command; keep = accept W-3) | 3k untested lines of maintenance surface |
 
----
+## Verification evidence (v0.26.0)
 
-## Verification evidence (v0.06)
-
-- `python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability`
-  → **92/92 OK** (73 legacy + 19 new reliability; GUI-layer cases skip
-  cleanly where PyQt6/Qt system libs are absent, run green where present).
-- `python -m gitcurator.integrations.subprocess_runner` → 4/4 scenarios
-  (healthy / hung-killed / auth-grace / hard-cap).
-- Offscreen GUI smoke → import, MainWindow construction, lock semantics,
-  watchdog force-release, SystemExit → finished_signal, clean exit.
-- **End-to-end forever-bug repro through the real `check_bot_queue()`:**
-  fast-fail child → lock released + second op admitted; **hung child
-  (600s sleep, simulated dead proxy) → killed in 6.1s, lock
-  auto-released**; window close → `app.exec()` returns (no zombie, no
-  stale `app.lock`).
+- `python -m unittest …` (the exact CI module list) → **837/837 OK**
+- `npm test` (Worker, Node built-in runner) → **37/37 OK**
+- Offline golden run → **30/30 processed, 0 invalid categories**
+- Fingerprint (1,047 hashes / 1,064 callables), public-surface and
+  fresh-import checks → **PASS** (allowlists = the 26 documented
+  intentional edits of this pass)
+- `npx wrangler deploy --dry-run` → bundle + bindings valid
+  (no production deploy without the owner — prepare-only rule)

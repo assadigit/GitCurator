@@ -1,3 +1,177 @@
+## [0.26.0] — the SWOT hardening pass: weaknesses found, fixed and locked by tests — 2026-10-01
+
+Owner ask (session): "do a SWOT analysis, and find threats and weaknesses of
+app, software-engineering wise and fix them" — plus approval to execute the
+pending Tier B tidy. Suite **826 → 837**, Worker tests **31 → 37**, all green.
+The new risk picture lives in `SWOT-ANALYSIS.md` (the v0.06-era one is archived
+in `docs/history/`).
+
+**1. Tier B tidy (owner-approved).** The root `dashboard/` verification
+console (79 files) is removed — it duplicated the CI gate one-to-one and
+nothing referenced it (recoverable from git history). `unique_links.csv`
+(your personal 784-link bookmark export) is removed from the tree and
+gitignored — personal data in a public repo; the golden-set candidates it
+produced stay committed, and the backfill tool takes any CSV path. The
+session-history docs (`STATUS.md`, the three `REFACTOR_*` notes, the old
+`SWOT-ANALYSIS.md`, `KICKOFF.md`, `docs/reports/`, `docs/trials/`) moved to
+`docs/history/` — `CHANGELOG.md` remains the living history. The `tools/`
+dev utilities are classified and documented in `AGENTS.md`; the dormant
+`cloud/` helpers stay (your "fixed, not deleted" decision).
+
+**2. The mirror⇄linking import cycle is gone.** `core/mirror.py` imports
+`linking` (the Phase 6 hook) while `linking` imported mirror's helpers
+*lazily inside a function* to dodge the cycle. The shared `mirror_of` key
++ its regex + `_unquote` now live in the leaf module `core/mirror_keys.py`;
+the import graph is one-way, proven by a fresh-process test (importing
+`linking` no longer even loads `mirror`).
+
+**3. No more bare `except:` anywhere.** All 12 sites (including the
+app-lock cleanup, the backfill and the backup paths) silently swallowed
+`KeyboardInterrupt`/`SystemExit` — a Ctrl+C landing inside one was eaten.
+All narrowed to `except Exception:` (same fallback behavior for ordinary
+errors), and an AST-based test keeps the package clean forever.
+
+**4. TLS verification is now an explicit `verify_ssl` config flag.** Four
+outbound paths silently hard-disabled certificate checks (cloud LLM calls,
+banner downloads, the sources fetch — the websites fetcher always
+verified). Default remains **off** (your censored-network setup, unchanged
+behavior); set `"verify_ssl": true` in config.json to enforce certificates.
+Documented in `config.example.json` and the README.
+
+**5. Worker contract fixes (deploy with the prepared v0.26.0 pack).**
+GitHub Pages links (`owner.github.io/repo`) now get the SAME identity on
+both sides — the Worker maps them to `github.com/owner/repo` exactly like
+the desktop (they used to be typed `non_github`, two identities for one
+link). A transiently-failed link (`dlq_exhausted` after e.g. a D1 hiccup)
+no longer disappears from `/pending` forever or earns re-sends a permanent
+💀 — only the policy reason (`blocked_domain`) hides/blocks now. And a
+failed repo-metadata enrichment is recorded in the activity log instead of
+being silently acked away. Six new Worker tests cover it all.
+
+**6. Run summaries are capped.** `processing_summary_*.txt` files used to
+accumulate in the vault root forever (and VaultSeal committed every one).
+Only the newest `summary_keep_last` (default 10, configurable) are kept —
+the matcher touches nothing else, and dry-run records removals instead of
+performing them. Also: `tools/diagnose_code.py` no longer reads config.json
+and prints a banner at *import* time (script behavior unchanged when run
+directly).
+
+**Reviewer-grade verification, twice.** Every commit gated by the full
+suite plus the fingerprint/surface/import net (the 26 intentional edits
+are allowlisted and itemized in the commit messages); Worker tests
+37/37; offline golden 30/30; `wrangler deploy --dry-run` valid; the
+per-module CI counts recomputed from the loader (837 = the real sum).
+**What you may want to do next** (P0/P1 in the SWOT): rotate the
+credentials (they were exposed in chat again), and deploy the prepared
+Worker — a 5-minute pack is in `app/cloudflare-bot/DEPLOYMENT.md`.
+*(Update 2026-10-01: the Worker P1 is done — v0.26.0 was deployed to
+production and verified healthy; see the deploy record in
+`app/cloudflare-bot/DEPLOYMENT.md`. Credential rotation P0 remains.)*
+
+## [0.25.0] — the hygiene & modularization pass: the worker split, the dead-letter safety net, and a tidier repo — 2026-10-01
+
+Owner ask (session brief): "a hygiene and modularization pass" — split only
+what needs splitting, delete what is provably dead, make the Cloudflare bot
+match the app verifiably, and keep every existing behavior. Suite
+**818 → 826** (all green, twice at baseline, twice at the end). Zero
+behavior change in the app except one new information line in Test
+Connection (below).
+
+**1. The ProcessingWorker split (the big one).** `gui/processing_worker.py`
+was 3,387 lines mixing four unrelated jobs: batch orchestration (the
+`_run_impl` method alone is 1,319 lines), the LLM conversation, GitHub
+metadata enrichment, and end-of-run reporting. It is now the QThread shell
+(signals, `__init__`, `run`, `_run_impl`, `stop`, `TestWorker` — 1,604
+lines) plus six focused mixin modules under `gui/worker/`, every method
+moved **byte-for-byte** (all 32 moved methods verified identical; the
+fingerprint gate passes — 1,058 callables, same multiplicities):
+`llm.py` (how the batch talks to the LLM), `github_meta.py` (org
+reputation, banners, credibility, missing-repo backfill), `notes.py`
+(note writes), `reports.py` (master index, final report, summary log),
+`inputs.py` (telegram/import fetches), `website_phase.py` (the websites
+leg). The old import path still works — nothing you run changes.
+
+**2. The CLI split.** `cli.py` (2,497 lines) is now three layered modules
+plus the command surface: `cli_terminal.py` (the paint box — colors,
+spinner, bars), `cli_settings.py` (config.json load/save + the model
+picker), `cli_run.py` (pre-flight checks + the animated batch run +
+dry-run report). `cli.py` keeps the commands, the parser and every old
+name importable (1,430 lines). `python main.py --cli --auto --yes
+--dry-run` behaves exactly as before (verified live).
+
+**3. WebsiteStateDB** moved out of `website_pipeline.py` into
+`core/website_state.py` (the retry ledger + its policy constants —
+schema changes and pipeline-flow changes are different jobs);
+`website_pipeline.py` re-exports it, tests unaffected. And
+`main_window/phase6.py` was renamed to **`linking_tools.py`** (its class:
+`LinkingToolsMixin`) — a module named for what it does, not for the SPEC
+phase it was born in; the old name stays importable via a facade alias.
+
+**4. Tier A deletions (every one provably unused, all recoverable from
+git):** the duplicate `gui/telegram_fetch_worker.py` (byte-identical twin
+of the integrations copy the app actually launches — 741 dead lines);
+`GitCurator-TEST-CONNECTION.bat` (the GUI button + `--cli
+--test-connection` do the same thing; the quickstart now points at the
+command); the two "headless mode" one-line note files; the ancient "list
+of changes.txt"; `app/_attic/` (its own README said "delete it freely");
+and `tools/smoke_detectset.py` (zero references, and broken since the
+app.py split — it patched a config path that moved, so running it could
+touch the real config.json). Docs, the zip builder's lists, the packaging
+tests and the CI compile list all updated so nothing points at a deleted
+file. The zip now ships **six** launchers (was seven).
+
+**5. The Cloudflare bot now provably matches the app.** The contract
+audit (every endpoint, field, HMAC scheme, schema + migration, policies)
+found two real gaps, both fixed and covered by the bot's **first test
+suite** (Node's built-in runner, `npm test`, 31 cases, zero new
+dependencies):
+- **The dead-letter queue never had a consumer** — a link that failed 5
+  processing retries sat in a queue forever, never reaching the permanent
+  database (the one hole in "no link left behind"). The DLQ now records
+  every such link into the `dead_letters` table (reason
+  `dlq_exhausted`), sends you a 💀 note in Telegram, and never loops.
+- **`/api/decommissions?since=…` could never verify** — the worker
+  checked the signature over the path without its query string while the
+  desktop signs path + query; that endpoint always answered 401. Fixed
+  worker-side (endpoints without query strings are unaffected).
+- **Staleness is now detectable:** `/health` reports the worker version
+  from one place (`src/version.js`), and Test Connection — when a Worker
+  URL is configured — adds ONE line to the Telegram section comparing it
+  with the version this app expects (`✅ Bot Worker — v0.25.0 — matches
+  this app`, or a ⚠️ with the exact redeploy command when older; a bot
+  NEWER than the app is an info line, not a warning). No
+  Worker URL configured → nothing changes in the battery.
+- Validated prepare-only: `wrangler deploy --dry-run` bundles clean, and
+  a local `wrangler dev` run recorded a GitHub link, a website link and
+  an x.com link exactly as the app expects (ledger github / ledger
+  non_github / dead-letter blocked_domain). **The production deploy is
+  NOT done** — see the step-by-step pack (backup → deploy → verify →
+  rollback) at the top of `app/cloudflare-bot/DEPLOYMENT.md`.
+
+**6. For future sessions:** a short `AGENTS.md` at the repo root (what
+the project is, how to run the tests, the architecture map, and the
+do-not-read-in-full list — CHANGELOG/STATUS/CSV data), `.gitignore`
+completed, and the split's safety net rebuilt (fingerprint / surface /
+import checks — failure-proved before any move).
+
+**7. Independent review fixes.** A fresh reviewer agent tried to break
+the pass and found one real defect (the advertised `npm test` script used
+a directory argument modern Node rejects — fixed to `node --test`, true
+count 31 cases; the helper file no longer counts itself) plus small
+polish, all applied: the Worker version check now bypasses the system
+proxy exactly like the sync client it mirrors (no false ⚠️ behind
+v2rayN-style proxies), a deployed bot NEWER than the app is an info line
+instead of a misleading warning, the in-app redeploy hint names the
+Windows launcher too, the Worker's 31 Node tests now run in CI, and the
+stale 818-test mentions in CI were corrected.
+
+**Not done on purpose (owner decisions, listed in the session report):**
+the root `dashboard/` (still used?), the dormant `gitcurator/cloud/`
+helpers, the remaining `tools/` scripts, the big history docs
+(STATUS/REFACTOR_*/SWOT), and `unique_links.csv` — which is **personal
+data committed to a public repo**; recommended: remove it and (optionally)
+scrub history.
+
 ## [0.24.1] — the "websites never sync" queue fix: pending now covers BOTH vaults — 2026-09-30
 
 Owner report (the v0.24.0 Windows build log): "it doesn't sync and see new

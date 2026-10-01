@@ -228,7 +228,7 @@ class RestoreDialog(QDialog):
             try:
                 dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
                 date_str = dt.strftime('%Y-%m-%d %H:%M')
-            except:
+            except Exception:
                 date_str = created[:16]
 
             item_text = f"{name}\n    📦 {size_str}  •  📅 {date_str}"

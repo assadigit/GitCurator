@@ -449,7 +449,7 @@ class GDriveBackup:
             # Clean up temp file
             try:
                 os.unlink(zip_path)
-            except:
+            except Exception:
                 pass
 
     def _zip_vault(self, vault_path: Path, zip_path: str) -> int:
@@ -494,7 +494,7 @@ class GDriveBackup:
         # Check file prefixes (relative to vault root)
         try:
             rel_path = str(full_path.relative_to(full_path.parents[-2]))  # This won't work correctly
-        except:
+        except Exception:
             pass
 
         # Check against obsidian workspace files
@@ -672,7 +672,7 @@ class GDriveBackup:
         finally:
             try:
                 os.unlink(zip_path)
-            except:
+            except Exception:
                 pass
 
     def replace_current_vault(self, file_id: str, current_vault_path: str) -> Tuple[bool, Optional[str]]:
@@ -715,7 +715,7 @@ class GDriveBackup:
         finally:
             try:
                 os.unlink(zip_path)
-            except:
+            except Exception:
                 pass
 
     # ========================================

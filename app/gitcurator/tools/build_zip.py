@@ -9,16 +9,16 @@ Usage (from the app/ folder of a GitCurator checkout):
 What lands in the zip (one root folder, ``GitCurator/``):
 
     GitCurator/main.py, gitcurator/…, prompts/, taxonomy/, assets/,
-    the seven .bat launchers, README.md, WINDOWS-QUICKSTART.md,
+    the six .bat launchers, README.md, WINDOWS-QUICKSTART.md,
     config.example.json, requirements.txt, VERSION, about_me.md,
-    system_prompt.txt, gitcurator-cli.sh, the two headless-mode notes.
+    system_prompt.txt, gitcurator-cli.sh.
 
 Deliberately EXCLUDED (developer-only, too big, or optional infra):
 
-    app/tests/            the 374-case suite (runs in CI, not on your PC)
-    app/_attic/           historical scripts
+    app/tests/            the 818-case suite (runs in CI, not on your PC)
+    app/_attic/           historical scripts (kept as a guard; folder was
+                          removed from the repo at v0.25.0)
     app/cloudflare-bot/   the optional Worker + web dashboard (repo only)
-    app/list of changes.txt  superseded by CHANGELOG.md
 
 NEVER included, enforced (the build refuses to start if any of these
 is tracked under app/ — defense in depth against an accidental
@@ -65,9 +65,7 @@ EXCLUDE_PREFIXES = (
     "app/_attic/",
     "app/cloudflare-bot/",
 )
-EXCLUDE_EXACT = {
-    "app/list of changes.txt",  # superseded by the repo-root CHANGELOG.md
-}
+EXCLUDE_EXACT: set[str] = set()
 
 # If any of these is tracked under app/ the build refuses to run.
 BANNED_EXACT = {

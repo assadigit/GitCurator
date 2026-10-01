@@ -4,12 +4,13 @@
 // Exports: fetch (HTTP), queue (consumer), scheduled (cron)
 
 import { handleWebhook } from './webhook.js';
-import { handleQueue } from './queue-consumer.js';
+import { handleQueue, handleDeadLetterQueue } from './queue-consumer.js';
 import { handleApi } from './api.js';
 import { handleScheduled } from './cron.js';
 import { handleCors, jsonResponse } from './utils.js';
 import { stateGet, stateSet } from './db.js';
 import { getDashboardHtml } from './dashboard-html.js';
+import { WORKER_VERSION } from './version.js';
 
 // ========================================
 // Main Worker
@@ -57,7 +58,7 @@ export default {
       return jsonResponse({
         status: 'ok',
         service: 'github-curator-bot',
-        version: '0.22.0',
+        version: WORKER_VERSION,
         last_webhook_at: lastWebhook,
         cutover_complete: cutoverComplete === '1',
         timestamp: new Date().toISOString()
@@ -96,9 +97,17 @@ export default {
   },
 
   // ========================================
-  // Queue consumer (7-day retry buffer)
+  // Queue consumers (7-day retry buffer + the DLQ drain)
   // ========================================
   async queue(batch, env) {
+    // v0.25.0 — no link left behind, the last leg: messages that exhausted
+    // their retries land in curator-ingest-dlq. That queue now HAS a
+    // consumer (see wrangler.toml) which records every URL it still can
+    // into the dead_letters table (D1, permanent) and acks — it never
+    // reprocesses, so a poison message can never loop forever.
+    if (batch.queue === 'curator-ingest-dlq') {
+      return handleDeadLetterQueue(batch, env);
+    }
     return handleQueue(batch, env);
   },
 

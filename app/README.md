@@ -1,4 +1,13 @@
-# GitHub-to-Obsidian v0.23.0 (Five-Request Desktop Overhaul: Test Connection modal · two-radio LLM tab with Claude · split context budget · themed dialogs · Import txt file)
+# GitHub-to-Obsidian v0.26.0 (hygiene, modularization & SWOT hardening — 837-test suite)
+
+Latest user-visible change: Test Connection can now tell you when the
+deployed Telegram bot is older than the app expects (one extra line in
+the Telegram section, only when a Cloudflare Worker URL is configured).
+The rest of this pass is internal: the big modules were split by
+responsibility with zero behavior change. Previous feature release:
+v0.23.0 (Five-Request Desktop Overhaul: Test Connection modal ·
+two-radio LLM tab with Claude · split context budget · themed dialogs ·
+Import txt file).
 
 ## Quick Start
 
@@ -48,7 +57,7 @@ python -m unittest tests.test_core -v
 ```cmd
 python gitcurator/tools/scan_vault_edits.py "C:\path\to\vault"   (read-only vault scan → report)
 python gitcurator/tools/snapshot_vault.py "C:\path\to\vault"      (zip backup, timestamped)
-python gitcurator/tools/pick_golden_links.py "C:\path\to\unique_links.csv"  (golden-set candidates)
+python gitcurator/tools/pick_golden_links.py "C:\path\to\bookmarks.csv"  (golden-set candidates)
 ```
 All three refuse to write anything inside the vault they are pointed at.
 Reports and snapshots land in `app/reports/` (scan/, snapshots/, dry-runs/).
@@ -152,9 +161,13 @@ shows baseline / corrections / dismissed counts per vault.
 safely:
 
 ```cmd
-python gitcurator/tools/backfill_websites.py ../unique_links.csv --dry-run
-python gitcurator/tools/backfill_websites.py ../unique_links.csv --limit 30
+python gitcurator/tools/backfill_websites.py "C:\path\to\bookmarks.csv" --dry-run
+python gitcurator/tools/backfill_websites.py "C:\path\to\bookmarks.csv" --limit 30
 ```
+
+(The path is any bookmarks CSV — the owner's original `unique_links.csv`
+is no longer tracked in the repo since v0.26.0; pass wherever your copy
+lives.)
 
 GitHub links are excluded by the same routing the app uses; the tool is
 resumable (per-URL checkpoint in `cache.db` — interrupt it any time,
@@ -353,6 +366,14 @@ ollama") — one click per engine now does the whole switch:
 
 ### Test Connection (v0.17.0 — everything-up-and-ready, in the log)
 
+v0.25.0 adds one optional line: when a Cloudflare Worker URL is
+configured (Settings → Backup / config `cloudflare_worker_url`), the
+Telegram section also compares the **deployed bot's version** (its
+`/health` endpoint) with the version this app expects —
+`✅ Bot Worker — v0.25.0 — matches this app`, or a ⚠️ telling you to
+redeploy (`cd app/cloudflare-bot && bash deploy-latest.sh`). No Worker
+URL configured → the battery looks exactly as before (four sections).
+
 One button — **Test Connection**, in the hero row next to SYNC — checks
 the four subsystems a batch needs and logs one verdict line per result,
 then a final `🏁` verdict (the CLI twin is `--cli --test-connection`):
@@ -481,7 +502,7 @@ npx wrangler login
 ```
 Edit `installer.config.json` with your credentials, then:
 ```cmd
-node install.js
+node install.cjs
 ```
 
 ### Dashboard (deploy from cloudflare-bot/dashboard/ folder)

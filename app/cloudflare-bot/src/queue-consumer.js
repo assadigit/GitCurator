@@ -7,7 +7,8 @@
 
 import {
   normalizeUrl, normalizeUrlTyped, isGitHubUrl, parseGitHubUrl, formatStars,
-  domainMatches, domainsFromEnv, scrubUrlToken,
+  domainMatches, domainsFromEnv, scrubUrlToken, extractUrls,
+  mapGithubIoUrl,
   DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS,
   truncate, now, uuid
 } from './utils.js';
@@ -45,6 +46,84 @@ export async function handleQueue(batch, env) {
 }
 
 // ========================================
+// DLQ drain — the "no link left behind" last leg (v0.25.0)
+// ========================================
+// Messages that exhausted their retries on curator-ingest land here.
+// The job is NOT to retry them (a poison message must never loop) — it
+// is to record every URL the message still carries into the permanent
+// dead_letters table (D1), best-effort notify the user, and ack.
+
+export async function handleDeadLetterQueue(batch, env) {
+  for (const message of batch.messages) {
+    try {
+      const data = JSON.parse(message.body);
+
+      if (data.type === 'enrich') {
+        // v0.26.0 — the enrich-message DLQ gap: an enrich message that
+        // exhausted its retries used to be parsed as type 'urls', find
+        // no URLs and be acked SILENTLY. The link itself is already in
+        // the ledger (layer 1) — only the metadata reply edit was lost,
+        // and the receipt reply stays honestly "Pending processing".
+        // Record the failure in the activity log so it is never
+        // silently swallowed, then ack (never retry).
+        try {
+          await activityLog(env.DB, 'dead_letter', data.url_normalized || null,
+            'GitHub enrichment failed after retries — link stays ' +
+            'ledgered; the metadata reply was not sent');
+        } catch (e) {
+          console.error('DLQ enrich activityLog error:', e);
+        }
+      }
+
+      const urls = (data.type === 'urls' && Array.isArray(data.urls)) ? data.urls : [];
+
+      for (const rawUrl of urls) {
+        // Same canonical identity as the intake path (v0.26.0 github.io
+        // parity) so a dead-lettered pages URL matches its ledger row.
+        const urlNorm = normalizeUrlTyped(mapGithubIoUrl(rawUrl) || rawUrl);
+        const urlOriginal = (rawUrl || '').replace(/[.,);]+$/, '');
+        try {
+          await deadLetterInsert(env.DB, {
+            url_normalized: urlNorm,
+            url_original: scrubUrlToken(urlOriginal),
+            reason: 'dlq_exhausted',
+            first_attempted_at: data.received_at || now(),
+            last_attempted_at: now(),
+            telegram_message_id: data.message_id || null
+          });
+        } catch (e) {
+          console.error('DLQ deadLetterInsert error:', e);
+        }
+      }
+
+      // Best-effort notice to the user (the link never got its
+      // 'Received' reply — the consumer kept failing). Never fatal.
+      if (urls.length > 0 && data.chat_id && env.BOT_TOKEN) {
+        try {
+          await sendMessage(env, data.chat_id,
+            `💀 <b>Recording problem</b> — I could not fully process ${urls.length === 1 ? 'this link' : `these ${urls.length} links`} after several tries.\n` +
+            `They are parked in the bot's dead letters (see the dashboard — nothing is lost).`);
+        } catch (e) {
+          console.error('DLQ notify error:', e);
+        }
+      }
+
+      try {
+        await activityLog(env.DB, 'dead_letter', null,
+          `DLQ drained: ${urls.length} link(s) recorded (reason dlq_exhausted)`);
+      } catch (e) {
+        console.error('DLQ activityLog error:', e);
+      }
+    } catch (err) {
+      // Unparseable body — nothing recordable; ack so it can never loop.
+      console.error('DLQ consumer (unparseable body, acking):', err);
+    }
+    // ALWAYS ack on the DLQ — there is no queue behind this queue.
+    if (typeof message.ack === 'function') message.ack();
+  }
+}
+
+// ========================================
 // Process a message containing URLs
 // ========================================
 
@@ -63,10 +142,16 @@ async function processUrlsMessage(data, env) {
   // Deduplicate URLs within the same message. Identity is website-aware
   // (v0.22.0): GitHub URLs keep the frozen normalizeUrl semantics, every
   // other URL keeps meaningful query params (a YouTube ?v= IS the page).
-  const uniqueUrls = [...new Set(urls.map(u => normalizeUrlTyped(u)))];
+  // v0.26.0 — GitHub Pages parity (the desktop's links.py §4.2 map):
+  // owner.github.io/<repo> pages map to github.com/<owner>/<repo> BEFORE
+  // typing/normalizing, so the ledger records the canonical repo URL with
+  // url_type 'github' — the same identity the desktop routes and dedupes
+  // on. A bare owner.github.io site is a real website and stays as-is.
+  const canonicalOf = (u) => mapGithubIoUrl(u) || u;
+  const uniqueUrls = [...new Set(urls.map(u => normalizeUrlTyped(canonicalOf(u))))];
   const originalUrlsMap = {};
   for (const rawUrl of urls) {
-    const normalized = normalizeUrlTyped(rawUrl);
+    const normalized = normalizeUrlTyped(canonicalOf(rawUrl));
     if (!originalUrlsMap[normalized]) {
       originalUrlsMap[normalized] = rawUrl.replace(/[.,);]+$/, '');
     }
@@ -85,7 +170,9 @@ async function processUrlsMessage(data, env) {
   // Process each URL
   for (const urlNorm of uniqueUrls) {
     const urlOriginal = originalUrlsMap[urlNorm];
-    const github = isGitHubUrl(normalizeUrl(urlOriginal));
+    // v0.26.0 — typing follows the CANONICAL form (a mapped pages URL
+    // is its repo); urlOriginal stays what the user actually sent.
+    const github = isGitHubUrl(normalizeUrl(canonicalOf(urlOriginal)));
     const githubInfo = github ? parseGitHubUrl(urlNorm) : null;
     const urlType = github ? 'github' : 'non_github';
 

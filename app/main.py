@@ -19,7 +19,7 @@ This shim keeps every historical entry point working unchanged:
                                     see GitCurator-CLI.bat for the double-click
                                     launcher and GitCurator-CLI-Setup.bat for the
                                     first-run wizard)
-    python main.py --headless …     (legacy plain headless — see "headless mode command.txt")
+    python main.py --headless …     (legacy plain headless — same flags as --cli)
     python -m unittest tests.test_core tests.test_e2e   (run from this directory)
 
 The real main() is :func:`gitcurator.gui.app.main`.

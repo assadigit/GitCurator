@@ -1,4 +1,4 @@
-"""MainWindow BackupSealMixin — methods moved verbatim from the MainWindow in gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""MainWindow BackupSealMixin — methods moved verbatim from the MainWindow in gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys as _sys
 import sys
@@ -423,7 +423,7 @@ class BackupSealMixin:
                         for old_file in backups[:len(backups) - self.max_backups]:
                             try:
                                 os.remove(old_file)
-                            except:
+                            except Exception:
                                 pass
 
                     size = os.path.getsize(zip_path)

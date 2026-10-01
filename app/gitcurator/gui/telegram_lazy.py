@@ -1,4 +1,4 @@
-"""_import_telethon_fetcher, fetch_github_urls_sync, TelegramFetcherError — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""_import_telethon_fetcher, fetch_github_urls_sync, TelegramFetcherError — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os

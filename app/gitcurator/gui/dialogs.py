@@ -1,4 +1,4 @@
-"""SettingsDialog, ConnectionTestDialog — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""SettingsDialog, ConnectionTestDialog — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys
 import os

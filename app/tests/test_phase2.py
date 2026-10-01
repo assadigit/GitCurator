@@ -1012,7 +1012,7 @@ class TestWorkerWebsites(unittest.TestCase):
 
         def _fake_cloud(api_url, api_key, model, messages,
                         json_mode=False, timeout_s=300, num_ctx=None,
-                        on_warn=None):
+                        on_warn=None, verify_tls=False):
             return fake(messages)
 
         gui_pw.Github = _FastFailGithub

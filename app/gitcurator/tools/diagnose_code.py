@@ -28,64 +28,79 @@ import sys
 import os
 import json
 
-# Load config from config.json if it exists, otherwise use test.py's credentials
+# Load config from config.json if it exists, otherwise use test.py's
+# credentials. v0.26.0 — this moved INTO a function: the old module-level
+# load + banner meant IMPORTING this file read config.json and printed
+# (the surface-check import caught it leaking cfg/f module attrs when a
+# config.json happened to exist).
 CONFIG_FILE = "config.json"
-if os.path.exists(CONFIG_FILE):
-    with open(CONFIG_FILE, 'r') as f:
-        cfg = json.load(f)
-    API_ID = int(cfg.get('telegram_api_id', 0))
-    API_HASH = cfg.get('telegram_api_hash', '')
-    PHONE = cfg.get('telegram_phone', '')
-    PROXY_CFG = cfg.get('proxy', {})
-else:
-    # Fall back to test.py's hardcoded values
-    API_ID = 0
-    API_HASH = 'YOUR_API_HASH'
-    PHONE = '+15551234567'
-    PROXY_CFG = {
-        'enabled': True,
-        'type': 'socks5',
-        'host': '127.0.0.1',
-        'port': 10808,
-    }
 
-print("=" * 60)
-print("TELEGRAM CODE REQUEST DIAGNOSTIC")
-print("=" * 60)
-print(f"API ID:   {API_ID}")
-print(f"API Hash: {API_HASH[:8]}...")
-print(f"Phone:    {PHONE}")
-print(f"Proxy:    {PROXY_CFG}")
-print("=" * 60)
-print()
+
+def load_credentials():
+    """(api_id, api_hash, phone, proxy_cfg) from config.json (cwd), or
+    test.py's hardcoded fallback values."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            cfg = json.load(f)
+        return (
+            int(cfg.get('telegram_api_id', 0)),
+            cfg.get('telegram_api_hash', ''),
+            cfg.get('telegram_phone', ''),
+            cfg.get('proxy', {}),
+        )
+    # Fall back to test.py's hardcoded values
+    return (
+        0,
+        'YOUR_API_HASH',
+        '+15551234567',
+        {
+            'enabled': True,
+            'type': 'socks5',
+            'host': '127.0.0.1',
+            'port': 10808,
+        },
+    )
+
 
 from telethon import TelegramClient, errors
 import socks
 
 
-def build_proxy():
-    if not PROXY_CFG or not PROXY_CFG.get('enabled'):
+def build_proxy(proxy_cfg):
+    if not proxy_cfg or not proxy_cfg.get('enabled'):
         return None
-    ptype_str = str(PROXY_CFG.get('type', 'socks5')).lower()
+    ptype_str = str(proxy_cfg.get('type', 'socks5')).lower()
     ptype = {
         'socks5': socks.SOCKS5,
         'socks4': socks.SOCKS4,
         'http': socks.HTTP,
     }.get(ptype_str, socks.SOCKS5)
-    host = PROXY_CFG.get('host', '127.0.0.1')
-    port = int(PROXY_CFG.get('port', 10808))
+    host = proxy_cfg.get('host', '127.0.0.1')
+    port = int(proxy_cfg.get('port', 10808))
     return (ptype, host, port, '', '')
 
 
 async def diagnose():
-    proxy = build_proxy()
+    api_id, api_hash, phone, proxy_cfg = load_credentials()
+
+    print("=" * 60)
+    print("TELEGRAM CODE REQUEST DIAGNOSTIC")
+    print("=" * 60)
+    print(f"API ID:   {api_id}")
+    print(f"API Hash: {api_hash[:8]}...")
+    print(f"Phone:    {phone}")
+    print(f"Proxy:    {proxy_cfg}")
+    print("=" * 60)
+    print()
+
+    proxy = build_proxy(proxy_cfg)
     print(f"[1/4] Building proxy tuple: {proxy}")
     print()
 
     # Use a SEPARATE session file so we don't interfere with the main one
     session_file = 'diagnose_session'
     print(f"[2/4] Creating TelegramClient (session: {session_file})...")
-    client = TelegramClient(session_file, API_ID, API_HASH, proxy=proxy)
+    client = TelegramClient(session_file, api_id, api_hash, proxy=proxy)
 
     print("[3/4] Connecting to Telegram...")
     try:
@@ -100,11 +115,11 @@ async def diagnose():
 
     print()
     print("[4/4] Calling send_code_request(phone)...")
-    print(f"      Phone: {PHONE}")
+    print(f"      Phone: {phone}")
     print()
 
     try:
-        result = await client.send_code_request(PHONE)
+        result = await client.send_code_request(phone)
         print("=" * 60)
         print("✅ SUCCESS! Telegram accepted the code request.")
         print("=" * 60)

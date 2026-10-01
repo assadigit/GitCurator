@@ -181,7 +181,8 @@ from gitcurator.gui.main_window.telegram_ui import TelegramUiMixin
 from gitcurator.gui.main_window.input_proxy import InputProxyMixin
 from gitcurator.gui.main_window.vaults_config import VaultConfigMixin
 from gitcurator.gui.main_window.test_connection_modal import TestConnectionModalMixin
-from gitcurator.gui.main_window.phase6 import Phase6Mixin
+from gitcurator.gui.main_window.linking_tools import LinkingToolsMixin
+Phase6Mixin = LinkingToolsMixin  # v0.25.0 rename alias (was main_window/phase6.py)
 from gitcurator.gui.main_window.llamacpp import LlamaCppMixin
 from gitcurator.gui.main_window.connection_tests import ConnectionTestsMixin
 from gitcurator.gui.main_window.hero import HeroMixin
@@ -428,7 +429,7 @@ def main():
             try:
                 if lock_fd:
                     os.close(lock_fd)
-            except:
+            except Exception:
                 pass
             with open(lock_file, 'w') as f:
                 f.write(str(os.getpid()))

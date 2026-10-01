@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_decomm_source ON decommission_events(source);
 CREATE TABLE IF NOT EXISTS dead_letters (
   url_normalized     TEXT PRIMARY KEY,
   url_original       TEXT NOT NULL,
-  reason             TEXT NOT NULL,    -- 'invalid_format' | 'persistent_fetch_fail' | 'blocked_domain'
+  reason             TEXT NOT NULL,    -- 'invalid_format' | 'persistent_fetch_fail' | 'blocked_domain' | 'dlq_exhausted' (v0.25.0: the DLQ drain records exhausted-retry links)
   first_attempted_at TEXT NOT NULL,   -- ('not_github' retired in v0.22.0 — websites are accepted now)
   last_attempted_at  TEXT NOT NULL,
   attempt_count      INTEGER DEFAULT 1,

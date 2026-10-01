@@ -129,9 +129,17 @@ async function verifyHmac(request, env) {
     return { ok: false, error: 'Unknown install' };
   }
 
-  // Recompute signature
+  // Recompute signature.
+  // v0.25.0 — Fix (HMAC query-string mismatch): the desktop signs the path
+  // WITH its query string (cloudflare_sync._make_request signs exactly the
+  // `path` argument it was given, e.g. '/api/decommissions?since=…'), but
+  // this check used to recompute over url.pathname only (query stripped) —
+  // so GET /api/decommissions?since=… could never verify (always 401
+  // 'Invalid signature'). Sign over pathname + search, like the client.
+  // Endpoints without a query string are unaffected (search === '').
   const method = request.method;
-  const path = new URL(request.url).pathname;
+  const u = new URL(request.url);
+  const path = u.pathname + u.search;
   const bodyText = await request.clone().text();
   const bodyHash = await sha256(bodyText);
   const message = `${method}\n${path}\n${timestamp}\n${bodyHash}`;
@@ -202,7 +210,7 @@ async function handleGetPending(request, env) {
     WHERE l.forgotten = 0
       AND (v.status IS NULL OR v.status = 'pending')
       AND l.url_normalized NOT IN (SELECT url_normalized FROM decommission_events)
-      AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0)
+      AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0 AND reason = 'blocked_domain')
     ORDER BY l.first_seen_at ASC
     LIMIT 100
   `).all();

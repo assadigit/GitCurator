@@ -1,4 +1,4 @@
-"""MainWindow — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""MainWindow — moved verbatim from gitcurator/gui/app.py (branch refactor/gui-app-split; see docs/history/REFACTOR_PLAN.md)."""
 
 import sys as _sys
 import sys
@@ -69,7 +69,7 @@ from gitcurator.gui.main_window.lifecycle import LifecycleMixin
 
 from gitcurator.gui.main_window.llamacpp import LlamaCppMixin
 
-from gitcurator.gui.main_window.phase6 import Phase6Mixin
+from gitcurator.gui.main_window.linking_tools import LinkingToolsMixin
 
 from gitcurator.gui.main_window.processing_control import ProcessingControlMixin
 
@@ -85,7 +85,7 @@ from gitcurator.gui.main_window.vaults_config import VaultConfigMixin
 
 from gitcurator.gui.processing_worker import TestWorker
 
-class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin, ProcessingControlMixin, TelegramUiMixin, InputProxyMixin, VaultConfigMixin, TestConnectionModalMixin, Phase6Mixin, LlamaCppMixin, ConnectionTestsMixin, HeroMixin, UiMixin, ThemeMixin, QMainWindow):
+class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin, ProcessingControlMixin, TelegramUiMixin, InputProxyMixin, VaultConfigMixin, TestConnectionModalMixin, LinkingToolsMixin, LlamaCppMixin, ConnectionTestsMixin, HeroMixin, UiMixin, ThemeMixin, QMainWindow):
     # v0.15.1 — startup llama.cpp auto-detect: the detector daemon thread
     # hands its result to the GUI thread through this queued signal (the
     # owner: "the service is running on task manager, the app must
