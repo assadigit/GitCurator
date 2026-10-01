@@ -116,5 +116,113 @@ class TestVerifySslFlag(unittest.TestCase):
                       "default must preserve the historical behavior")
 
 
+class TestSummaryCap(unittest.TestCase):
+    """v0.26.0: per-run processing_summary_*.txt files in the vault root
+    are capped to ``summary_keep_last`` (default 10) — they used to
+    accumulate forever and VaultSeal committed every one."""
+
+    def _worker_stub(self, config, vault):
+        from gitcurator.gui.worker.reports import WorkerReportsMixin
+
+        class _Log:
+            def emit(self, *_a, **_k):
+                pass
+
+        class _Stub(WorkerReportsMixin):
+            def __init__(self):
+                self.config = config
+                self.total = 0
+                self._processed_log = []
+                self.log_message = _Log()
+
+        return _Stub()
+
+    def test_prune_keeps_newest_n(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as vault:
+            for i in range(12):
+                name = f"processing_summary_2026010{i // 10}{i % 10}_0000{i:02d}.txt"
+                with open(os.path.join(vault, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("old")
+            # a lookalike file that must NEVER be touched
+            keep_me = os.path.join(vault, "processing_summary_notes.md")
+            with open(keep_me, "w", encoding="utf-8") as f:
+                f.write("not a run summary")
+            stub = self._worker_stub({'summary_keep_last': 5, 'vault_path': vault,
+                                      'pipelines': {}}, vault)
+            out = stub._generate_summary_log()
+            self.assertTrue(out and os.path.isfile(out))
+            remaining = sorted(f for f in os.listdir(vault)
+                               if f.startswith("processing_summary_")
+                               and f.endswith(".txt"))
+            self.assertEqual(len(remaining), 5,
+                             "keep=5 keeps the 5 NEWEST files total "
+                             "(including the one just written)")
+            self.assertTrue(os.path.isfile(keep_me),
+                            "the lookalike is never touched")
+
+    def test_default_cap_is_ten(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as vault:
+            for i in range(20):
+                name = f"processing_summary_2026010{i // 10}{i % 10}_0000{i % 10:02d}.txt"
+                with open(os.path.join(vault, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("old")
+            stub = self._worker_stub({'vault_path': vault}, vault)
+            stub._generate_summary_log()
+            remaining = [f for f in os.listdir(vault)
+                         if f.startswith("processing_summary_")
+                         and f.endswith(".txt")]
+            self.assertEqual(len(remaining), 10,
+                             "default keep=10: the 10 newest, including "
+                             "the one just written")
+
+    def test_zero_disables_pruning(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as vault:
+            for i in range(14):
+                name = f"processing_summary_20260101_0000{i:02d}.txt"
+                with open(os.path.join(vault, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("old")
+            stub = self._worker_stub(
+                {'summary_keep_last': 0, 'vault_path': vault}, vault)
+            stub._generate_summary_log()
+            remaining = [f for f in os.listdir(vault)
+                         if f.startswith("processing_summary_")
+                         and f.endswith(".txt")]
+            self.assertEqual(len(remaining), 15, "keep everything + new")
+
+
+class TestDevToolImportHygiene(unittest.TestCase):
+    """v0.26.0: tools/diagnose_code.py ran its config load + banner at
+    IMPORT time (read config.json, printed, leaked cfg/f as module
+    attrs when a config.json existed). The work now lives inside
+    functions behind the __main__ guard — importing must be silent and
+    side-effect free."""
+
+    def test_diagnose_code_imports_silently(self):
+        code = (
+            "import io, contextlib, sys\n"
+            "buf = io.StringIO()\n"
+            "with contextlib.redirect_stdout(buf):\n"
+            "    import gitcurator.tools.diagnose_code as m\n"
+            "out = buf.getvalue()\n"
+            "bad = out or hasattr(m, 'API_ID') or hasattr(m, 'cfg') "
+            "or hasattr(m, 'f')\n"
+            "sys.exit(1 if bad else 0)\n"
+        )
+        env = dict(os.environ)
+        env["QT_QPA_PLATFORM"] = "offscreen"
+        r = subprocess.run([sys.executable, "-c", code], cwd=APP_ROOT,
+                           env=env, capture_output=True, text=True,
+                           timeout=120)
+        self.assertEqual(r.returncode, 0,
+                         f"import has side effects: {r.stdout[-300:]} "
+                         f"{r.stderr[-300:]}")
+
+
 if __name__ == "__main__":
     unittest.main()

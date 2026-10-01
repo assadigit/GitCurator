@@ -61,6 +61,7 @@
   "web_blocked_domains": ["x.com", "twitter.com", "t.co"],
   "web_self_domains": ["github-to-obsidian-bot.aliassadi-plus.workers.dev"],
   "verify_ssl": false,
+  "summary_keep_last": 10,
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
   "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",

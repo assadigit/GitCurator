@@ -611,6 +611,25 @@ class WorkerReportsMixin:
             # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
             _dryrun.write_text(filepath, '\n'.join(lines))
 
+            # v0.26.0 — SWOT fix (the v0.06 P3 item): run summaries used
+            # to accumulate in the vault root forever (and VaultSeal
+            # committed every one of them). Keep only the newest
+            # ``summary_keep_last`` (default 10). The matcher is the exact
+            # processing_summary_*.txt pattern — nothing else is ever
+            # touched, and dry-run records the removals instead of
+            # performing them. ``summary_keep_last`` <= 0 keeps everything.
+            keep = int((self.config or {}).get('summary_keep_last', 10) or 0)
+            if keep > 0:
+                try:
+                    existing = sorted(
+                        f for f in os.listdir(vault_path)
+                        if f.startswith('processing_summary_')
+                        and f.endswith('.txt'))
+                    for old_name in existing[:-keep]:
+                        _dryrun.remove(os.path.join(vault_path, old_name))
+                except OSError:
+                    pass
+
             return filepath
         except Exception as e:
             self.log_message.emit(f"Failed to generate summary log: {e}", "warning")
