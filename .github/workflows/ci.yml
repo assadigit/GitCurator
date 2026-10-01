@@ -1,6 +1,6 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 74 audited
+# Every push to main, every tag, and every PR compiles the 77 audited
 # Python modules and runs the full 818-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
@@ -164,6 +164,9 @@ jobs:
           gitcurator/integrations/subprocess_runner.py
           gitcurator/cloud/cloudflare_sync.py
           gitcurator/cli.py
+          gitcurator/cli_terminal.py
+          gitcurator/cli_settings.py
+          gitcurator/cli_run.py
           gitcurator/tools/scan_vault_edits.py
           gitcurator/tools/snapshot_vault.py
           gitcurator/tools/pick_golden_links.py
@@ -182,4 +185,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate mirrors dashboard POST /api/verify — 74 compiles + 818 tests + offline golden run (v0.25.0)."
+        run: echo "Gate mirrors dashboard POST /api/verify — 77 compiles + 818 tests + offline golden run (v0.25.0)."
