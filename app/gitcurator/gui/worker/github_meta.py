@@ -270,7 +270,7 @@ class WorkerGithubMetaMixin:
                 doc_score += 1
             if repo.get_readme():
                 doc_score += 1
-        except:
+        except Exception:
             pass
         doc_score = min(doc_score, 10)
 

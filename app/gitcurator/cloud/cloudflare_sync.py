@@ -131,13 +131,13 @@ class CloudflareSync:
             # Read the actual response body for debugging
             try:
                 body_text = e.read().decode('utf-8', errors='replace')
-            except:
+            except Exception:
                 body_text = ''
 
             try:
                 err_data = json.loads(body_text)
                 err_msg = err_data.get('error', f'HTTP {e.code}')
-            except:
+            except Exception:
                 err_msg = body_text[:200] if body_text else f'HTTP {e.code}'
 
             if e.code == 403:
@@ -227,7 +227,7 @@ class CloudflareSync:
             try:
                 err_data = json.loads(e.read())
                 return e.code, err_data
-            except:
+            except Exception:
                 return e.code, {'error': str(e)}
         except Exception as e:
             return 0, {'error': str(e)}

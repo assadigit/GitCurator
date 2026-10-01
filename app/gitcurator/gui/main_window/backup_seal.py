@@ -423,7 +423,7 @@ class BackupSealMixin:
                         for old_file in backups[:len(backups) - self.max_backups]:
                             try:
                                 os.remove(old_file)
-                            except:
+                            except Exception:
                                 pass
 
                     size = os.path.getsize(zip_path)

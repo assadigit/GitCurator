@@ -360,5 +360,5 @@ class BackfillManager:
             if not verify_data:
                 return False
             return verify_data.get('cutover_complete', False)
-        except:
+        except Exception:
             return False

@@ -429,7 +429,7 @@ def main():
             try:
                 if lock_fd:
                     os.close(lock_fd)
-            except:
+            except Exception:
                 pass
             with open(lock_file, 'w') as f:
                 f.write(str(os.getpid()))
