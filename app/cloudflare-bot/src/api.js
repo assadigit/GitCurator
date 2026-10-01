@@ -210,7 +210,7 @@ async function handleGetPending(request, env) {
     WHERE l.forgotten = 0
       AND (v.status IS NULL OR v.status = 'pending')
       AND l.url_normalized NOT IN (SELECT url_normalized FROM decommission_events)
-      AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0)
+      AND l.url_normalized NOT IN (SELECT url_normalized FROM dead_letters WHERE resolved = 0 AND reason = 'blocked_domain')
     ORDER BY l.first_seen_at ASC
     LIMIT 100
   `).all();

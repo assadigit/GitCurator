@@ -71,8 +71,12 @@ export class FakeD1 {
     }
     if (s.startsWith('SELECT l.* FROM ever_seen_ledger l')) {
       // /api/pending: ledger rows not in mirror (or pending), not
-      // decommissioned, not unresolved-dead — oldest first, LIMIT 100.
-      const dead = new Set(this.deadLetters.keys());
+      // decommissioned, not POLICY-dead (v0.26.0: only blocked_domain
+      // is hidden — a transient dlq_exhausted row must stay visible to
+      // the desktop sync) — oldest first, LIMIT 100.
+      const dead = new Set([...this.deadLetters.values()]
+        .filter(r => !r.resolved && r.reason === 'blocked_domain')
+        .map(r => r.url_normalized));
       const decomm = new Set(this.decommission.map(r => r.url_normalized));
       const rows = [...this.ledger.values()]
         .filter(r => !r.forgotten)
@@ -104,8 +108,10 @@ export class FakeD1 {
         .slice(0, args[1]);
       return mode === 'first' ? null : rows;
     }
-    if (s.includes('FROM dead_letters WHERE url_normalized = ? AND resolved = 0')) {
-      return this.deadLetters.has(args[0]) ? { 1: 1 } : null;
+    if (s.includes("FROM dead_letters WHERE url_normalized = ? AND reason = 'blocked_domain'")) {
+      // v0.26.0 deadLetterIsDead: only POLICY dead letters block intake.
+      const row = this.deadLetters.get(args[0]);
+      return (row && !row.resolved && row.reason === 'blocked_domain') ? { 1: 1 } : null;
     }
     if (s.includes('INSERT INTO dead_letters')) {
       const [urlN, urlO, reason, firstAt, lastAt, msgId] = args;

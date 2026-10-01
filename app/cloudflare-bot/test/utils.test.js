@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeUrl, normalizeWebsiteUrl, normalizeUrlTyped, isGitHubUrl,
   parseGitHubUrl, scrubUrlToken, domainMatches, domainsFromEnv, extractUrls,
+  mapGithubIoUrl,
   DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS
 } from '../src/utils.js';
 
@@ -65,4 +66,26 @@ test('extractUrls pulls every URL out of a message and trims punctuation', () =>
 
 test('self-domain default is the bot\'s own worker host', () => {
   assert.equal(DEFAULT_SELF_DOMAINS[0], 'github-to-obsidian-bot.aliassadi-plus.workers.dev');
+});
+
+// ── v0.26.0 ──────────────────────────────────────────────────────────
+
+test('mapGithubIoUrl: pages URLs map to their canonical repo (desktop links.py parity)', () => {
+  assert.equal(mapGithubIoUrl('https://owner.github.io/repo'),
+    'https://github.com/owner/repo');
+  assert.equal(mapGithubIoUrl('https://owner.github.io/repo/anything?utm=x'),
+    'https://github.com/owner/repo');
+  assert.equal(mapGithubIoUrl('  https://owner.github.io/repo  '),
+    'https://github.com/owner/repo');
+  // a bare owner.github.io site is a real website — no repo path
+  assert.equal(mapGithubIoUrl('https://owner.github.io'), '');
+  assert.equal(mapGithubIoUrl('https://owner.github.io/'), '');
+  // non-pages URLs pass through untouched (returned as '')
+  assert.equal(mapGithubIoUrl('https://github.com/o/r'), '');
+  assert.equal(mapGithubIoUrl('https://example.com/x'), '');
+  assert.equal(mapGithubIoUrl(''), '');
+  // invalid GitHub names (must start/end alphanumeric — traversal guard)
+  assert.equal(mapGithubIoUrl('https://..github.io/repo'), '');
+  assert.equal(mapGithubIoUrl('https://-bad.github.io/repo'), '');
+  assert.equal(mapGithubIoUrl('https://owner.github.io/bad-'), '');
 });

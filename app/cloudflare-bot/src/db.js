@@ -207,8 +207,13 @@ export async function deadLetterInsert(db, entry) {
 }
 
 export async function deadLetterIsDead(db, urlNormalized) {
+  // v0.26.0 — only POLICY dead letters block intake: 'blocked_domain' is
+  // a permanent owner-set policy; 'dlq_exhausted' is a transient worker
+  // failure (the DLQ drain records it for the audit trail) and must
+  // never stop a re-sent link from being ledgered ("no link left
+  // behind" on the re-send path too).
   const result = await db.prepare(
-    'SELECT 1 FROM dead_letters WHERE url_normalized = ? AND resolved = 0 LIMIT 1'
+    "SELECT 1 FROM dead_letters WHERE url_normalized = ? AND reason = 'blocked_domain' AND resolved = 0 LIMIT 1"
   ).bind(urlNormalized).first();
   return !!result;
 }

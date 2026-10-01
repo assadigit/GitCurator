@@ -173,3 +173,60 @@ test('DLQ: the activity log records the drain', async () => {
   })], queue: 'curator-ingest-dlq' }, env);
   assert.ok(env.DB.activity.some(a => a.event_type === 'dead_letter'));
 });
+
+// ── v0.26.0 ──────────────────────────────────────────────────────────
+
+test('intake: owner.github.io/<repo> maps to the canonical GitHub URL (parity with the desktop)', async () => {
+  const env = makeEnv();
+  await handleQueue({ messages: [message({
+    type: 'urls', urls: ['https://owner.github.io/repo/?utm_x=1'],
+    chat_id: 1, user_id: 12345, message_id: 20, received_at: '2026-10-01T00:00:00Z'
+  })], queue: 'curator-ingest' }, env);
+  const row = env.DB.ledger.get('https://github.com/owner/repo');
+  assert.ok(row, 'ledger row lives under the canonical repo URL');
+  assert.equal(row.url_type, 'github');
+  assert.equal(row.github_owner, 'owner');
+  assert.equal(row.github_repo, 'repo');
+  assert.equal(env.DB.ledger.size, 1);
+});
+
+test('intake: a bare owner.github.io site stays a website', async () => {
+  const env = makeEnv();
+  await handleQueue({ messages: [message({
+    type: 'urls', urls: ['https://owner.github.io/'],
+    chat_id: 1, user_id: 12345, message_id: 21, received_at: '2026-10-01T00:00:00Z'
+  })], queue: 'curator-ingest' }, env);
+  const row = env.DB.ledger.get('https://owner.github.io/');
+  assert.ok(row);
+  assert.equal(row.url_type, 'non_github');
+});
+
+test('intake: the pages form and the repo form of one link dedupe to a single row', async () => {
+  const env = makeEnv();
+  await handleQueue({ messages: [message({
+    type: 'urls', urls: ['https://github.com/o/r'],
+    chat_id: 1, user_id: 12345, message_id: 22, received_at: '2026-10-01T00:00:00Z'
+  })], queue: 'curator-ingest' }, env);
+  await handleQueue({ messages: [message({
+    type: 'urls', urls: ['https://o.github.io/r/'],
+    chat_id: 1, user_id: 12345, message_id: 23, received_at: '2026-10-01T00:00:00Z'
+  })], queue: 'curator-ingest' }, env);
+  assert.equal(env.DB.ledger.size, 1, 'one identity, not two');
+  assert.equal(env.DB.ledger.get('https://github.com/o/r').forward_count, 2);
+});
+
+test('DLQ: a failed enrich message is audited in the activity log, never silently acked', async () => {
+  const env = makeEnv();
+  const msg = message({
+    type: 'enrich', url_normalized: 'https://github.com/o/r',
+    chat_id: 1, owner: 'o', repo: 'r'
+  });
+  await handleDeadLetterQueue({ messages: [msg], queue: 'curator-ingest-dlq' }, env);
+  assert.ok(msg.acked, 'DLQ always acks — no loop behind this queue');
+  assert.equal(env.DB.deadLetters.size, 0,
+    'the link is NOT dead-lettered — it is already ledgered');
+  const entry = env.DB.activity.find(a =>
+    a.event_type === 'dead_letter' && /enrichment/i.test(a.message));
+  assert.ok(entry, 'the enrichment failure is recorded for the audit trail');
+  assert.equal(entry.url, 'https://github.com/o/r');
+});

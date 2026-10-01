@@ -189,6 +189,32 @@ export function isGitHubUrl(url) {
   return /^https?:\/\/(?:www\.)?github\.com\/[a-zA-Z0-9\-_.]+\/[a-zA-Z0-9\-_.]+/.test(url);
 }
 
+// GitHub names must start and end with an alphanumeric — this also
+// rejects traversal payloads like '..' or '../etc' (same rule as the
+// desktop's links.py).
+const VALID_REPO_CHARS = /^[a-zA-Z0-9](?:[a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$/;
+
+/**
+ * Map a GitHub Pages URL to its canonical GitHub repo URL — the SAME
+ * mapping the desktop's links.py applies (v0.11.0 Phase 2, SPEC §4.2):
+ * https://owner.github.io/repo/anything -> https://github.com/owner/repo
+ * Returns '' when the URL is not an <owner>.github.io/<repo> page (a
+ * bare owner.github.io site is a real website and stays non_github).
+ *
+ * v0.26.0 parity fix: the ledger used to type pages URLs 'non_github'
+ * while the desktop routed them to the GitHub pipeline — an identity
+ * asymmetry between the two sides.
+ */
+export function mapGithubIoUrl(url) {
+  if (!url) return '';
+  const m = /^https?:\/\/([a-zA-Z0-9\-_.]+)\.github\.io\/([a-zA-Z0-9\-_.]+)/
+    .exec(url.trim());
+  if (!m) return '';
+  const [, owner, repo] = m;
+  if (!VALID_REPO_CHARS.test(owner) || !VALID_REPO_CHARS.test(repo)) return '';
+  return `https://github.com/${owner}/${repo}`;
+}
+
 /**
  * Extract all URLs from a text message.
  */

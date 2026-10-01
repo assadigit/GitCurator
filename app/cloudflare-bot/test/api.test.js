@@ -176,3 +176,25 @@ test('unknown paths 404 with the endpoint hint', async () => {
   const res = await worker.fetch(new FakeRequest("https://bot.example/nope", { body: null }), env, {});
   assert.equal(res.status, 404);
 });
+
+// ── v0.26.0 ──────────────────────────────────────────────────────────
+
+test('/api/pending: a transient dlq_exhausted link stays visible (no link left behind)', async () => {
+  const env = await pairedEnv();
+  // A ledgered link whose intake message later exhausted its retries —
+  // the DLQ drain recorded it as dlq_exhausted (audit trail). Only the
+  // POLICY reason (blocked_domain) hides a link from the desktop sync.
+  await env.DB.prepare(`INSERT INTO ever_seen_ledger`).bind(
+    'https://github.com/o/flaky', 'x', 'github', 'o', 'flaky',
+    '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 1, 30, 1, null
+  ).run();
+  await env.DB.prepare(`INSERT INTO dead_letters`).bind(
+    'https://github.com/o/flaky', 'x', 'dlq_exhausted',
+    '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 30
+  ).run();
+  const res = await worker.fetch(
+    signedRequest({ url: 'https://bot.example/api/pending' }), env, {});
+  const data = await res.json();
+  assert.equal(data.count, 1, 'the transiently-failed link is still pending');
+  assert.equal(data.pending[0].url_normalized, 'https://github.com/o/flaky');
+});
