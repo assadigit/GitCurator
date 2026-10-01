@@ -122,7 +122,7 @@ jobs:
           gitcurator/gui/main_window/hero.py
           gitcurator/gui/main_window/connection_tests.py
           gitcurator/gui/main_window/llamacpp.py
-          gitcurator/gui/main_window/phase6.py
+          gitcurator/gui/main_window/linking_tools.py
           gitcurator/gui/main_window/test_connection_modal.py
           gitcurator/gui/main_window/vaults_config.py
           gitcurator/gui/main_window/input_proxy.py

@@ -1,4 +1,7 @@
-"""MainWindow Phase6Mixin — methods moved verbatim from the MainWindow in gitcurator/gui/app.py (branch refactor/gui-app-split; see REFACTOR_PLAN.md at the repo root)."""
+"""MainWindow LinkingToolsMixin — the recall-hooks / link-suggestions tool
+launchers. (Was Phase6Mixin in gitcurator/gui/app.py, then
+main_window/phase6.py; renamed at v0.25.0 to say what it does. Bodies
+moved verbatim — see REFACTOR_PLAN.md at the repo root.)"""
 
 import sys as _sys
 import sys
@@ -43,8 +46,8 @@ _APP_DIR = APP_DIR
 
 from gitcurator.gui.processing_worker import TestWorker
 
-class Phase6Mixin:
-    """Phase6Mixin"""
+class LinkingToolsMixin:
+    """LinkingToolsMixin — launch the Phase-6 linking tools safely from the GUI."""
 
     # ------------------------------------------------------------------
     # v0.16.0 — Phase 6 (Linking): the recall-hook and link-suggestion
