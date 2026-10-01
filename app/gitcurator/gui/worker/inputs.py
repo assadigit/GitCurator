@@ -168,35 +168,26 @@ class WorkerInputsMixin:
         if not self.import_file or not os.path.exists(self.import_file):
             self.log_message.emit("Import file not found.", "error")
             return []
-        with open(self.import_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                urls.append(line)
+        # v0.29.0 — faithful batch imports (the owner's fidelity test):
+        # the file is parsed by core/links.parse_import_text — the SAME
+        # link grammar as every other intake — instead of treating each
+        # raw line as a URL. Markdown links, bullets, trailing
+        # descriptions, scheme-less addresses, http://, www., BOM'd
+        # files and duplicates are all handled; lines that contain no
+        # recognizable address are REPORTED (never silently dropped).
+        try:
+            text = _links.read_import_file(self.import_file)
+        except Exception as e:
+            self.log_message.emit(f"Could not read import file: {e}", "error")
+            return []
+        parsed = _links.parse_import_text(text)
+        github_urls = parsed['github_urls']
+        non_github_urls = parsed['website_urls']
 
-        # v23 — No Link Left Behind: split the imported URLs into GitHub
-        # and non-GitHub lists. Non-GitHub URLs are recorded in the inbox
-        # table so they are never silently dropped. The processing loop
-        # only sees GitHub URLs.
-        # v0.11.0 — Phase 2: github.io pages route to the GitHub pipeline
-        # too (mapped to their repo, SPEC §4.2) — same rule split_links()
-        # already applies on the Telegram paths.
-        github_urls = []
-        non_github_urls = []
-        for u in urls:
-            try:
-                cleaned = clean_url(u)
-            except Exception:
-                cleaned = u
-            mapped = _links.map_github_io_url(cleaned)
-            if cleaned.startswith("https://github.com/"):
-                github_urls.append(u)
-            elif mapped:
-                github_urls.append(mapped)
-            else:
-                non_github_urls.append(u)
-
+        # v23 — No Link Left Behind: non-GitHub URLs are recorded in the
+        # inbox table so they are never silently dropped. The processing
+        # loop only sees GitHub URLs. (v0.29.0: they now always carry a
+        # scheme, so the fetcher and THE LAW's domain check both work.)
         if non_github_urls:
             try:
                 self._create_inbox_notes(non_github_urls, source="Import")
@@ -205,8 +196,37 @@ class WorkerInputsMixin:
             # Store for the manifest intake in run()
             self._non_github_urls = non_github_urls
 
+        # Intake bookkeeping — feeds the run report's "N duplicate URL(s)
+        # removed during intake" line (Feature 7 counters).
+        try:
+            self._intake_duplicates = int(parsed['duplicates'])
+            self._raw_url_count = int(parsed['raw_count'])
+        except Exception:
+            pass
+
+        if parsed['duplicates']:
+            self.log_message.emit(
+                f"🔄 {parsed['duplicates']} duplicate address(es) in the "
+                f"file ignored ({parsed['raw_count']} total → "
+                f"{len(github_urls) + len(non_github_urls)} unique)",
+                "info")
+        if parsed['unparsed']:
+            self.log_message.emit(
+                f"⚠️ {len(parsed['unparsed'])} line(s) with no recognizable "
+                "address skipped:", "warning")
+            for line in parsed['unparsed'][:20]:
+                self.log_message.emit(f"     · {line[:100]}", "warning")
+            if len(parsed['unparsed']) > 20:
+                self.log_message.emit(
+                    f"     … and {len(parsed['unparsed']) - 20} more",
+                    "warning")
+
         self.log_message.emit(
-            f"📄 Loaded {len(github_urls)} GitHub URLs + {len(non_github_urls)} non-GitHub URLs from import file.",
-            "info"
-        )
+            f"📄 Loaded {len(github_urls)} GitHub URLs + "
+            f"{len(non_github_urls)} website URLs from import file.",
+            "info")
+        if not github_urls and not non_github_urls:
+            self.log_message.emit(
+                "The import file contained no addresses — only blank "
+                "lines and # comments were found.", "warning")
         return github_urls

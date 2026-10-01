@@ -1,3 +1,72 @@
+## [0.29.0] — Faithful batch imports: every address in a .txt/.md file is processed or accounted — 2026-10-01
+
+Owner ask (session): "test the ability of batch-processing of the app.
+for example give the app a .txt or .md file with one website address
+each, and see whether it does faitfully process them all or not. then
+if not, fix it. it must be robust and accurate and do not miss
+anything." The test found the intake was NOT faithful: on a realistic
+Markdown list (bullets, `[Name](url)` links, trailing notes, bare
+domains, `http://`/`www.` GitHub variants, a BOM, duplicates, junk
+lines) only ~11 of 29 addresses survived as notes; two repo links were
+lost entirely; one banned link leaked past THE LAW. Suite
+**871 → 900**, all green.
+
+**1. The one-address-per-line grammar (core/links.py).** Import parsing
+now lives in `links.parse_import_text` — the SAME link grammar as every
+other intake, instead of the import path's private "the whole line IS
+the URL" rule. Markdown links (`- [Coolors](https://coolors.co)`),
+bullets, trailing notes (`https://site.com — my description`) and even
+two addresses on one line are all read out correctly; a bare
+`coolors.co/palettes/af6f9f5`, `www.paletton.com`, `github.com/o/r` or
+`127.0.0.1:8901/site` gets a scheme; `#` comments and blanks stay
+skipped (the documented rule); a UTF-8 BOM (Windows Notepad) no longer
+glues itself onto the first URL (`read_import_file`: `utf-8-sig` first,
+latin-1 fallback — an odd encoding can never crash the batch). GitHub
+routing uses the real grammar: `http://github.com/o/r` and
+`www.github.com/o/r` now reach the **GitHub** pipeline as canonical
+`https://github.com/o/r` (previously they fell into the Websites
+pipeline, where THE LAW bans github.com — the repo link was LOST with
+no note anywhere). Duplicates are deduped and COUNTED; lines with no
+recognizable address are listed in the log by content — never silently
+dropped ("do not miss anything" is now a log line you can check).
+
+**2. THE LAW is scheme-proof.** A bare `twitter.com/PyBlog/status/456`
+line used to bypass the blocked-domain check entirely (`domain_of`
+returned an empty host for scheme-less URLs) — it was fetched, failed,
+and left a banned placeholder note in the vault, the exact violation
+the owner outlawed. `domain_of` is now scheme-tolerant, so the law's
+gate refuses banned domains with or without a scheme (regression test:
+a bare twitter link is skipped, never fetched, no note written).
+
+**3. The GitHub loop can no longer corrupt owner/repo.** A decorated
+line ("`https://github.com/encode/starlette extra path /blob/main/
+README.md`") used to parse the repo as `starlette extra path` → a
+bogus 404 → a `_missing` note for a real repo. The loop canonicalizes
+every URL through `extract_github_urls` (the single source of truth)
+before the owner/repo split — trailing text, deep paths, `http://`
+and `www.` variants all resolve to the same canonical repo.
+
+**4. E2E-verified.** The release was gated on a real end-to-end run of
+the actual CLI (`main.py --cli --import-file`) against a deterministic
+local web server + a stub OpenAI-compatible LLM: a 42-line `.md` file
+(21 unique addresses in every format above) → 13/13 website notes
+filed in the right taxonomy folders (including a REAL bare
+`example.com` fetch), 4 banned links refused with zero notes, 2
+duplicates and 2 junk lines reported, the Website Directory rebuilt
+with every site, manifest fully accounted; a second `.txt` re-import
+run processed the one new site, skipped the already-noted site with a
+reason, refused the banned link and reported the junk line — proving
+idempotent re-imports. The 4 GitHub URLs were correctly canonicalized
+by the new intake (the anonymous GitHub API rate limit of the test
+machine's shared IP blocked the live repo-metadata leg of the run; the
+loop's parsing is locked by unit tests instead). New
+`tests/test_importbatch.py` (29 cases) covers the grammar, the reader,
+the law's scheme-proofing, the intake counters and the owner/repo
+corruption regression; `--import-file`'s help and the GUI tooltip now
+describe the faithful format. Desktop-only release — the Worker stays
+at 0.28.0 (no deploy needed; `EXPECTED_WORKER_VERSION` unchanged).
+
+
 ## [0.28.0] — THE LAW release: banned domains can never enter the Websites vault + the 📚 Website Directory — 2026-10-01
 
 Owner ask (session): "despite the setting forbid x domains to leak into

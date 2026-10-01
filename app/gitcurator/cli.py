@@ -1349,7 +1349,10 @@ def build_parser():
     p.add_argument("--to-id", type=int, help="Telegram range mode: end message ID")
     p.add_argument("--offset-start", type=int, help="Telegram offset mode: start ID")
     p.add_argument("--count", type=int, help="Telegram offset mode: message count")
-    p.add_argument("--import-file", type=str, help="import GitHub URLs from a .txt file")
+    p.add_argument("--import-file", type=str,
+                   help="batch-import from a .txt/.md file, one address per "
+                        "line (GitHub repos AND websites; Markdown links, "
+                        "bullets and trailing notes are fine)")
     p.add_argument("--single-id", type=int, help="fetch a single Telegram message by ID")
     p.add_argument("--vault", type=str, help="override the vault path for this run")
     p.add_argument("--config", type=str, help="config file path (default: app/config.json)")

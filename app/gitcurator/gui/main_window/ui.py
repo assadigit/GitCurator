@@ -698,8 +698,11 @@ class UiMixin:
         self.import_file.setPlaceholderText(
             "Path to a .txt or .md file — one URL per line")
         self.import_file.setToolTip(
-            "A plain-text or Markdown file with one URL per line.\n"
-            "Lines starting with # are comments; blank lines are skipped.\n"
+            "A plain-text or Markdown file with one address per line.\n"
+            "Markdown links, bullets and trailing notes are fine — the\n"
+            "address is read out of them. Lines starting with # are\n"
+            "comments; blank lines are skipped; duplicates are ignored\n"
+            "(reported); lines with no address are listed in the log.\n"
             "GitHub repos go to the GitHub pipeline, every other website\n"
             "to the Websites pipeline — exactly like a fetched batch.")
         import_btn = QPushButton("📄 Select…")

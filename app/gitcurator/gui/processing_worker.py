@@ -786,6 +786,18 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
 
             try:
                 url = clean_url(url)
+                # v0.29.0 — canonicalize through the single link grammar
+                # (core/links) so http://, www. and decorated lines
+                # ("…/owner/repo — best repo ever", Markdown-link residue)
+                # all resolve to the same canonical repo URL instead of
+                # being skipped as "non-GitHub" (http/www variants) or —
+                # worse — corrupting the owner/repo parse below with
+                # trailing text (a bogus 404 + _missing note for a real
+                # repo). Zero-op for the canonical URLs every other
+                # intake produces.
+                _canon = _links.extract_github_urls(url)
+                if _canon:
+                    url = _canon[0]
                 if not url.startswith("https://github.com/"):
                     self.log_message.emit(f"Skipping non-GitHub URL: {url}", "warning")
                     # v23 — Phase 2: mark as skipped (defensive — should not

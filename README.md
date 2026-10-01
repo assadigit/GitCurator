@@ -158,8 +158,14 @@ rewritten**; your hand-edited placeholders survive automatic retries.
 - **Split context budget** — *Model max context window* (`llm_num_ctx`)
   plus *Output max tokens* (`llm_max_output_tokens`) — e.g. 160k total /
   32k output. Nothing is ever truncated silently on any backend.
-- **Input = the bot queue + Import txt file** (`.txt` or `.md`, one URL per
-  line) — the old ID-range/markers/single-message modes are gone.
+- **Input = the bot queue + Import txt file** (`.txt` or `.md`, one address
+  per line) — the old ID-range/markers/single-message modes are gone.
+  v0.29.0 made imports **faithful**: Markdown links, bullets and trailing
+  notes are read out for their address, bare domains (`coolors.co`,
+  `www.…`, `github.com/o/r`, `127.0.0.1:8901/x`) get a scheme, `http://`
+  and `www.` GitHub variants reach the GitHub pipeline, duplicates are
+  counted and reported, and lines with no recognizable address are listed
+  in the log — nothing is silently dropped.
 - **Every dialog themed** — cream light / plum night, AA contrast, one
   Lucide icon pack, always-visible theme toggle.
 

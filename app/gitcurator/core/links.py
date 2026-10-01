@@ -224,9 +224,20 @@ def normalize_url(url: str) -> str:
 
 
 def domain_of(url: str) -> str:
-    """Lowercased netloc of a URL ('' when unparseable)."""
+    """Lowercased netloc of a URL ('' when unparseable).
+
+    v0.29.0 — scheme-tolerant: a bare ``x.com/foo`` (an import-file
+    line with no scheme) parses as host ``x.com``, not ``''``. THE
+    LAW's blocked-domain check must never be bypassable by dropping
+    the scheme off a link.
+    """
     try:
-        return (urlparse(url or '').netloc or '').lower()
+        u = str(url or '').strip()
+        if not u:
+            return ''
+        if '://' not in u:
+            u = 'https://' + u
+        return (urlparse(u).netloc or '').lower()
     except Exception:
         return ''
 
@@ -511,3 +522,136 @@ def dedupe_urls(urls: List[str]) -> Tuple[List[str], int]:
         seen.add(key)
         unique.append(u)
     return unique, len(urls) - len(unique)
+
+
+# ---------------------------------------------------------------------------
+# v0.29.0 — Faithful batch imports (the owner's fidelity test: "give the
+# app a .txt or .md file with one website address each … it must be
+# robust and accurate and do not miss anything")
+# ---------------------------------------------------------------------------
+
+# A line that is ONE bare address with no scheme: a domain (or IPv4),
+# optional port, optional path/query/fragment. No spaces, no markdown —
+# those go through extract_all_links instead. The TLD must be ≥2 letters
+# so 'not a url at all' / 'just-text' never match.
+_BARE_ADDRESS_RE = re.compile(
+    r'^(?:'
+    r'[a-zA-Z0-9][a-zA-Z0-9\-.]*\.[a-zA-Z]{2,}'   # domain.tld(…)
+    r'|\d{1,3}(?:\.\d{1,3}){3}'                   # IPv4 literal
+    r')'
+    r'(?::\d+)?'                                   # optional port
+    r'(?:[/?#].*)?$'                               # optional path/query/#
+)
+
+# Markdown list decoration that may cling to the START of an address
+# line ('- ', '* ', '+ ', '1. ' …). extract_all_links already finds the
+# URL inside such lines; this is used only to keep the line-level
+# accounting (unparsed detection) honest.
+
+
+def read_import_file(path: str) -> str:
+    """Read an import file to text, never raising for encoding issues.
+
+    UTF-8 with BOM first (the Windows Notepad case — a leading ``\\ufeff``
+    used to glue itself onto the first URL and corrupt its scheme), then
+    a latin-1 fallback so an old .txt never crashes the batch.
+    """
+    with open(path, 'rb') as f:
+        raw = f.read()
+    try:
+        return raw.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return raw.decode('latin-1', errors='replace')
+
+
+def parse_import_text(text: str) -> dict:
+    """Parse a one-address-per-line import file (.txt or .md).
+
+    Every non-comment line yields its address(es), whatever decoration
+    they carry:
+
+    * ``https://example.com`` — plain (always worked)
+    * ``http://…`` / ``www.….com`` / bare ``example.com/path`` — any
+      scheme form
+    * ``- https://example.com`` — bullet lists
+    * ``[Name](https://example.com)`` — Markdown links
+    * ``https://example.com — a description`` — trailing text
+    * two addresses on one line — both are captured
+
+    Routing uses the SAME grammar as every other intake (split_links):
+    github.com repos (http/www tolerated) → canonical GitHub URLs;
+    ``owner.github.io/repo`` → the repo; everything else → websites.
+    Blocked-domain (THE LAW) filtering is NOT done here — the Websites
+    pipeline's gate stays the single enforcement point.
+
+    Returns a dict (all lists order-preserving, deduped):
+
+    ``github_urls``   canonical https://github.com/owner/repo list
+    ``website_urls``  scheme-ful non-GitHub list
+    ``unparsed``      the raw text of lines that yielded no address
+    ``duplicates``    how many addresses were dropped as repeats
+    ``raw_count``     total addresses seen before dedup
+    ``skipped_comment_lines``  blank/# lines (for the report)
+    """
+    github_urls: List[str] = []
+    website_urls: List[str] = []
+    unparsed: List[str] = []
+    duplicates = 0
+    raw_count = 0
+    skipped_comment_lines = 0
+    seen_github = set()
+    seen_website = set()
+
+    def _route(link: str) -> None:
+        nonlocal raw_count, duplicates
+        raw_count += 1
+        m = GITHUB_URL_PATTERN.match(link)
+        if m:
+            canonical = f"https://github.com/{m.group(1)}/{m.group(2)}"
+            if canonical in seen_github:
+                duplicates += 1
+                return
+            seen_github.add(canonical)
+            github_urls.append(canonical)
+            return
+        gh_io = map_github_io_url(link)
+        if gh_io:
+            if gh_io in seen_github:
+                duplicates += 1
+                return
+            seen_github.add(gh_io)
+            github_urls.append(gh_io)
+            return
+        key = normalize_website_url(link)
+        if key in seen_website:
+            duplicates += 1
+            return
+        seen_website.add(key)
+        website_urls.append(link)
+
+    for line in (text or '').splitlines():
+        line = line.strip().lstrip('\ufeff')
+        if not line or line.startswith('#'):
+            skipped_comment_lines += 1
+            continue
+        links = extract_all_links(line)
+        if not links:
+            # No http(s) link on the line. One bare address without a
+            # scheme (coolors.co, www.paletton.com, github.com/o/r,
+            # 127.0.0.1:8901/site) is still a valid import line.
+            if _BARE_ADDRESS_RE.match(line):
+                _route(clean_url(line))
+            else:
+                unparsed.append(line)
+            continue
+        for link in links:
+            _route(link)
+
+    return {
+        'github_urls': github_urls,
+        'website_urls': website_urls,
+        'unparsed': unparsed,
+        'duplicates': duplicates,
+        'raw_count': raw_count,
+        'skipped_comment_lines': skipped_comment_lines,
+    }
