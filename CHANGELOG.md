@@ -1,3 +1,47 @@
+## [0.27.0] — the practical-notes release: website notes that answer "can I use this?" — 2026-10-01
+
+Owner ask (session): looking at a real generated note ("Reverse UI" from
+reverseui.com): "how can we make it further? for example make the text
+more practical." Suite **837 → 847**, all green; the offline golden run
+30/30 unchanged (classification untouched).
+
+**1. Website notes are now decision-oriented (web-v2).** The v1 body
+described the product ("Core offerings" bullets that parroted the
+landing page — "Lifetime access", "Easy integration" — plus a
+"Standout feature" that restated the TL;DR, and printed
+"Login required: unknown" as if it were information). The new body
+answers the reader's questions instead:
+
+- **"What it does"** — 3–6 factual bullets, each checkable against the
+  page; marketing claims are explicitly banned with examples.
+- **"Best used for"** — unchanged heading (the recall/linking layer
+  regex-parses exactly this section — locked by a test), but the prompt
+  now demands the READER'S task, not a restatement of the product.
+- **"Practical details"** (new, only when something is actually known) —
+  the page's real price terms ("$60 one-time", not just "paid"),
+  sign-up requirement, license, framework, install method. Unknown
+  values are omitted, never printed as "unknown" (the frontmatter keeps
+  the searchable `pricing`/`login_required` enums).
+- **"Watch out"** (new, only when the page supports it) — up to two
+  honest caveats: login wall, no public pricing, build step required.
+- **"Similar tools"** — now always the closing section (the recall regex
+  needs a heading after "Best used for"; that invariant is tested).
+
+**2. Nothing else moved.** Classification (w01/w02) untouched — golden
+30/30 identical. Frontmatter shape unchanged (`schema_version` stays
+"1"); new notes simply carry `prompt_version: "web-v2"`. Old
+web-v1 notes are never rewritten (existing design: the prompt_version
+field exists precisely to tell formats apart). The offline golden
+runner's old-shape analyses still render (the builder falls back to
+`core_offerings`), and the deployed Worker stays at 0.26.0 — no worker
+change, no deploy needed, and `EXPECTED_WORKER_VERSION` stays 0.26.0 so
+Test Connection shows no false staleness warning.
+
+**Evidence.** 10 new tests (full render, unknown-omission, old-shape
+compat, recall integration on both a full and a minimal v2 note, the
+pricing-detail no-stutter guard, caps); 847/847 suite; golden 30/30 +
+0 invalid; SPEC §4.5 updated to match reality.
+
 ## [0.26.0] — the SWOT hardening pass: weaknesses found, fixed and locked by tests — 2026-10-01
 
 Owner ask (session): "do a SWOT analysis, and find threats and weaknesses of

@@ -144,15 +144,15 @@ Rules of the road:
 
 **Common frontmatter on every new machine note:** `source`, `aliases`, `tags`, `category`, `date_processed`, `managed_by`, `schema_version`, `prompt_version`. Websites add `subcategory`, `fetch_status`, `pricing`, `login_required`. `category_locked` is added only after a move.
 
-**Website note body** (every field written by the app):
+**Website note body** (every field written by the app; web-v2 since v0.27.0 — notes carry `prompt_version: web-v2` in frontmatter; existing notes are never rewritten):
 
 1. Name (title)
 2. One-line description (at most 25 words), shown as the TL;DR line
-3. Core offerings: 3 to 6 concrete bullets
-4. Standout feature: the one thing most worth knowing (may be empty)
-5. **Best used for**: one sentence starting "Use when you need to…", written around the problem, not the site's marketing. This is the **recall field**; the linking layer relies on it.
-6. Pricing and sign-up: `free|freemium|paid|unknown`, login `yes|no|unknown`
-7. Similar tools: only when clearly confident, otherwise empty
+3. What it does: 3 to 6 factual bullets, checkable against the page (replaces the v1 "Core offerings" + "Standout feature"; omitted when the model returns nothing)
+4. **Best used for**: one sentence starting "Use when you need to…", written around the READER'S task, not the site's marketing. This is the **recall field**; the linking layer relies on it. The section always renders (with a not-captured fallback line), and "Similar tools" always follows it — the recall regex needs a heading after this section.
+5. Practical details: only known facts — pricing (enum plus the page's actual terms, e.g. "$60 one-time"), sign-up requirement, license/framework/install facts. Omitted entirely when nothing is known; unknown values are never printed as "unknown" in the body (the frontmatter keeps the searchable enums).
+6. Watch out: up to 2 honest caveats supported by the page (login wall, no public pricing…). Omitted when empty.
+7. Similar tools: only when clearly confident, otherwise "—"
 8. Source link
 
 **GitHub notes:** same structure as today, with these changes. New notes no longer contain the three human placeholder sections ("My Ideas & Notes", "Social Signal (Manual)", "Journal"); that writing now lives in Manual Notes. New notes get the common frontmatter above. **Existing notes are not rewritten** except by Phase 6's single delimited "recall" block.

@@ -62,7 +62,14 @@ from gitcurator.core.website_state import (  # noqa: F401
 )
 
 # Bump when the website prompt set changes shape (SPEC Appendix A).
-WEBSITE_PROMPT_VERSION = "web-v1"
+# web-v2 (v0.27.0): decision-oriented body — "What it does" replaces the
+# marketing-prone "Core offerings"/"Standout feature" pair, unknown values
+# are omitted instead of printed as "unknown", and two new sections carry
+# the practical facts (price terms, license, framework, install) and honest
+# caveats. "Best used for" keeps its exact heading (recall/linking parses
+# it) and "Similar tools" stays the closing section (the recall regex
+# needs a heading after "Best used for").
+WEBSITE_PROMPT_VERSION = "web-v2"
 
 # ===========================================================================
 # CONFIGURATION (safe to edit)
@@ -96,23 +103,33 @@ def build_website_note(url: str, analysis: Dict, category: str,
     name = sanitize_short_summary(analysis.get('name') or '')[:120] \
         or "Untitled site"
     one_line = sanitize_short_summary(analysis.get('one_line') or '')
-    offerings = analysis.get('core_offerings') or []
-    if isinstance(offerings, str):
-        offerings = [offerings]
-    offering_lines = [sanitize_body_text(o, max_len=200) for o in offerings]
-    offering_lines = [o for o in offering_lines if o.strip()]
-    offerings_md = "\n".join(f"- {o}" for o in offering_lines[:6]) \
-        or "- (none listed)"
-    standout = sanitize_body_text(analysis.get('standout_feature') or '',
-                                  max_len=500)
+    # web-v2: "what_it_does" replaces "core_offerings" (old-shape dicts —
+    # the offline golden runner, any in-flight analyses — still render).
+    does = analysis.get('what_it_does') or analysis.get('core_offerings') or []
+    if isinstance(does, str):
+        does = [does]
+    does_lines = [sanitize_body_text(o, max_len=200) for o in does]
+    does_lines = [o for o in does_lines if o.strip()]
     best_used_for = sanitize_body_text(analysis.get('best_used_for') or '',
                                        max_len=400)
     pricing = str(analysis.get('pricing') or 'unknown').strip().lower()
     if pricing not in ('free', 'freemium', 'paid', 'unknown'):
         pricing = 'unknown'
+    pricing_detail = sanitize_body_text(analysis.get('pricing_detail') or '',
+                                        max_len=200)
     login_required = str(analysis.get('login_required') or 'unknown').strip().lower()
     if login_required not in ('yes', 'no', 'unknown'):
         login_required = 'unknown'
+    practical = analysis.get('practical_details') or []
+    if isinstance(practical, str):
+        practical = [practical]
+    practical_lines = [sanitize_body_text(p, max_len=200) for p in practical]
+    practical_lines = [p for p in practical_lines if p.strip()][:4]
+    watch = analysis.get('watch_out') or []
+    if isinstance(watch, str):
+        watch = [watch]
+    watch_lines = [sanitize_body_text(w, max_len=200) for w in watch]
+    watch_lines = [w for w in watch_lines if w.strip()][:2]
     similar = sanitize_tags(analysis.get('similar_tools') or [], max_items=5)
     note_tags = sanitize_tags(list(tags or []) + list(analysis.get('tags') or []),
                               max_items=8)
@@ -125,10 +142,42 @@ def build_website_note(url: str, analysis: Dict, category: str,
     tags_yaml = "tags: [" + ", ".join(note_tags) + "]" if note_tags \
         else "tags: []"
 
-    outstanding_md = standout or "(none identified)"
+    # --- body (web-v2: only what is known; no "unknown" filler lines) ---
+    # The recall/linking layer regex-parses "## Best used for" and needs a
+    # heading after it, so "Best used for" always renders (with the
+    # not-captured fallback line) and "Similar tools" always closes.
     best_used_line = best_used_for or \
         "Use when you need to… (not captured — see the source link)."
     similar_md = ", ".join(similar) if similar else "—"
+
+    detail_lines = []
+    if pricing_detail:
+        if (pricing in ('free', 'freemium', 'paid')
+                and not pricing_detail.lower().startswith(pricing)):
+            detail_lines.append(f"Pricing: {pricing} — {pricing_detail}")
+        else:
+            detail_lines.append(f"Pricing: {pricing_detail}")
+    elif pricing in ('free', 'freemium', 'paid'):
+        detail_lines.append(f"Pricing: {pricing}")
+    if login_required in ('yes', 'no'):
+        detail_lines.append(
+            "Sign-up required: yes" if login_required == 'yes'
+            else "Sign-up required: no")
+    detail_lines.extend(practical_lines)
+
+    sections = []
+    if does_lines:
+        sections.append("## What it does\n" +
+                        "\n".join(f"- {o}" for o in does_lines))
+    sections.append("## Best used for\n" + best_used_line)
+    if detail_lines:
+        sections.append("## Practical details\n" +
+                        "\n".join(f"- {d}" for d in detail_lines))
+    if watch_lines:
+        sections.append("## Watch out\n" +
+                        "\n".join(f"- {w}" for w in watch_lines))
+    sections.append("## Similar tools\n" + similar_md)
+    body_md = "\n\n".join(sections)
 
     return f"""---
 source: {url_yaml}
@@ -151,21 +200,7 @@ prompt_version: "{WEBSITE_PROMPT_VERSION}"
 
 > **TL;DR:** {one_line or '—'}
 
-## Core offerings
-{offerings_md}
-
-## Standout feature
-{outstanding_md}
-
-## Best used for
-{best_used_line}
-
-## Pricing & sign-up
-- Pricing: {pricing}
-- Login required: {login_required}
-
-## Similar tools
-{similar_md}
+{body_md}
 
 ---
 *Source: [{url}]({url})*

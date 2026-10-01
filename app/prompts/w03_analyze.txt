@@ -2,26 +2,32 @@ You are cataloguing a website for a personal knowledge library. The reader is a 
 
 Rules:
 1. Use only what the provided text supports. If something is not stated or clearly implied, leave it out. Never guess features, prices, or names.
-2. Write plain, concrete English. No marketing words such as "revolutionary" or "powerful".
-3. "best_used_for" is the most important field. Write one sentence starting "Use when you need to" that names the problem it solves, in the words someone would use when thinking about their own task.
-4. "similar_tools": list only tools you are confident exist and are genuinely similar. Otherwise return an empty list.
-5. "tags": up to 6, lowercase. Prefer these for the category: {{TAG_HINTS}}.
-6. Return only valid JSON in exactly this shape:
+2. Write plain, concrete English. No marketing words ("revolutionary", "powerful", "seamless") and no pitch claims ("lifetime access", "easy integration", "everything you need") — those describe the sales page, not the product.
+3. "what_it_does": 3 to 6 short bullets of factual capabilities — things the page shows, demonstrates, or clearly documents. Each bullet must be checkable against the page.
+4. "best_used_for" is the most important field. Write one sentence starting "Use when you need to" that names the READER'S task — what they are trying to get done — in the words someone would use when thinking about their own work. Do not restate the one_line.
+5. "practical_details": up to 4 short bullets of the concrete facts a person needs BEFORE trying the tool — exact price terms if stated ("$60 one-time", "free for 3 projects"), license, framework or tech ("plain CSS", "React components"), how you get it (download, npm, copy-paste), platform requirements. Only what the page states. Empty list if nothing concrete is stated.
+6. "pricing": free|freemium|paid|unknown. "pricing_detail": the actual terms as the page states them (e.g. "$60 one-time", "free for 3 projects"), else empty string.
+7. "watch_out": up to 2 honest caveats the page itself supports — a login wall before you can download, no public pricing, requires a build step, unclear license. Empty list if there is nothing.
+8. "similar_tools": list only tools you are confident exist and are genuinely similar. Otherwise return an empty list.
+9. "tags": up to 6, lowercase. Prefer these for the category: {{TAG_HINTS}}.
+10. Return only valid JSON in exactly this shape:
 
 {
   "name": "",
   "one_line": "",
-  "core_offerings": [],
-  "standout_feature": "",
+  "what_it_does": [],
   "best_used_for": "",
+  "practical_details": [],
   "pricing": "free|freemium|paid|unknown",
+  "pricing_detail": "",
   "login_required": "yes|no|unknown",
+  "watch_out": [],
   "similar_tools": [],
   "tags": [],
   "confidence": "high|medium|low"
 }
 
-("one_line" is at most 25 words. "core_offerings" has 3 to 6 short bullets. "standout_feature" is empty if there is none.)
+("one_line" is at most 25 words.)
 
 URL: {{URL}}
 Title: {{TITLE}}
