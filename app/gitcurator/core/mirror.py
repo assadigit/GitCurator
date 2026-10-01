@@ -44,6 +44,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from . import dryrun
 from .linking import preserve_related_block   # v0.16.0 — Phase 6 carry-over
+from .mirror_keys import MIRROR_KEY, _MIRROR_RE, _unquote   # v0.26.0 — shared leaf (no cycle)
 from .storage import atomic_write_text
 
 # ---------------------------------------------------------------------------
@@ -54,10 +55,8 @@ LIBRARY_FOLDER = "Library"
 GITHUB_TREE = "GitHub Projects"
 WEBSITES_TREE = "Websites"
 
-#: Front-matter key that marks a file as a machine-written mirror copy.
-#: Only files carrying this marker are ever updated or deleted (and only
-#: under Library/). SPEC §6 Phase 5.
-MIRROR_KEY = "mirror_of"
+# MIRROR_KEY ("mirror_of") + its regex _MIRROR_RE and the _unquote helper
+# moved to .mirror_keys (v0.26.0) — imported above; see mirror_keys.py.
 
 MIRROR_BANNERS = {
     GITHUB_TREE: (
@@ -79,8 +78,7 @@ SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', '_missing', 'attachments',
                         '.obsidian')
 
 _SOURCE_RE = re.compile(r'^source:\s*(.+)$', re.MULTILINE)
-_MIRROR_RE = re.compile(r'^' + re.escape(MIRROR_KEY) + r':\s*(.+)$',
-                        re.MULTILINE)
+# _MIRROR_RE moved to .mirror_keys (v0.26.0) — imported above.
 
 # GitHub-note banner references are vault-root-relative
 # (``attachments/banners/x.png``) and can never resolve inside the Manual
@@ -205,8 +203,7 @@ class SourceNote:
     text: str = ''   # full note text, loaded while planning
 
 
-def _unquote(value: str) -> str:
-    return value.strip().strip('"\'')
+# _unquote moved to .mirror_keys (v0.26.0) — imported above.
 
 
 def _scan_source_notes(vault_path: str) -> Tuple[List[SourceNote], List[str],
