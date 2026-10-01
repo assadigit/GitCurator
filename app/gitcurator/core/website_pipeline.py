@@ -333,6 +333,22 @@ class WebsitePipeline:
             # run / tests). Purge queued retries + _review placeholders
             # ONCE so previously-queued blocked links stop coming back.
             self._enforce_blocked_domains()
+            # v0.28.0 — THE LAW, disk edition: any app-owned note whose
+            # source is on a banned domain (the legacy x_com_i_status_*
+            # _review pile, notes written by an older app, a since-banned
+            # domain) leaves the library for .trash/banned-domains. Runs
+            # on every batch; idempotent (the first run cleans history,
+            # later runs are no-ops).
+            if self.vault_path and os.path.isdir(self.vault_path):
+                try:
+                    from gitcurator.core import \
+                        website_directory as _webdir
+                    _webdir.sweep_banned_notes(
+                        self.vault_path, self.blocked_domains,
+                        log=self.log)
+                except Exception as e:
+                    self.log(f"⚠️ Banned-domain sweep skipped: {e}",
+                             "warning")
         # Fetch politeness knobs are config-overridable (tests use small
         # timeouts; the owner can raise them for slow connections).
         self.fetch_timeout_s = float(

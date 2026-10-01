@@ -280,16 +280,23 @@ warning) — llama-server speaks the protocol natively.
 python gitcurator/tools/run_golden_websites.py --live --backend llamacpp
 ```
 
-### The intake truth (v0.20.0 — blocked domains, missing repos, vault separation)
+### The intake truth (v0.20.0 — blocked domains, missing repos, vault separation; v0.28.0 — the law)
 
-Three owner-directed fixes after the first proxied batch:
+Three owner-directed fixes after the first proxied batch, plus the law:
 
-- **🚫 Blocked domains** — Settings → 📁 Vault → "Blocked domains"
-  (default `x.com, twitter.com, t.co`). Links on these domains are
-  recorded as rows in the `_inbox` platform tables ONLY — never fetched,
-  never turned into notes, never retried; previously-queued ones are
-  purged and dismissed automatically; the bot-queue view counts them in
-  their own 🚫 bucket instead of "pending". Empty field = allow all.
+- **🚫 Banned domains — THE LAW (v0.28.0)** — the owner's decree
+  (2026-10-01): x/Twitter, the whole GitHub group (github.com, gists,
+  `*.github.io`, githubusercontent.com), HuggingFace, Instagram,
+  Facebook and LinkedIn can NEVER appear in the Websites vault
+  (`links.LAW_BLOCKED_DOMAINS` — a hard floor; Settings → 📁 Vault can
+  only ADD domains). Links on these domains are recorded as rows in the
+  `_inbox` platform tables ONLY — never fetched, never turned into
+  notes, never retried; previously-queued ones are purged and dismissed
+  automatically; the bot-queue view counts them in their own 🚫 bucket
+  instead of "pending"; and every batch SWEEPS the vault — any legacy
+  app-written note for a banned domain (the `x_com_i_status_*` review
+  pile) is moved to `.trash/banned-domains` (hidden, recoverable,
+  never backed up). Hand-written notes are never touched.
 - **🕳️ Missing-repo notes** — a 404 GitHub repo now gets a placeholder
   note in `<github vault>/_missing/` immediately (plus a batch-start
   backfill for repos that struck out in earlier versions), so those

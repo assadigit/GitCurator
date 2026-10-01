@@ -42,9 +42,39 @@ export function normalizeUrl(rawUrl) {
 // v0.22.0 — Website links (parity with desktop links.py)
 // ========================================
 
-// The owner's never-fetch policy list (v0.20.0 desktop parity).
-// x-family links are recorded but never fetched/processed.
-export const DEFAULT_BLOCKED_DOMAINS = ['x.com', 'twitter.com', 't.co'];
+// v0.28.0 — THE LAW (the owner's words): "EVERY X And GITHUB domain (all
+// of its group) must be banned from showing on websites directory …
+// This 3 are forbiddan: Hugginface, Github, Twitter (X), Instagram,
+// Facebook, Linkedin." Same list as the desktop's links.py
+// LAW_BLOCKED_DOMAINS. Collection-side effect: a NON-GitHub link on one
+// of these domains is dead-lettered (reason 'blocked_domain') and never
+// reaches the desktop as a pending website. GitHub REPO links are typed
+// 'github' before this check ever runs (queue-consumer), so the github
+// entries here only catch non-repo github.com paths — exactly the law.
+export const DEFAULT_BLOCKED_DOMAINS = [
+  // X / Twitter (the v0.20.0 policy, kept)
+  'x.com', 'twitter.com', 't.co',
+  // GitHub — the whole group
+  'github.com', 'gist.github.com', 'github.io', 'githubusercontent.com',
+  // HuggingFace
+  'huggingface.co', 'hf.co',
+  // Instagram
+  'instagram.com', 'instagr.am',
+  // Facebook
+  'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
+  // LinkedIn
+  'linkedin.com', 'lnkd.in',
+];
+
+/**
+ * The effective blocked list: the LAW floor plus any BLOCKED_DOMAINS env
+ * extras. The env var can only ADD domains, never remove the law
+ * (v0.28.0 law semantics — unset or empty means "just the law").
+ */
+export function blockedDomainsFromEnv(envValue) {
+  const extras = domainsFromEnv(envValue, []);
+  return [...new Set([...DEFAULT_BLOCKED_DOMAINS, ...extras])];
+}
 
 // Hosts that belong to THIS deployment — the bot's own worker.
 // The bot's own auth links (.../auth/?token=...) are never stored

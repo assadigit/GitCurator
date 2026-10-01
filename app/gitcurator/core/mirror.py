@@ -75,7 +75,7 @@ MIRROR_BANNERS = {
 # walked path.) v0.20.0: _missing placeholders are NOT library notes —
 # unlike VaultIndex, which DOES index them (they are the 404 dedupe key).
 SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', '_missing', 'attachments',
-                        '.obsidian')
+                        '.obsidian', '.trash')
 
 _SOURCE_RE = re.compile(r'^source:\s*(.+)$', re.MULTILINE)
 # _MIRROR_RE moved to .mirror_keys (v0.26.0) — imported above.

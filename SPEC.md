@@ -99,8 +99,9 @@ One Telegram bot (the existing one) receives everything; there are no commands o
 
 - `github.com` repo links go to the GitHub pipeline.
 - `owner.github.io/repo` is mapped to `github.com/owner/repo` and goes to the GitHub pipeline.
-- Gists (`gist.github.com`) and every other link go to the Website pipeline; gists get the tag `#snippet`.
+- ~~Gists (`gist.github.com`) and every other link go to the Website pipeline; gists get the tag `#snippet`.~~ **v0.28.0 — superseded by the domain law (the owner, 2026-10-01):** the whole GitHub group (github.com, gist.github.com, `*.github.io`, githubusercontent.com) plus x.com / twitter.com / t.co, huggingface.co / hf.co, instagram.com, facebook.com and linkedin.com are BANNED from the Websites vault (`links.LAW_BLOCKED_DOMAINS` — a floor the config can only add to). Gists and bare Pages sites are refused at every Websites-pipeline entry point and dead-lettered at collection (`blocked_domain`); the `_inbox` tables / D1 ledger rows are the record. Every batch also sweeps the vault for legacy banned-domain notes (moved to `.trash/banned-domains`).
 - Telegram only confirms receipt (as it does today for GitHub links). Linking is silent.
+- After every websites batch, the 📚 Website Directory (`000 📚 Website Directory.md` at the vault root) is regenerated: all real notes grouped Category → Subcategory in taxonomy order, one clickable line each (wiki-link + TL;DR + pricing + ↗ site link).
 
 ### 4.3 Website pipeline (per link)
 

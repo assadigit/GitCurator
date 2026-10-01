@@ -94,11 +94,13 @@ the mirror tool yourself.
   before are re-armed and retried automatically (`🔁 Web proxy active
   — re-armed N queued retry(ies)`). Ollama / llama.cpp traffic on
   127.0.0.1 is NEVER proxied.
-- **X/Twitter links are never fetched** (they are already recorded in
-  the `_inbox/x_twitter_links.md` table): Settings → 📁 Vault →
-  "Blocked domains" (default x.com, twitter.com, t.co). The bot-queue
-  view shows them in their own 🚫 bucket; queued ones are purged
-  automatically.
+- **X/Twitter (and GitHub/HuggingFace/Instagram/Facebook/LinkedIn)
+  links are never fetched — THE LAW (v0.28.0)**: they are already
+  recorded in the `_inbox` platform tables. The law cannot be turned
+  off — Settings → 📁 Vault → "Blocked domains" only ADDS domains.
+  The bot-queue view shows them in their own 🚫 bucket; queued ones are
+  purged automatically; old notes for them are swept to
+  `.trash/banned-domains` on the next run.
 - **404 GitHub repos stop counting as pending**: they get a placeholder
   note in `_missing/` (a batch also backfills past 404s
   automatically). To re-check a repo: delete its note + reset it in

@@ -743,14 +743,22 @@ class TestBackfillTool(unittest.TestCase):
         self.assertIn('3 website link(s)', text)          # incl. the gist
         self.assertIn('2 GitHub-pipeline link(s) excluded', text)
         self.assertIn('1 duplicate(s) removed', text)
+        # v0.28.0 — THE LAW: the gist (GitHub group) is excluded at the
+        # CSV layer, counted as banned, never fetched, never noted.
+        self.assertIn('1 banned-domain link(s) excluded (the law)', text)
         notes = self._vault_notes()
-        self.assertEqual(len(notes), 3)                   # tool+page+gist
-        # the gist carries the #snippet tag (SPEC §4.2)
-        gist = [n for n in notes if 'gist' in open(
-            n, encoding='utf-8').read()][:1]
-        self.assertTrue(gist)
-        self.assertIn('snippet', open(gist[0], encoding='utf-8').read())
-        # checkpoint: everything handled, resumable
+        # tool + page + the Website Directory (v0.28.0 — no gist note!)
+        self.assertEqual(len(notes), 3)
+        self.assertFalse(any('gist' in open(n, encoding='utf-8').read()
+                              for n in notes))
+        directory = os.path.join(self.vault, '000 📚 Website Directory.md')
+        self.assertTrue(os.path.exists(directory))
+        dir_text = open(directory, encoding='utf-8').read()
+        # both sites are listed with their live links (the fake LLM names
+        # them all "Test Site", so assert by source URL)
+        self.assertIn('[↗](https://example.com/tool)', dir_text)
+        self.assertIn('[↗](https://another.example/page)', dir_text)
+        # checkpoint: everything handled, resumable (the banned gist too)
         st = bw.BackfillState(os.path.join(self.tmp, 'cache.db'))
         counts = st.counts()
         st.close()
@@ -784,21 +792,27 @@ class TestBackfillTool(unittest.TestCase):
                       fetch_fn=_InterruptingFetch(),
                       sleep_fn=lambda s: None, progress=out.append)
         self.assertEqual(code, 130)
-        self.assertEqual(len(self._vault_notes()), 1)
+        # the first site note + the freshly rebuilt directory (v0.28.0)
+        self.assertEqual(len(self._vault_notes()), 2)
 
         code2, out2 = self._run()
         self.assertEqual(code2, 0)
-        self.assertIn('2 processed', "\n".join(out2))
+        # only the interrupted page remains — the gist is checkpointed
+        # as banned (never retried), the tool as done
+        self.assertIn('1 processed', "\n".join(out2))
+        # both sites + the directory
         self.assertEqual(len(self._vault_notes()), 3)
 
     def test_limit_one_per_batch(self):
         code, out = self._run(limit=1)
         self.assertEqual(code, 0)
         self.assertIn('1 processed', "\n".join(out))
-        self.assertEqual(len(self._vault_notes()), 1)
+        # 1 site note + the directory (v0.28.0)
+        self.assertEqual(len(self._vault_notes()), 2)
         code2, out2 = self._run(limit=1)
         self.assertIn('1 processed', "\n".join(out2))
-        self.assertEqual(len(self._vault_notes()), 2)
+        # 2 site notes + the directory
+        self.assertEqual(len(self._vault_notes()), 3)
 
     def test_dry_run_records_nothing(self):
         code, out = self._run(dry_run=True)

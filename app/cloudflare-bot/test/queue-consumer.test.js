@@ -190,15 +190,20 @@ test('intake: owner.github.io/<repo> maps to the canonical GitHub URL (parity wi
   assert.equal(env.DB.ledger.size, 1);
 });
 
-test('intake: a bare owner.github.io site stays a website', async () => {
+test('intake (v0.28.0 THE LAW): a bare owner.github.io site is dead-lettered, not a website', async () => {
+  // The owner's law bans the whole GitHub group from the Websites
+  // directory — a bare Pages site never becomes a pending website; the
+  // dead_letters row (reason 'blocked_domain') is the record.
   const env = makeEnv();
   await handleQueue({ messages: [message({
     type: 'urls', urls: ['https://owner.github.io/'],
     chat_id: 1, user_id: 12345, message_id: 21, received_at: '2026-10-01T00:00:00Z'
   })], queue: 'curator-ingest' }, env);
   const row = env.DB.ledger.get('https://owner.github.io/');
-  assert.ok(row);
-  assert.equal(row.url_type, 'non_github');
+  assert.equal(row, undefined, 'no ledger row — never a pending website');
+  const dead = env.DB.deadLetters.get('https://owner.github.io/');
+  assert.ok(dead, 'dead-lettered instead');
+  assert.equal(dead.reason, 'blocked_domain');
 });
 
 test('intake: the pages form and the repo form of one link dedupe to a single row', async () => {

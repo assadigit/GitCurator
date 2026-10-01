@@ -132,10 +132,18 @@ CONFIG_EXAMPLE = {
         # fix: x.com / t.co / youtu.be are connection-refused direct).
         "use_for_web": True
     },
-    # v0.20.0 — domains the Websites pipeline NEVER fetches (they are
-    # already recorded as rows in the _inbox platform tables). Settings →
-    # 📁 Vault → "Blocked domains"; an empty list = allow all.
-    "web_blocked_domains": ["x.com", "twitter.com", "t.co"],
+    # v0.28.0 — THE LAW (owner, 2026-10-01): x/twitter, the GitHub group,
+    # HuggingFace, Instagram, Facebook and LinkedIn domains are ALWAYS
+    # banned from the Websites vault (links.core.LAW_BLOCKED_DOMAINS) —
+    # never fetched, never noted, never retried; legacy notes are swept
+    # to .trash/banned-domains on the next run. This setting can only
+    # ADD domains on top of the law; an empty value = just the law.
+    "web_blocked_domains": ["x.com", "twitter.com", "t.co",
+                            "github.com", "gist.github.com", "github.io",
+                            "githubusercontent.com", "huggingface.co",
+                            "hf.co", "instagram.com", "instagr.am",
+                            "facebook.com", "fb.com", "fb.me", "fb.watch",
+                            "linkedin.com", "lnkd.in"],
     # v0.21.0 — hosts that belong to THIS deployment (the Telegram bot's
     # own worker): its auth links (…/auth/?token=…) are never fetched and
     # never noted; the _inbox row (secret query values scrubbed) is the
@@ -253,7 +261,7 @@ CONFIG_EXAMPLE = {
 # compares against it and warns when the deployed Worker is older, so a
 # stale bot is detectable from the app. Keep in lockstep with
 # app/cloudflare-bot/src/version.js (and its package.json) at release time.
-EXPECTED_WORKER_VERSION = "0.26.0"
+EXPECTED_WORKER_VERSION = "0.28.0"
 
 CATEGORY_FOLDERS = {
     "Agents": "AI-Domain/Agents",

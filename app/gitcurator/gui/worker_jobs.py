@@ -89,7 +89,7 @@ def _telegram_test_job(api_id, api_hash, phone, proxy, log_signal, code_callback
     }
     return _run_telegram_worker(config, log_signal, code_callback=code_callback)
 
-def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None, self_domains=None, website_vault_path=None, websites_pipeline_on=False):
+def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, code_callback=None, mark_read=False, min_id=0, vault_path=None, blocked_domains=None, self_domains=None, website_vault_path=None, websites_pipeline_on=False, website_blocked_domains=None):
     """Fetch unread GitHub URLs from the user's dedicated bot chat.
     Uses the user's Telethon session (through proxy) to read messages sent
     TO the bot. Resolves the bot by username (no Bot API call needed —
@@ -116,6 +116,16 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     v0.21.0 — ``self_domains`` does the same for the app's OWN hosts
     (the bot's auth links): their own bucket (``self_count``), never
     pending, never fetched.
+
+    v0.28.0 — THE LAW: ``blocked_domains`` is now the PLATFORM half of
+    the law (x/twitter, HuggingFace, Instagram, Facebook, LinkedIn —
+    the GitHub group EXCLUDED, because this filter also sees the repo
+    links that must keep flowing to the GitHub pipeline).
+    ``website_blocked_domains`` (default: same as ``blocked_domains``)
+    is the FULL law used for the non-GitHub website links below — gists
+    and bare *.github.io sites are banned from the Websites vault too.
+    Both come from links.platform_domains_from_config / .blocked_
+    domains_from_config.
 
     v0.24.1 — Fix (websites never sync): ``website_vault_path`` +
     ``websites_pipeline_on`` classify the NON-GitHub links against the
@@ -158,6 +168,10 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 cache.close()
             except Exception:
                 decommissioned_urls = set()
+            # v0.28.0 — the repo filter uses the PLATFORM list only
+            # (links.platform_domains_from_config): a github.com repo
+            # link must NEVER be blanket-banned here, whatever the law
+            # says about the Websites vault.
             pending, in_vault, decomm, blocked, selfc = [], 0, 0, 0, 0
             for url in result.get('urls', []):
                 norm = normalize_url(url)
@@ -222,6 +236,13 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             result['pending_website_urls'] = list(non_github)
         elif non_github:
             try:
+                # v0.28.0 — the websites loop uses the FULL law (gists,
+                # bare *.github.io pages and raw.githubusercontent hosts
+                # are banned from the Websites vault like every other
+                # law domain — they count as blocked here, and the
+                # pipeline gate skips them again on arrival).
+                web_block = website_blocked_domains \
+                    if website_blocked_domains is not None else blocked_domains
                 wvi = VaultIndex(
                     website_vault_path,
                     normalizer=_links.normalize_website_url)
@@ -238,8 +259,8 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 web_blocked, web_self = 0, 0
                 for url in non_github:
                     canonical = _links.normalize_website_url(url)
-                    if blocked_domains and _links.domain_is_blocked(
-                            url, blocked_domains):
+                    if web_block and _links.domain_is_blocked(
+                            url, web_block):
                         web_blocked += 1
                     elif self_domains and _links.domain_is_self(
                             url, self_domains):

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeUrl, normalizeWebsiteUrl, normalizeUrlTyped, isGitHubUrl,
   parseGitHubUrl, scrubUrlToken, domainMatches, domainsFromEnv, extractUrls,
-  mapGithubIoUrl,
+  mapGithubIoUrl, blockedDomainsFromEnv,
   DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS
 } from '../src/utils.js';
 
@@ -39,10 +39,51 @@ test('routing: github.com repos are github; gists and everything else are not', 
 });
 
 test('blocked-domain policy matches the desktop default (x-family)', () => {
-  assert.deepEqual(DEFAULT_BLOCKED_DOMAINS, ['x.com', 'twitter.com', 't.co']);
   assert.ok(domainMatches('https://x.com/anything', DEFAULT_BLOCKED_DOMAINS));
   assert.ok(domainMatches('https://evil.x.com/path', ['x.com'])); // subdomain
   assert.ok(!domainMatches('https://x.com.example.org/', ['x.com'])); // suffix trap
+});
+
+// ── v0.28.0 — THE LAW ───────────────────────────────────────────────
+
+test('THE LAW: every x/github-group/hf/ig/fb/li domain is in the default ban list', () => {
+  const law = ['x.com', 'twitter.com', 't.co',
+    'github.com', 'gist.github.com', 'github.io', 'githubusercontent.com',
+    'huggingface.co', 'hf.co',
+    'instagram.com', 'instagr.am',
+    'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
+    'linkedin.com', 'lnkd.in'];
+  assert.deepEqual(DEFAULT_BLOCKED_DOMAINS, law);
+  for (const d of law) {
+    assert.ok(domainMatches(`https://${d}/x`, DEFAULT_BLOCKED_DOMAINS), d);
+    assert.ok(domainMatches(`https://www.${d}/x`, DEFAULT_BLOCKED_DOMAINS), d);
+  }
+});
+
+test('THE LAW: repo links still flow (typing happens before the block check)', () => {
+  // The queue-consumer checks `!github && domainMatches(...)`, so a
+  // github.com REPO url is never blocked at collection — the GitHub
+  // pipeline keeps working. Only non-repo github.com paths would fall
+  // through to the law.
+  assert.ok(isGitHubUrl('https://github.com/owner/repo'));
+  assert.ok(!isGitHubUrl('https://github.com/features'));
+  assert.ok(!isGitHubUrl('https://gist.github.com/abc'));
+  assert.ok(domainMatches('https://gist.github.com/abc', DEFAULT_BLOCKED_DOMAINS));
+  assert.ok(domainMatches('https://owner.github.io/', DEFAULT_BLOCKED_DOMAINS));
+  assert.ok(domainMatches('https://raw.githubusercontent.com/o/r/main/f',
+    DEFAULT_BLOCKED_DOMAINS));
+  assert.ok(!domainMatches('https://github.com/owner/repo', []));
+});
+
+test('blockedDomainsFromEnv: the law is the floor, env can only add', () => {
+  const law = DEFAULT_BLOCKED_DOMAINS;
+  assert.deepEqual(blockedDomainsFromEnv(undefined), law);
+  assert.deepEqual(blockedDomainsFromEnv(''), law); // no more opt-out
+  assert.deepEqual(blockedDomainsFromEnv('x.com,reddit.com'),
+    [...law, 'reddit.com']);
+  assert.ok(blockedDomainsFromEnv('reddit.com').includes('linkedin.com'));
+  // removal attempts are ignored — the law cannot be edited away
+  assert.ok(blockedDomainsFromEnv('linkedin.com').includes('x.com'));
 });
 
 test('domainsFromEnv: unset -> defaults, empty -> opt-out, values parsed', () => {

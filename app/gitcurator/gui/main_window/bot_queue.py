@@ -189,7 +189,13 @@ class BotQueueMixin:
             return _bot_queue_job(aid, ahash, ph, px, bu, worker.log_message,
                                   worker.request_code,
                                   vault_path=(_vault_for_filter or None),
-                                  blocked_domains=_links.blocked_domains_from_config(self.config),
+                                  # v0.28.0 — THE LAW, split in two: the
+                                  # repo filter gets the PLATFORM half
+                                  # (github.com repo links must keep
+                                  # flowing to the GitHub pipeline), the
+                                  # website links get the FULL law.
+                                  blocked_domains=_links.platform_domains_from_config(self.config),
+                                  website_blocked_domains=_links.blocked_domains_from_config(self.config),
                                   self_domains=_links.self_domains_from_config(self.config),
                                   # v0.24.1 — Fix (websites never sync): hand
                                   # the WEBSITES vault + pipeline switch to the
@@ -249,8 +255,11 @@ class BotQueueMixin:
                     pending_urls = []
                     # v0.20.0 — the legacy GUI-side filter applies the
                     # same blocked-domain bucket as the worker-side one
-                    # (v0.21.0: + the self-domain bucket).
-                    _blocked_list = _links.blocked_domains_from_config(self.config)
+                    # (v0.21.0: + the self-domain bucket). v0.28.0 —
+                    # these are the REPO links, so the list is the law's
+                    # PLATFORM half (github.com repos are never banned
+                    # here; the Websites links below use the full law).
+                    _blocked_list = _links.platform_domains_from_config(self.config)
                     _self_list = _links.self_domains_from_config(self.config)
                     vault_path = self.vault_combo.currentText()
                     if vault_path and os.path.isdir(vault_path):

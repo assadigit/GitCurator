@@ -867,12 +867,17 @@ class TestPipeline(_PipeCase):
         self.assertIn('Pipeline error: RuntimeError', note)
         self.assertIn('LLM connection refused', note)
 
-    def test_gist_gets_snippet_tag(self):
+    def test_gist_is_law_blocked_not_noted(self):
+        """v0.28.0 — THE LAW settles the old SPEC §4.2 judgment call: the
+        GitHub group (gists included) is banned from the Websites vault.
+        A gist link is refused — never fetched, never noted (the _inbox
+        row / D1 ledger row is the record). The old behavior (a note
+        with the #snippet tag) is gone by owner decree."""
         pipe = self.make_pipeline(_FakeLLM())
         r = pipe.process_link('https://gist.github.com/o/abc123')
-        self.assertEqual(r['outcome'], 'processed')
-        note = open(r['note_path'], encoding='utf-8').read()
-        self.assertIn('snippet', note)
+        self.assertEqual(r['outcome'], 'skipped')
+        self.assertIn('blocked', r['error'])
+        self.assertFalse(r.get('note_path'))
 
     def test_hostile_llm_output_is_sanitized(self):
         hostile = {
@@ -1061,9 +1066,18 @@ class TestWorkerWebsites(unittest.TestCase):
             notes = [os.path.join(root, f)
                      for root, dirs, files in os.walk(web_vault)
                      for f in files if f.endswith('.md')]
-            self.assertEqual(len(notes), 1, notes)
-            note = open(notes[0], encoding='utf-8').read()
+            # v0.28.0 — the batch ALSO writes the Website Directory
+            # (the consolidated categorized index) at the vault root.
+            self.assertEqual(len(notes), 2, notes)
+            site = [n for n in notes
+                    if os.path.basename(n) !=
+                    '000 📚 Website Directory.md'][0]
+            note = open(site, encoding='utf-8').read()
             self.assertIn('category: "Design"', note)
+            directory = os.path.join(web_vault,
+                                     '000 📚 Website Directory.md')
+            self.assertTrue(os.path.exists(directory))
+            self.assertIn('Test Site', open(directory, encoding='utf-8').read())
             finished = [a[1] for _n, a in events if _n == 'finished']
             self.assertTrue(finished)
             self.assertIn('Websites: 1 processed', finished[-1])
@@ -1112,7 +1126,8 @@ class TestWorkerWebsites(unittest.TestCase):
                      for root, dirs, files in
                      os.walk(cfg['website_vault_path'])
                      for f in files if f.endswith('.md')]
-            self.assertEqual(len(notes), 1)
+            # site note + the Website Directory (v0.28.0)
+            self.assertEqual(len(notes), 2)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

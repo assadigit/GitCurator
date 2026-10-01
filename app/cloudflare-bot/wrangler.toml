@@ -72,8 +72,11 @@ max_retries = 1
 # X-Telegram-Bot-Api-Secret-Token header (stops forged updates).
 #
 # v0.22.0 — OPTIONAL plain-text vars (not secrets; defaults match the
-# desktop app, Settings → 📁 Vault):
+# desktop app, Settings → 📁 Vault). v0.28.0 — BLOCKED_DOMAINS is now
+# ADD-ONLY: the law floor (x/twitter, GitHub group, HuggingFace,
+# Instagram, Facebook, LinkedIn — see src/utils.js) always applies;
+# this var can only append MORE domains. "" = just the law.
 #   [vars]
-#   BLOCKED_DOMAINS = "x.com,twitter.com,t.co"                        # never fetched, by policy
+#   BLOCKED_DOMAINS = "reddit.com"                                   # extra bans beyond the law
 #   SELF_DOMAINS    = "github-to-obsidian-bot.aliassadi-plus.workers.dev"  # the bot's own hosts — never stored
-# Omit them entirely to keep the defaults; set to "" to opt out.
+# Omit them entirely to keep the defaults; SELF_DOMAINS "" = opt out.

@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 79 audited
-# Python modules and runs the full 847-case suite (34 core + 11 e2e +
+# Python modules and runs the full 871-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 44 webproxy +
@@ -73,7 +73,7 @@ on:
 
 jobs:
   verify:
-    name: Python gate (compile + 847 tests + websites pipeline)
+    name: Python gate (compile + 871 tests + websites pipeline)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -96,7 +96,7 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 67 audited modules
+      - name: Compile the 80 audited modules
         run: >
           python -m py_compile
           main.py
@@ -150,6 +150,7 @@ jobs:
           gitcurator/core/web_fetch.py
           gitcurator/core/web_extract.py
           gitcurator/core/website_pipeline.py
+          gitcurator/core/website_directory.py
           gitcurator/core/website_state.py
           gitcurator/core/mirror.py
           gitcurator/core/recall.py
@@ -180,7 +181,7 @@ jobs:
           gitcurator/core/netctx.py
 
       - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 -v
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -191,4 +192,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate: 79 compiles + 847 tests + worker 37 + offline golden run (v0.27.0). Mirrors the removed dashboard's POST /api/verify one-to-one."
+        run: echo "Gate: 80 compiles + 871 tests + worker 40 + offline golden run (v0.28.0). Mirrors the removed dashboard's POST /api/verify one-to-one."

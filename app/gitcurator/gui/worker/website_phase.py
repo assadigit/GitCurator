@@ -261,6 +261,31 @@ class WorkerWebsitePhaseMixin:
                         except Exception:
                             pass  # manifest is best-effort bookkeeping
 
+                # v0.28.0 — the Website Directory: regenerate the
+                # consolidated categorized index of the whole vault after
+                # every websites batch (app-owned file, atomic write; a
+                # rebuild with zero new links is a cheap no-op rewrite).
+                # Never fails the batch — the index is a convenience.
+                try:
+                    from gitcurator.core import \
+                        website_directory as _webdir
+                    _dir = _webdir.build_website_directory(
+                        website_vault, taxonomy=pipeline.taxonomy,
+                        config=self.config, log=self.log_message.emit)
+                    if _dir:
+                        self.log_message.emit(
+                            f"📚 Website Directory rebuilt: "
+                            f"{_dir['sites']} site(s) in "
+                            f"{_dir['categories']} categor(ies)"
+                            + (f" (+{_dir['review']} in review)"
+                               if _dir['review'] else "")
+                            + f" → {os.path.basename(_dir['path'])}",
+                            "success")
+                except Exception as _dir_err:
+                    self.log_message.emit(
+                        f"⚠️ Website Directory rebuild skipped: "
+                        f"{_dir_err}", "warning")
+
                 summary = {'counters': dict(pipeline.counters),
                            'results': list(pipeline.last_results),
                            'vault': website_vault}

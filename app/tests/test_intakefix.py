@@ -48,42 +48,80 @@ from gitcurator.core import dryrun
 
 class TestBlockedDomainsHelpers(unittest.TestCase):
 
-    def test_missing_key_means_default(self):
-        """THE fix contract: the owner's existing config.json (no
-        web_blocked_domains key) blocks the X family with no Settings
-        visit."""
+    def test_missing_key_means_the_law(self):
+        """THE fix contract (v0.28.0 law edition): the owner's existing
+        config.json (no web_blocked_domains key) blocks the whole LAW
+        with no Settings visit — and the law can never be opted out."""
         self.assertEqual(L.blocked_domains_from_config({}),
-                         ['x.com', 'twitter.com', 't.co'])
+                         list(L.LAW_BLOCKED_DOMAINS))
         self.assertEqual(L.blocked_domains_from_config(None),
-                         ['x.com', 'twitter.com', 't.co'])
+                         list(L.LAW_BLOCKED_DOMAINS))
 
-    def test_comma_string_parsed(self):
+    def test_comma_string_parsed_as_extras_beyond_the_law(self):
         self.assertEqual(
             L.blocked_domains_from_config(
                 {'web_blocked_domains': ' a.com , B.com ,, '}),
-            ['a.com', 'b.com'])
+            list(L.LAW_BLOCKED_DOMAINS) + ['a.com', 'b.com'])
 
-    def test_list_kept_deduped(self):
+    def test_list_kept_deduped_onto_the_law(self):
         self.assertEqual(
             L.blocked_domains_from_config(
                 {'web_blocked_domains': ['x.com', 'X.com', 't.co']}),
-            ['x.com', 't.co'])
+            list(L.LAW_BLOCKED_DOMAINS))   # law entries dedupe into the law
 
-    def test_empty_is_opt_out(self):
+    def test_empty_means_just_the_law_not_allow_all(self):
+        """v0.28.0 semantics change: the old v0.20.0 opt-out ([] = allow
+        all) is GONE — the owner's law is the floor and cannot be removed
+        (owner: "THIS IS THE LAW"). Empty now means "no extras"."""
         self.assertEqual(L.blocked_domains_from_config(
-            {'web_blocked_domains': []}), [])
+            {'web_blocked_domains': []}), list(L.LAW_BLOCKED_DOMAINS))
         self.assertEqual(L.blocked_domains_from_config(
-            {'web_blocked_domains': ''}), [])
+            {'web_blocked_domains': ''}), list(L.LAW_BLOCKED_DOMAINS))
+
+    def test_law_covers_every_group_the_owner_named(self):
+        """x/twitter, GitHub (whole group), HuggingFace, Instagram,
+        Facebook, LinkedIn — every domain group in the owner's law."""
+        for d in ('x.com', 'twitter.com', 't.co',
+                  'github.com', 'gist.github.com', 'github.io',
+                  'githubusercontent.com',
+                  'huggingface.co', 'hf.co',
+                  'instagram.com', 'instagr.am',
+                  'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
+                  'linkedin.com', 'lnkd.in'):
+            self.assertIn(d, L.LAW_BLOCKED_DOMAINS, d)
+            self.assertTrue(L.domain_is_blocked(
+                f'https://{d}/x', list(L.LAW_BLOCKED_DOMAINS)), d)
+            self.assertTrue(L.domain_is_blocked(
+                f'https://www.{d}/x', list(L.LAW_BLOCKED_DOMAINS)), d)
+
+    def test_platform_half_excludes_the_github_group(self):
+        """The bot-queue repo filter uses platform_domains_from_config:
+        the social platforms, NEVER the GitHub group — github.com repo
+        links must keep flowing to the GitHub pipeline."""
+        platform = L.platform_domains_from_config({})
+        for d in ('x.com', 'twitter.com', 't.co', 'huggingface.co',
+                  'instagram.com', 'facebook.com', 'linkedin.com'):
+            self.assertIn(d, platform, d)
+        for d in ('github.com', 'gist.github.com', 'github.io',
+                  'githubusercontent.com'):
+            self.assertNotIn(d, platform, d)
+        # extras ride on top of the platform law too
+        self.assertEqual(
+            L.platform_domains_from_config(
+                {'web_blocked_domains': 'reddit.com'}),
+            list(L.LAW_PLATFORM_DOMAINS) + ['reddit.com'])
 
     def test_hostile_never_raises(self):
         class Boom:
             def get(self, *a):
                 raise RuntimeError('boom')
         self.assertEqual(L.blocked_domains_from_config(Boom()),
-                         ['x.com', 'twitter.com', 't.co'])
+                         list(L.LAW_BLOCKED_DOMAINS))
         self.assertEqual(L.blocked_domains_from_config(
             {'web_blocked_domains': 42}),
-            ['x.com', 'twitter.com', 't.co'])
+            list(L.LAW_BLOCKED_DOMAINS))
+        self.assertEqual(L.platform_domains_from_config(Boom()),
+                         list(L.LAW_PLATFORM_DOMAINS))
 
     def test_matcher_exact_subdomain_port(self):
         blocked = ['x.com', 't.co', 'twitter.com']
@@ -109,8 +147,11 @@ class TestBlockedDomainsHelpers(unittest.TestCase):
         self.assertFalse(L.domain_is_blocked('https://x.com/1', None))
 
     def test_default_constant(self):
+        # v0.28.0 — the default IS the law now (the alias is kept for
+        # the v0.20.0 import sites; the law cannot be configured away).
         self.assertEqual(L.DEFAULT_BLOCKED_DOMAINS,
-                         ('x.com', 'twitter.com', 't.co'))
+                         L.LAW_BLOCKED_DOMAINS)
+        self.assertEqual(len(L.LAW_BLOCKED_DOMAINS), 17)
 
 
 # ---------------------------------------------------------------------------
@@ -213,16 +254,45 @@ class TestPipelineBlockedGuard(_PipeCase):
         pipe = self._make({'website_vault_path': os.path.join(self.tmp, 'w'),
                            'web_domain_delay_s': 0,
                            'web_blocked_domains': []})
-        self.assertEqual(pipe.blocked_domains, [])
+        # v0.28.0 — empty config now means "just the law", so the
+        # pipeline's list IS the law; a non-law link still flows.
+        self.assertEqual(pipe.blocked_domains, list(L.LAW_BLOCKED_DOMAINS))
         r = pipe.process_link('https://not-a-site.invalid/')
         self.assertNotEqual(r['error'], 'blocked domain — recorded in '
                                          '_inbox only')
 
-    def test_pipeline_reads_default_when_key_missing(self):
+    def test_pipeline_reads_the_law_when_key_missing(self):
         pipe = self._make({'website_vault_path': os.path.join(self.tmp, 'w'),
                            'web_domain_delay_s': 0})
         self.assertEqual(pipe.blocked_domains,
-                         ['x.com', 'twitter.com', 't.co'])
+                         list(L.LAW_BLOCKED_DOMAINS))
+
+    def test_law_blocks_every_group_even_with_opt_out_config(self):
+        """THE LAW: with web_blocked_domains EXPLICITLY emptied (the old
+        opt-out), every law-domain link is still refused — never
+        fetched, never noted, never retried."""
+        pipe = self._make({'website_vault_path': os.path.join(self.tmp, 'w'),
+                           'web_domain_delay_s': 0,
+                           'web_blocked_domains': []})
+        for url in ('https://x.com/i/status/1',
+                    'https://twitter.com/user/status/2',
+                    'https://t.co/abc',
+                    'https://huggingface.co/org/model',
+                    'https://hf.co/spaces/o/x',
+                    'https://gist.github.com/o/abc123',
+                    'https://someone.github.io/',
+                    'https://raw.githubusercontent.com/o/r/main/f.py',
+                    'https://www.instagram.com/p/xyz/',
+                    'https://instagr.am/p/xyz/',
+                    'https://facebook.com/groups/x',
+                    'https://fb.watch/x/',
+                    'https://linkedin.com/in/someone/',
+                    'https://lnkd.in/xyz'):
+            r = pipe.process_link(url)
+            self.assertEqual(r['outcome'], 'skipped', url)
+            self.assertIn('blocked', r['error'], url)
+            self.assertFalse(r.get('note_path'), url)
+        self.assertEqual(pipe.counters['skipped'], 14)
 
     def test_purge_runs_in_production_constructor(self):
         self.db.enqueue_retry('https://x.com/1', 'refused')
@@ -671,9 +741,10 @@ class TestGuiWiring(unittest.TestCase):
     def test_constants_defaults(self):
         from gitcurator import constants as c1
         from gitcurator.gui import constants as c2
+        law = list(L.LAW_BLOCKED_DOMAINS)
         for mod in (c1, c2):
             self.assertEqual(mod.CONFIG_EXAMPLE['web_blocked_domains'],
-                             ['x.com', 'twitter.com', 't.co'], mod.__name__)
+                             law, mod.__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -702,22 +773,29 @@ class TestGuiRoundTrip(unittest.TestCase):
         from PyQt6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])
         w = ga.MainWindow()
-        # default list shown in the field
+        # v0.28.0 — the field shows the LAW (the floor); the law label
+        # spells out that these cannot be removed.
         self.assertEqual(w.web_blocked_input.text(),
-                         'x.com, twitter.com, t.co')
-        # edit → save → disk
+                         ', '.join(L.LAW_BLOCKED_DOMAINS))
+        # edit → save → disk (the saved list is the EXTRAS layer; the
+        # law is re-unioned on read by blocked_domains_from_config)
         w.web_blocked_input.setText('x.com, threads.net')
         w.save_config()
         with open(cfg_path, encoding='utf-8') as f:
             on_disk = json.load(f)
         self.assertEqual(on_disk['web_blocked_domains'],
                          ['x.com', 'threads.net'])
-        # empty = deliberate opt-out
+        self.assertEqual(
+            L.blocked_domains_from_config(on_disk),
+            list(L.LAW_BLOCKED_DOMAINS) + ['threads.net'])
+        # empty field = just the law (no extras) — NOT allow-all anymore
         w.web_blocked_input.setText('')
         w.save_config()
         with open(cfg_path, encoding='utf-8') as f:
             on_disk2 = json.load(f)
         self.assertEqual(on_disk2['web_blocked_domains'], [])
+        self.assertEqual(L.blocked_domains_from_config(on_disk2),
+                         list(L.LAW_BLOCKED_DOMAINS))
 
 
 if __name__ == '__main__':

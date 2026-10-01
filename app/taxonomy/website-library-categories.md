@@ -5,6 +5,9 @@
 - Maximum two folder levels: **Category → Subcategory**. Anything more specific becomes a tag instead of a folder.
 - GitHub repo links (exact domain `github.com`) are excluded entirely from this system — your separate GitHub Project Curator app handles those. `GitHub Projects/` is reserved as its own top-level folder in the same vault.
 
+## The domain law (owner, 2026-10-01 — v0.28.0)
+**Banned from this Websites vault, always:** X/Twitter (`x.com`, `twitter.com`, `t.co`), the whole GitHub group (`github.com`, `gist.github.com`, `*.github.io`, `githubusercontent.com`), HuggingFace (`huggingface.co`, `hf.co`), Instagram, Facebook, and LinkedIn. Links on these domains are never fetched, never turned into notes, never retried — the `_inbox` platform tables and the bot's ledger keep the record. Any note that slips through is swept to `.trash/banned-domains` on the next run. This is law, not a setting: the "Blocked domains" field in Settings can only ADD domains.
+
 ---
 
 ## Categories
@@ -95,4 +98,4 @@ Catch-all — use sparingly, only when nothing else genuinely fits.
 - Shadow libraries and piracy-adjacent sites → **Download Resources → Torrent & Shadow Libraries** (private). Legitimate public-domain archives → **Public Archives & Libraries**.
 
 ## Not yet covered
-- `*.github.io` sites and `gist.github.com` links aren't in your data yet and aren't excluded by the current skip rule (only the exact `github.com` domain is). A `.github.io` site is a real website and should categorize normally; a Gist is more of a snippet than a full project — worth a decision if you start collecting those.
+- ~~`*.github.io` sites and `gist.github.com` links~~ — **settled by the domain law (v0.28.0)**: the whole GitHub group is banned from the Websites vault; repo links keep going to the GitHub pipeline.

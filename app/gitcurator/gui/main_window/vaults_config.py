@@ -334,9 +334,11 @@ class VaultConfigMixin:
             "website_repo_name": (self.website_repo_input.text().strip()
                                   if hasattr(self, 'website_repo_input')
                                   else self.config.get('website_repo_name', '')),
-            # v0.20.0 — blocked domains for the Websites pipeline (the X
-            # fix). Comma-separated text → clean list; an EMPTY field is a
-            # deliberate opt-out (list []), a missing widget keeps config.
+            # v0.28.0 — THE LAW: the saved list is the EXTRAS on top of
+            # links.LAW_BLOCKED_DOMAINS (which always applies and cannot
+            # be removed — see blocked_domains_from_config). Comma-
+            # separated text → clean list; an EMPTY field means "just
+            # the law" (no extras), NOT allow-all.
             "web_blocked_domains": (
                 [d.strip().lower() for d in
                  self.web_blocked_input.text().split(',') if d.strip()]

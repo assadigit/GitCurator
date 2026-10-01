@@ -71,10 +71,22 @@ def _code_prompt(kind: str):
 
 def _links_blocked_domains(cfg: dict) -> list:
     """v0.24.1 — core.links.blocked_domains_from_config, imported lazily
-    (CLI keeps its deps local). Never raises."""
+    (CLI keeps its deps local). Never raises. v0.28.0 — this is now the
+    FULL law (the Websites-vault ban list)."""
     try:
         from gitcurator.core import links as _links
         return _links.blocked_domains_from_config(cfg)
+    except Exception:
+        return []
+
+
+def _links_platform_domains(cfg: dict) -> list:
+    """v0.28.0 — the LAW's platform half (GitHub group excluded) for the
+    bot-queue's repo filter: github.com repo links must never be
+    blanket-banned. Imported lazily like its sibling; never raises."""
+    try:
+        from gitcurator.core import links as _links
+        return _links.platform_domains_from_config(cfg)
     except Exception:
         return []
 
@@ -114,7 +126,11 @@ def fetch_bot_queue(cfg: dict, status: StatusLine, min_id: int = 0) -> dict:
                 mark_read=False,
                 min_id=min_id,
                 vault_path=cfg.get("vault_path", ""),
-                blocked_domains=_links_blocked_domains(cfg),
+                # v0.28.0 — THE LAW, split: the repo filter gets the
+                # platform half (github.com repos keep flowing), the
+                # website links get the full law.
+                blocked_domains=_links_platform_domains(cfg),
+                website_blocked_domains=_links_blocked_domains(cfg),
                 self_domains=_links_self_domains(cfg),
                 # v0.24.1 — Fix (websites never sync): classify the
                 # non-GitHub links against the WEBSITES vault too, so the

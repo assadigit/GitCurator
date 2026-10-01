@@ -344,10 +344,32 @@ def run(args, llm=None, fetch_fn=None, sleep_fn=time.sleep,
                           else DEFAULT_DELAY_S)
             limit = int(args.limit or DEFAULT_LIMIT)
 
+            # v0.28.0 — THE LAW: never-fetch domains (x/twitter, the
+            # GitHub group, HuggingFace, Instagram, Facebook, LinkedIn)
+            # leave the CSV HERE — counted, checkpointed as done (a
+            # re-run never retries them), never fetched. The pipeline's
+            # own gate is the second layer.
+            _blocked = _links.blocked_domains_from_config(config)
+            if _blocked:
+                _kept = []
+                stats['blocked'] = 0
+                for u in links:
+                    if _links.domain_is_blocked(u, _blocked):
+                        stats['blocked'] += 1
+                        backfill.set(
+                            _links.normalize_website_url(u) or u, 'done',
+                            note_path='(banned domain — the law)',
+                            error='banned domain (the law)')
+                    else:
+                        _kept.append(u)
+                links = _kept
+
             progress(f"📚 Backfill: {stats['rows']} CSV rows -> "
                      f"{stats['websites']} website link(s) "
                      f"({stats['github']} GitHub-pipeline link(s) excluded, "
-                     f"{stats['duplicates']} duplicate(s) removed)")
+                     f"{stats['duplicates']} duplicate(s) removed)"
+                     + (f", {stats['blocked']} banned-domain link(s) "
+                        f"excluded (the law)" if stats.get('blocked') else ""))
             progress(f"   Checkpoint: {len(done)} link(s) already handled; "
                      f"batch limit {limit}, delay {delay}s")
 
@@ -416,6 +438,22 @@ def run(args, llm=None, fetch_fn=None, sleep_fn=time.sleep,
             progress(f"   Checkpoint totals: "
                      + ", ".join(f"{k}={v}" for k, v in
                                  sorted(state_counts.items())))
+            # v0.28.0 — keep the Website Directory in sync with whatever
+            # this batch added (the pipeline already ran the law sweep
+            # at construction; this is the same rebuild the GUI batch
+            # does). Dry-run aware (writes are recorded, not performed).
+            try:
+                from gitcurator.core import website_directory as _webdir
+                _dir = _webdir.build_website_directory(
+                    website_vault, taxonomy=taxonomy, config=config,
+                    log=lambda m, l='info': progress(f"   {m}"))
+                if _dir:
+                    progress(f"📚 Website Directory rebuilt: "
+                             f"{_dir['sites']} site(s) in "
+                             f"{_dir['categories']} categor(ies)")
+            except Exception as _dir_err:
+                progress(f"⚠️ Website Directory rebuild skipped: "
+                         f"{_dir_err}")
             if args.report:
                 _write_report(args.report, stats, counts, state_counts)
                 progress(f"   Report: {args.report}")

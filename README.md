@@ -89,8 +89,9 @@ are never rewritten, and every risky operation has a dry-run.**
 ```
 
 1. **Send** — forward any link to the bot. GitHub repos get a reply with
-   stars and description; websites get a "🌐 Received" reply; blocked
-   domains (x.com / twitter.com / t.co by default) get an honest 🚫.
+   stars and description; websites get a "🌐 Received" reply; banned
+   domains (THE LAW — x/Twitter, the GitHub group, HuggingFace,
+   Instagram, Facebook, LinkedIn) get an honest 🚫.
 2. **Ledger** — the Worker normalizes the URL (tracking parameters dropped,
    meaningful ones kept — a YouTube `?v=` **is** the page), dedupes against
    the permanent D1 ledger, and queues it. Secret query values are scrubbed
@@ -135,9 +136,12 @@ rewritten**; your hand-edited placeholders survive automatic retries.
 - **No link left behind** — a permanent D1 ledger (`ever_seen_ledger`) plus
   the desktop manifest; every link's state is knowable at any time
   (`/pending`, `/status`, the web dashboard).
-- **Blocked domains** (default `x.com, twitter.com, t.co`) are recorded in
-  the platform `_inbox` tables but never fetched, never noted, purged from
-  retry queues.
+- **Banned domains — THE LAW** (v0.28.0, the owner's decree: x/Twitter,
+  the whole GitHub group, HuggingFace, Instagram, Facebook, LinkedIn —
+  `links.LAW_BLOCKED_DOMAINS`) are recorded in the platform `_inbox`
+  tables but never fetched, never noted, purged from retry queues, and
+  swept out of the vault to `.trash/banned-domains` on every run. The
+  config can only ADD domains; it can never remove the law.
 - **Self domains** (the bot's own auth links) are never stored at all;
   secret query values are scrubbed from every stored original.
 - **Decommission** — mark a repo dead from Telegram; it is never re-added.
@@ -304,7 +308,7 @@ touch:
 | `pipelines.github` / `pipelines.websites` | per-vault pipeline switches |
 | `llm_provider` | `ollama` · `llamacpp` · `cloud` |
 | `llm_num_ctx` / `llm_max_output_tokens` | the split context budget |
-| `web_blocked_domains` | never-fetched domains (default the x-family) |
+| `web_blocked_domains` | EXTRA never-fetched domains beyond the law floor (`links.LAW_BLOCKED_DOMAINS` always applies) |
 | `verify_ssl` | enforce TLS certificate checks on outbound calls (default `false` — the historical censored-network setting; the websites fetcher always verifies) |
 | `summary_keep_last` | run summaries kept in the vault root (default 10; `0` = keep all) |
 | `notfound_strike_threshold` | 404 quarantine threshold (default 3) |

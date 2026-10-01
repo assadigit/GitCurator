@@ -241,21 +241,37 @@ class UiMixin:
             "private GitHub repo for the Websites vault backup")
         web_repo_row.addWidget(self.website_repo_input, 1)
         web_layout.addLayout(web_repo_row)
-        # v0.20.0 — blocked domains (the X fix): these links are already
-        # addressed as rows in the _inbox platform tables; the Websites
-        # pipeline never fetches them. Comma-separated; empty = allow all.
+        # v0.28.0 — THE LAW: these domains are ALWAYS banned from the
+        # Websites vault and cannot be removed — x/twitter, the GitHub
+        # group, HuggingFace, Instagram, Facebook, LinkedIn (the owner's
+        # law, 2026-10-01). The field below only ADDS more; the app also
+        # sweeps any legacy banned-domain notes out of the vault.
+        web_law_label = QLabel(
+            "🔒 Always banned (the law — cannot be removed): "
+            + ', '.join(_links.LAW_BLOCKED_DOMAINS))
+        web_law_label.setWordWrap(True)
+        web_law_label.setStyleSheet("font-size: 11px; color: #8A5B0B;")
+        web_law_label.setToolTip(
+            "Links on these domains never enter the Websites vault: never "
+            "fetched, never noted, never retried. Existing notes for them "
+            "are swept to the vault's .trash on the next run. The record "
+            "lives on: the _inbox platform tables and the bot's ledger "
+            "keep every link.")
+        web_layout.addWidget(web_law_label)
         web_blocked_row = QHBoxLayout()
         web_blocked_row.addWidget(QLabel("Blocked domains:"))
         self.web_blocked_input = QLineEdit(
             ', '.join(_links.blocked_domains_from_config(self.config)))
         self.web_blocked_input.setPlaceholderText(
-            "never fetched by the Websites pipeline (default: x.com, "
-            "twitter.com, t.co) — empty = allow all")
+            "EXTRA domains to ban beyond the law (e.g. reddit.com) — "
+            "the law list above always applies")
         self.web_blocked_input.setToolTip(
-            "Links on these domains are recorded in the _inbox platform "
-            "tables only — never fetched, never turned into notes, never "
-            "retried. Subdomains count (www.x.com matches x.com). Empty "
-            "field = no blocked domains.")
+            "EXTRA domains the Websites pipeline refuses, on top of the "
+            "always-banned law list above. Links on them are recorded in "
+            "the _inbox platform tables only — never fetched, never "
+            "turned into notes, never retried. Subdomains count "
+            "(www.x.com matches x.com). The law entries above cannot be "
+            "removed; the field can only add more.")
         web_blocked_row.addWidget(self.web_blocked_input, 1)
         web_layout.addLayout(web_blocked_row)
         # v0.21.0 — self domains: hosts that belong to THIS deployment

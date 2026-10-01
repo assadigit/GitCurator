@@ -232,36 +232,69 @@ def domain_of(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# v0.20.0 — Blocked domains (the X fix)
+# v0.20.0 — Blocked domains (the X fix) → superseded by the v0.28.0 LAW
 # ---------------------------------------------------------------------------
+#
+# v0.28.0 — THE LAW (the owner's words, 2026-10-01): "EVERY X And GITHUB
+# domain (all of its group) must be banned from showing on websites
+# directory. … This 3 are forbiddan: Hugginface, Github, Twitter (X),
+# Instagram, Facebook, Linkedin." The law is the FLOOR: the config's
+# ``web_blocked_domains`` can only ADD domains, never remove these.
 
-#: Domains the Websites pipeline NEVER fetches. The owner's words: "the X
-#: domains are already addressed" — x.com / twitter.com / t.co links are
-#: already recorded as rows in the ``_inbox/x_twitter_links.md`` table, so
-#: processing them into the Websites vault would be a duplicate effort
-#: (and they are JS shells anyway). Editable in Settings → 📁 Vault and in
-#: config.json (``web_blocked_domains``).
-DEFAULT_BLOCKED_DOMAINS = ('x.com', 'twitter.com', 't.co')
+#: THE LAW — domains that can NEVER appear in the Websites vault, whatever
+#: the config says. The Websites pipeline refuses them (never fetched,
+#: never noted, never retried — the _inbox platform table / D1 ledger row
+#: is the record), and a run-start sweep quarantines any legacy note that
+#: carries one in its ``source:`` frontmatter (v0.28.0).
+LAW_BLOCKED_DOMAINS = (
+    # X / Twitter (the original v0.20.0 fix)
+    'x.com', 'twitter.com', 't.co',
+    # GitHub — the whole group. Repo links belong to the GitHub vault's
+    # own pipeline; gists, Pages sites and the raw file hosts are never
+    # "websites" either (the owner's law settles the old SPEC §4.2
+    # gist/Pages judgment call for good).
+    'github.com', 'gist.github.com', 'github.io', 'githubusercontent.com',
+    # HuggingFace
+    'huggingface.co', 'hf.co',
+    # Instagram
+    'instagram.com', 'instagr.am',
+    # Facebook
+    'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
+    # LinkedIn
+    'linkedin.com', 'lnkd.in',
+)
+
+#: The subset of the law used where GITHUB links must keep flowing (the
+#: bot-queue classifier's repo filter): the social platforms only. The
+#: GitHub group is NOT here — github.com repo links must never be
+#: blanket-banned from the queue; gists and bare Pages sites are refused
+#: later at the Websites pipeline gate instead.
+LAW_PLATFORM_DOMAINS = tuple(
+    d for d in LAW_BLOCKED_DOMAINS
+    if not (d == 'github.com' or d.endswith('.github.com')
+            or d == 'github.io' or d.endswith('.github.io')
+            or d == 'githubusercontent.com'
+            or d.endswith('.githubusercontent.com')))
+
+#: Back-compat alias (the v0.20.0 name): the default ban list IS the law
+#: now. The user-editable part is whatever the config ADDS on top.
+DEFAULT_BLOCKED_DOMAINS = LAW_BLOCKED_DOMAINS
 
 
-def blocked_domains_from_config(config) -> list:
-    """The blocked-domain list from the app config (never raises).
-
-    Accepts a list/tuple of domains or a comma-separated string. Entries
-    are lowercased, stripped, deduped (order preserved). Missing key →
-    the DEFAULT list (the owner's fix works on an existing config.json
-    with no Settings visit). Empty string / empty list → [] (opt-out).
-    """
+def _extra_domains_from_config(config, key: str) -> list:
+    """The config's EXTRA domain list for ``key`` (never raises; any
+    problem → []). Accepts a list/tuple or a comma-separated string;
+    entries are lowercased, stripped, deduped (order preserved)."""
     try:
-        raw = (config or {}).get('web_blocked_domains')
+        raw = (config or {}).get(key)
         if raw is None:
-            return list(DEFAULT_BLOCKED_DOMAINS)
+            return []
         if isinstance(raw, str):
             items = raw.split(',')
         elif isinstance(raw, (list, tuple)):
             items = list(raw)
         else:
-            return list(DEFAULT_BLOCKED_DOMAINS)
+            return []
         out, seen = [], set()
         for item in items:
             d = str(item or '').strip().lower().lstrip('.')
@@ -270,7 +303,43 @@ def blocked_domains_from_config(config) -> list:
                 out.append(d)
         return out
     except Exception:
-        return list(DEFAULT_BLOCKED_DOMAINS)
+        return []
+
+
+def _merge_domain_lists(base, extras) -> list:
+    """Ordered dedupe union: ``base`` first (the law), then the extras
+    the config adds. A base entry repeated in extras is kept once."""
+    out, seen = [], set()
+    for d in list(base or []) + list(extras or []):
+        d = str(d or '').strip().lower().lstrip('.')
+        if d and d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def blocked_domains_from_config(config) -> list:
+    """The Websites-pipeline ban list from the app config (never raises).
+
+    v0.28.0 LAW: ``LAW_BLOCKED_DOMAINS`` is the floor — the config's
+    ``web_blocked_domains`` (list or comma string) can only ADD entries.
+    A missing key, a hostile config, or an EMPTY value all still yield
+    the law (the ban can no longer be opted out of; empty now means
+    "nothing beyond the law", not "allow all").
+    """
+    return _merge_domain_lists(
+        LAW_BLOCKED_DOMAINS,
+        _extra_domains_from_config(config, 'web_blocked_domains'))
+
+
+def platform_domains_from_config(config) -> list:
+    """The bot-queue ban list: the LAW's social-platform subset (the
+    GitHub group EXCLUDED — repo links must keep flowing to the GitHub
+    pipeline) plus the config's extra ``web_blocked_domains`` entries.
+    Same never-raises contract as ``blocked_domains_from_config``."""
+    return _merge_domain_lists(
+        LAW_PLATFORM_DOMAINS,
+        _extra_domains_from_config(config, 'web_blocked_domains'))
 
 
 def domain_is_blocked(url: str, blocked_domains) -> bool:

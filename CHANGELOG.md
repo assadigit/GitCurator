@@ -1,3 +1,79 @@
+## [0.28.0] — THE LAW release: banned domains can never enter the Websites vault + the 📚 Website Directory — 2026-10-01
+
+Owner ask (session): "despite the setting forbid x domains to leak into
+website directory, it already generated every x domain in website
+directory under review folder. **THIS IS THE LAW**: EVERY X And GITHUB
+domain (all of its group) must be banned from showing on websites
+directory. … This 3 are forbiddan: Hugginface, Github, Twitter (X),
+Instagram, Facebook, Linkedin." Plus: "a very userfriendly way to
+navigate through this websites … I'm looking for color-pallete makers
+[i can] easily find them like a directory which I can easily click on
+their link, knowing a short description (consolidated categorized
+lists)". Suite **847 → 871**, Worker tests **37 → 40**, all green.
+
+**1. THE LAW — a floor, not a setting.** The old `web_blocked_domains`
+meant "blocked unless you empty the list" — and links collected by an
+older app (or an emptied list) still became notes. Now
+`links.LAW_BLOCKED_DOMAINS` is hard-coded and can only be ADDED to:
+x.com / twitter.com / t.co, the whole GitHub group (github.com,
+gist.github.com, github.io, githubusercontent.com), huggingface.co /
+hf.co, instagram.com / instagr.am, facebook.com / fb.com / fb.me /
+fb.watch, linkedin.com / lnkd.in. An empty `web_blocked_domains` now
+means "just the law", never "allow all". The Websites pipeline refuses
+these links at every entry point (never fetched, never noted, never
+retried; the `_inbox` platform tables and the bot's D1 ledger keep the
+record). The law also settles the old SPEC §4.2 judgment call: gists
+and bare `*.github.io` sites are no longer "websites with a #snippet
+tag" — they are GitHub group, banned. GitHub REPO links are untouched:
+they keep flowing to the GitHub pipeline (the bot-queue repo filter
+uses the law's platform half — `platform_domains_from_config` — so
+`github.com/owner/repo` can never be blanket-banned; that split is
+locked by a regression test that reproduces the old bug).
+
+**2. The law sweep — the leaked pile leaves the vault on the next run.**
+Every batch now starts with a vault sweep (new
+`core/website_directory.py`): any app-owned note whose `source:` is on
+a banned domain — the legacy `x_com_i_status_*.md` `_review` pile from
+the screenshot, notes written by an older app, real category notes on a
+since-banned domain — is moved to `<vault>/.trash/banned-domains/`
+(Obsidian's hidden trash; recoverable by hand, never backed up by
+VaultSeal, invisible to the VaultIndex dedupe layer, note_state and the
+Library mirror, which now all skip `.trash`). Hand-written notes are
+never touched — counted and reported as yours. Idempotent, dry-run
+aware, runs in production only (tests/golden stay hermetic). DB-known
+`_review` placeholders are still purged + deleted + dismissed by the
+v0.20.0 bookkeeping pass first.
+
+**3. The 📚 Website Directory.** After every websites batch (and every
+backfill run), the app regenerates `000 📚 Website Directory.md` at the
+vault root: every real note grouped **Category → Subcategory** in
+taxonomy order, one line per site — a wiki-link to the note (click =
+open), the note's TL;DR one-liner, the pricing word when known, and a
+↗ link that opens the site in the browser. Looking for color-palette
+makers → **Design → Assets & Resources**. Notes waiting in `_review`
+are counted in a footer callout (never silently missing); law-domain
+notes never appear. The file is app-owned (`kind: "directory"`, no
+`source:` line — the dedupe layer never sees it) and has no `source:`
+frontmatter key, so overwriting it never violates the
+never-rewrite-user-notes rule. Settings → 📁 Vault now shows the law as
+a locked label above the (extras-only) blocked-domains field.
+
+**4. Worker: the law at collection time.** The Cloudflare bot's
+`DEFAULT_BLOCKED_DOMAINS` carries the same 17 domains (dead-letter
+reason `blocked_domain`); the `BLOCKED_DOMAINS` var can only ADD
+(`blockedDomainsFromEnv` — the env can no longer opt out of the law).
+GitHub REPO links are typed `github` before the block check and always
+flow to the ledger. Worker bumped to **0.28.0** and deployed
+(`EXPECTED_WORKER_VERSION` follows, so Test Connection stays honest).
+
+**Evidence.** 24 new Python tests (`tests/test_lawfix.py`: the sweep,
+the directory, the pipeline integration, the queue split, the .trash
+skip lists; plus 3 law-contract tests in `test_intakefix.py` and 6
+updated gist/batch expectations in `test_phase2/3` — the gist change is
+the law working). Worker: 3 new tests in `utils.test.js` + the
+pages-site test flipped to the law's expectation. 871/871 Python, 40/40
+worker, golden 30/30 + 0 invalid, wrangler dry-run PASS.
+
 ## [0.27.0] — the practical-notes release: website notes that answer "can I use this?" — 2026-10-01
 
 Owner ask (session): looking at a real generated note ("Reverse UI" from

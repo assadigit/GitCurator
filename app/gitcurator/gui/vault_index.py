@@ -73,7 +73,10 @@ class VaultIndex:
         count = 0
         for root, dirs, files in os.walk(self.vault_path):
             # Skip non-note folders — but INCLUDE _review (those are real notes!)
-            if any(skip in root for skip in ['_moc', '_inbox', 'attachments', '.obsidian']):
+            # v0.28.0 — .trash too: the law sweep moves banned-domain notes
+            # there (Obsidian's hidden trash); they must stop counting as
+            # "in vault" or the dedupe layer would keep them alive.
+            if any(skip in root for skip in ['_moc', '_inbox', 'attachments', '.obsidian', '.trash']):
                 continue
             for fname in files:
                 if not fname.endswith('.md'):

@@ -8,7 +8,7 @@
 import {
   normalizeUrl, normalizeUrlTyped, isGitHubUrl, parseGitHubUrl, formatStars,
   domainMatches, domainsFromEnv, scrubUrlToken, extractUrls,
-  mapGithubIoUrl,
+  mapGithubIoUrl, blockedDomainsFromEnv,
   DEFAULT_BLOCKED_DOMAINS, DEFAULT_SELF_DOMAINS,
   truncate, now, uuid
 } from './utils.js';
@@ -136,7 +136,10 @@ async function processUrlsMessage(data, env) {
   // (SPEC §4.2: "Telegram only confirms receipt"). Policy lists mirror the
   // desktop (blocked = never fetched; self = the bot's own hosts, never
   // stored because the query can carry a live token).
-  const blockedDomains = domainsFromEnv(env.BLOCKED_DOMAINS, DEFAULT_BLOCKED_DOMAINS);
+  // v0.28.0 — blockedDomainsFromEnv: THE LAW is the floor; BLOCKED_DOMAINS
+  // env extras can only add to it (x/twitter, GitHub group, HuggingFace,
+  // Instagram, Facebook, LinkedIn — same list as the desktop's law).
+  const blockedDomains = blockedDomainsFromEnv(env.BLOCKED_DOMAINS);
   const selfDomains = domainsFromEnv(env.SELF_DOMAINS, DEFAULT_SELF_DOMAINS);
 
   // Deduplicate URLs within the same message. Identity is website-aware
@@ -183,8 +186,11 @@ async function processUrlsMessage(data, env) {
       continue;
     }
 
-    // Blocked domains (x-family policy) — recorded as dead letters with
-    // their own reason; they are never fetched by the desktop either.
+    // Blocked domains (v0.28.0: THE LAW — x/twitter, GitHub group,
+    // HuggingFace, Instagram, Facebook, LinkedIn) — recorded as dead
+    // letters with their own reason; they are never fetched by the
+    // desktop either. GitHub REPO links are already typed 'github' and
+    // skip this check; only non-repo paths on the banned hosts land here.
     if (!github && domainMatches(urlOriginal, blockedDomains)) {
       await deadLetterInsert(env.DB, {
         url_normalized: urlNorm,

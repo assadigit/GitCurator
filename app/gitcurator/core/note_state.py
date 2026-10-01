@@ -60,9 +60,11 @@ RECALL_END = "<!-- gitcurator:recall:end -->"
 # The same special folders VaultIndex skips (SPEC §4.4: _review is NOT
 # skipped) — plus _missing (v0.20.0): a missing-repo placeholder must be
 # invisible to note-state so DELETING it (the owner's re-check trigger)
-# is never read as "dismiss the repo".
+# is never read as "dismiss the repo". v0.28.0 — .trash too: the law
+# sweep moves banned-domain notes there, and a swept note reading as
+# "deleted" (→ dismissed, never re-added) is exactly the law's intent.
 SKIPPED_FOLDER_MARKS = ('_moc', '_inbox', '_missing', 'attachments',
-                        '.obsidian')
+                        '.obsidian', '.trash')
 
 # Reverse lookup: vault folder -> category key (SPEC §4.4 "rules of the road").
 FOLDER_TO_CATEGORY = {folder: key for key, folder in CATEGORY_FOLDERS.items()}
