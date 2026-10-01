@@ -1,3 +1,95 @@
+## [0.25.0] — the hygiene & modularization pass: the worker split, the dead-letter safety net, and a tidier repo — 2026-10-01
+
+Owner ask (session brief): "a hygiene and modularization pass" — split only
+what needs splitting, delete what is provably dead, make the Cloudflare bot
+match the app verifiably, and keep every existing behavior. Suite
+**818 → 824** (all green, twice at baseline, twice at the end). Zero
+behavior change in the app except one new information line in Test
+Connection (below).
+
+**1. The ProcessingWorker split (the big one).** `gui/processing_worker.py`
+was 3,387 lines mixing four unrelated jobs: batch orchestration (the
+`_run_impl` method alone is 1,319 lines), the LLM conversation, GitHub
+metadata enrichment, and end-of-run reporting. It is now the QThread shell
+(signals, `__init__`, `run`, `_run_impl`, `stop`, `TestWorker` — 1,604
+lines) plus six focused mixin modules under `gui/worker/`, every method
+moved **byte-for-byte** (all 32 moved methods verified identical; the
+fingerprint gate passes — 1,058 callables, same multiplicities):
+`llm.py` (how the batch talks to the LLM), `github_meta.py` (org
+reputation, banners, credibility, missing-repo backfill), `notes.py`
+(note writes), `reports.py` (master index, final report, summary log),
+`inputs.py` (telegram/import fetches), `website_phase.py` (the websites
+leg). The old import path still works — nothing you run changes.
+
+**2. The CLI split.** `cli.py` (2,497 lines) is now three layered modules
+plus the command surface: `cli_terminal.py` (the paint box — colors,
+spinner, bars), `cli_settings.py` (config.json load/save + the model
+picker), `cli_run.py` (pre-flight checks + the animated batch run +
+dry-run report). `cli.py` keeps the commands, the parser and every old
+name importable (1,430 lines). `python main.py --cli --auto --yes
+--dry-run` behaves exactly as before (verified live).
+
+**3. WebsiteStateDB** moved out of `website_pipeline.py` into
+`core/website_state.py` (the retry ledger + its policy constants —
+schema changes and pipeline-flow changes are different jobs);
+`website_pipeline.py` re-exports it, tests unaffected. And
+`main_window/phase6.py` was renamed to **`linking_tools.py`** (its class:
+`LinkingToolsMixin`) — a module named for what it does, not for the SPEC
+phase it was born in; the old name stays importable via a facade alias.
+
+**4. Tier A deletions (every one provably unused, all recoverable from
+git):** the duplicate `gui/telegram_fetch_worker.py` (byte-identical twin
+of the integrations copy the app actually launches — 741 dead lines);
+`GitCurator-TEST-CONNECTION.bat` (the GUI button + `--cli
+--test-connection` do the same thing; the quickstart now points at the
+command); the two "headless mode" one-line note files; the ancient "list
+of changes.txt"; `app/_attic/` (its own README said "delete it freely");
+and `tools/smoke_detectset.py` (zero references, and broken since the
+app.py split — it patched a config path that moved, so running it could
+touch the real config.json). Docs, the zip builder's lists, the packaging
+tests and the CI compile list all updated so nothing points at a deleted
+file. The zip now ships **six** launchers (was seven).
+
+**5. The Cloudflare bot now provably matches the app.** The contract
+audit (every endpoint, field, HMAC scheme, schema + migration, policies)
+found two real gaps, both fixed and covered by the bot's **first test
+suite** (Node's built-in runner, `npm test`, 32 cases, zero new
+dependencies):
+- **The dead-letter queue never had a consumer** — a link that failed 5
+  processing retries sat in a queue forever, never reaching the permanent
+  database (the one hole in "no link left behind"). The DLQ now records
+  every such link into the `dead_letters` table (reason
+  `dlq_exhausted`), sends you a 💀 note in Telegram, and never loops.
+- **`/api/decommissions?since=…` could never verify** — the worker
+  checked the signature over the path without its query string while the
+  desktop signs path + query; that endpoint always answered 401. Fixed
+  worker-side (endpoints without query strings are unaffected).
+- **Staleness is now detectable:** `/health` reports the worker version
+  from one place (`src/version.js`), and Test Connection — when a Worker
+  URL is configured — adds ONE line to the Telegram section comparing it
+  with the version this app expects (`✅ Bot Worker — v0.25.0 — matches
+  this app`, or a ⚠️ with the exact redeploy command when older). No
+  Worker URL configured → nothing changes in the battery.
+- Validated prepare-only: `wrangler deploy --dry-run` bundles clean, and
+  a local `wrangler dev` run recorded a GitHub link, a website link and
+  an x.com link exactly as the app expects (ledger github / ledger
+  non_github / dead-letter blocked_domain). **The production deploy is
+  NOT done** — see the step-by-step pack (backup → deploy → verify →
+  rollback) at the top of `app/cloudflare-bot/DEPLOYMENT.md`.
+
+**6. For future sessions:** a short `AGENTS.md` at the repo root (what
+the project is, how to run the tests, the architecture map, and the
+do-not-read-in-full list — CHANGELOG/STATUS/CSV data), `.gitignore`
+completed, and the split's safety net rebuilt (fingerprint / surface /
+import checks — failure-proved before any move).
+
+**Not done on purpose (owner decisions, listed in the session report):**
+the root `dashboard/` (still used?), the dormant `gitcurator/cloud/`
+helpers, the remaining `tools/` scripts, the big history docs
+(STATUS/REFACTOR_*/SWOT), and `unique_links.csv` — which is **personal
+data committed to a public repo**; recommended: remove it and (optionally)
+scrub history.
+
 ## [0.24.1] — the "websites never sync" queue fix: pending now covers BOTH vaults — 2026-09-30
 
 Owner report (the v0.24.0 Windows build log): "it doesn't sync and see new

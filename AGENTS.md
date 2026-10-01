@@ -33,7 +33,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
 That exact module list lives in `.github/workflows/ci.yml` (also: the
 compile step of the audited modules and the offline golden run —
 `python gitcurator/tools/run_golden_websites.py --offline`). The suite is
-**818 tests, zero network**. New modules go into the CI compile list; new
+**824 tests, zero network**. New modules go into the CI compile list; new
 test modules into the unittest line. Version bumps: `VERSION` file +
 `CHANGELOG.md` entry in the existing prose style.
 

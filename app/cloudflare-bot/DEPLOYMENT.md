@@ -38,6 +38,79 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.25.0 update pack — the bot must match the app (prepare-only)
+
+This release changes the Worker (tested 32/32 with Node's built-in test
+runner — `npm test` — and validated with `wrangler deploy --dry-run` plus a
+local `wrangler dev` run: a forwarded GitHub link, a website link and an
+x.com link were recorded exactly as the app expects: ledger / ledger /
+dead-letter). What's new on the Worker side:
+
+1. **The dead-letter queue finally has a consumer** — a link that fails
+   processing 5 times used to sit in a queue forever, invisible to D1;
+   now it is recorded into the permanent `dead_letters` table (reason
+   `dlq_exhausted`), you get a 💀 note in Telegram, and nothing loops.
+2. **HMAC fix** — `/api/decommissions?since=…` could never verify before
+   (the worker stripped the query string when checking the signature);
+   it now signs exactly what the desktop signs.
+3. **Version reporting** — `/health` reports `0.25.0`, and the desktop
+   app's Test Connection compares it with the version it expects and
+   tells you when the deployed bot is older than the app.
+
+### Step-by-step (about 5 minutes, nothing is destroyed)
+
+Run everything from the `cloudflare-bot` folder. On Windows use
+PowerShell; the `bash` lines have PowerShell twins built into
+`deploy-latest.ps1` — you can simply run `.\deploy-latest.ps1` and skip
+to step 4.
+
+1. **Save a copy of the database first** (a plain-language safety net —
+   this downloads a snapshot of every link the bot has ever recorded to
+   your machine; nothing is changed or deleted):
+   ```bash
+   npx wrangler d1 export curator-bot --remote --output=d1-backup-$(date +%Y%m%d).sql
+   ```
+   Windows PowerShell:
+   ```powershell
+   npx wrangler d1 export curator-bot --remote --output="d1-backup-$(Get-Date -Format yyyyMMdd).sql"
+   ```
+2. **Check you are logged in** (opens your browser if not):
+   ```bash
+   npx wrangler login
+   ```
+3. **Apply the schema and deploy** (the schema is `IF NOT EXISTS` — safe
+   to run twice, existing data untouched; the only schema change in
+   v0.25.0 is a comment):
+   ```bash
+   npx wrangler d1 execute curator-bot --remote --file=schema.sql
+   npx wrangler deploy
+   ```
+   (Or just: `bash deploy-latest.sh` — it does both plus a health check.)
+4. **Check it worked** — all three must pass:
+   - `curl https://github-to-obsidian-bot.aliassadi-plus.workers.dev/health`
+     answers with `"version":"0.25.0"`.
+   - In the desktop app: **Test Connection** → the Telegram section shows
+     `✅ Bot Worker — v0.25.0 — matches this app`. (Needs the Worker URL
+     in Settings; it is already in your config.example.)
+   - Send **one test link** to @githubfetcherbot from Telegram — e.g.
+     `https://github.com/torvalds/linux` — and watch for the usual
+     ⭐ reply; it should appear in the bot queue on your next SYNC.
+5. **Watch it live while testing** (optional): `npx wrangler tail`.
+
+### Rollback (if anything looks wrong)
+
+```bash
+git log --oneline -5                      # find the previous release commit
+git checkout <previous-release-commit> -- src/ wrangler.toml schema.sql
+npx wrangler deploy                       # redeploy the old code
+```
+Data is never touched by a deploy (the schema is additive-only), so a
+rollback only means redeploying the previous worker code. The D1 export
+from step 1 is the belt-and-braces copy.
+
+
+---
+
 ## Prerequisites
 
 ### 1. Software

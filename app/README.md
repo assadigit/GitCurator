@@ -1,4 +1,13 @@
-# GitHub-to-Obsidian v0.23.0 (Five-Request Desktop Overhaul: Test Connection modal · two-radio LLM tab with Claude · split context budget · themed dialogs · Import txt file)
+# GitHub-to-Obsidian v0.25.0 (hygiene & modularization — 824-test suite)
+
+Latest user-visible change: Test Connection can now tell you when the
+deployed Telegram bot is older than the app expects (one extra line in
+the Telegram section, only when a Cloudflare Worker URL is configured).
+The rest of this pass is internal: the big modules were split by
+responsibility with zero behavior change. Previous feature release:
+v0.23.0 (Five-Request Desktop Overhaul: Test Connection modal ·
+two-radio LLM tab with Claude · split context budget · themed dialogs ·
+Import txt file).
 
 ## Quick Start
 
@@ -352,6 +361,14 @@ ollama") — one click per engine now does the whole switch:
   set + saved.
 
 ### Test Connection (v0.17.0 — everything-up-and-ready, in the log)
+
+v0.25.0 adds one optional line: when a Cloudflare Worker URL is
+configured (Settings → Backup / config `cloudflare_worker_url`), the
+Telegram section also compares the **deployed bot's version** (its
+`/health` endpoint) with the version this app expects —
+`✅ Bot Worker — v0.25.0 — matches this app`, or a ⚠️ telling you to
+redeploy (`cd app/cloudflare-bot && bash deploy-latest.sh`). No Worker
+URL configured → the battery looks exactly as before (four sections).
 
 One button — **Test Connection**, in the hero row next to SYNC — checks
 the four subsystems a batch needs and logs one verdict line per result,
