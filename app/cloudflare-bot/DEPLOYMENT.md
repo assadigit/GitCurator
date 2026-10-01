@@ -38,7 +38,16 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
-## 📦 v0.26.0 update pack — the bot must match the app (prepare-only)
+## 📦 v0.26.0 update pack — the bot must match the app (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-01** (worker version ID
+> `5865d691-8709-4a52-82f7-1eacdc9d7d5d`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> Verified after the deploy: `/health` answers `"version":"0.26.0"`,
+> both queue consumers registered (ingest **and** DLQ), Telegram webhook
+> healthy (0 pending, no errors), all four secrets persisted, D1 row
+> counts identical before/after (384 ledger / 2 dead / 341 activity).
+> The D1 export taken just before the deploy is the belt-and-braces copy.
 
 This release changes the Worker (tested 37/37 with Node's built-in test
 runner — `npm test` — and validated with `wrangler deploy --dry-run` plus a

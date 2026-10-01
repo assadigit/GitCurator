@@ -64,6 +64,9 @@ per-module CI counts recomputed from the loader (837 = the real sum).
 **What you may want to do next** (P0/P1 in the SWOT): rotate the
 credentials (they were exposed in chat again), and deploy the prepared
 Worker — a 5-minute pack is in `app/cloudflare-bot/DEPLOYMENT.md`.
+*(Update 2026-10-01: the Worker P1 is done — v0.26.0 was deployed to
+production and verified healthy; see the deploy record in
+`app/cloudflare-bot/DEPLOYMENT.md`. Credential rotation P0 remains.)*
 
 ## [0.25.0] — the hygiene & modularization pass: the worker split, the dead-letter safety net, and a tidier repo — 2026-10-01
 
