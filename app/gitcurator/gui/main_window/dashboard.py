@@ -669,6 +669,43 @@ class DashboardMixin:
             f"♻️ 404 quarantine reset — {removed} link(s) will be processed again.",
             "success")
 
+    def _retry_reconciliation_links(self):
+        """v0.32 (five-change pass): the retry BANNER's action — reprocess
+        the links the previous batch left unfinished (the banner's live
+        count comes from the same LinkTracker reconciliation read). Same
+        shape as retry_failed_repos: the >10-item confirm gate, the
+        bot-queue lists cleared so the auto-mark-read flow never fires on
+        a retry batch. The banner hides for the run; processing_finished
+        re-reads the manifest and refreshes it with the truth."""
+        vault = self.vault_combo.currentText()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box("Error", "Please select a valid Obsidian vault path.", success=False)
+            return
+        try:
+            tracker = LinkTracker(vault)
+            urls = tracker.get_reconciliation_urls()
+        except Exception as e:
+            self.log_message(f"❌ Failed to read the previous batch: {e}", "error")
+            return
+        if not urls:
+            # The manifest changed under us — re-read the banner's truth.
+            if hasattr(self, '_refresh_retry_banner'):
+                self._refresh_retry_banner()
+            self.log_message("✓ Nothing to retry — the previous batch is fully processed.", "success")
+            return
+        # v31.1 safety gate: confirm before large batches (>10 items).
+        if not self._confirm_batch(len(urls), "the previous batch's unfinished links"):
+            self.log_message("⏹️ Retry cancelled — nothing was processed.", "warning")
+            return
+        self.log_message(f"🔄 Retrying {len(urls)} unfinished link(s) from the previous batch...", "info")
+        # A retry batch is not a bot-queue batch (same rule as
+        # retry_failed_repos) — PROCESS must not pick these up either.
+        self._bot_queue_urls = []
+        self._bot_queue_pending_websites = []
+        if getattr(self, 'retry_banner', None) is not None:
+            self.retry_banner.setVisible(False)
+        self._start_worker_with_urls(urls)
+
     def retry_failed_repos(self):
         """v22 Feature 4: Fetch unresolved failed URLs from the SQLite cache
         and reprocess them. If the vault path is not set, just shows a message.

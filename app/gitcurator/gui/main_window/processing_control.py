@@ -156,8 +156,14 @@ class ProcessingControlMixin:
             if not self._acquire_telegram_lock("batch"):
                 return
 
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        # v0.32 (five-change pass): the ONE hero button becomes Stop while
+        # the batch runs (no separate STOP button). _batch_running is the
+        # GUI mirror's signal; the rendering is owned by _set_hero_state
+        # ('running' → danger fill + square glyph; processing_finished
+        # restores SYNC). A cooperative between-items stop leaves no
+        # partial state, so Stop needs no confirmation dialog.
+        self._batch_running = True
+        self._set_hero_state('running')
         self.progress_bar.setValue(0)
         # v31.1 spec: the determinate progress bar is visible ONLY while a
         # batch job runs — show it now, label it with the current item as
@@ -217,7 +223,11 @@ class ProcessingControlMixin:
         if self.worker:
             self.worker.stop()
             self.log_message("⏹️ Stopping...", "warning")
-            self.stop_btn.setEnabled(False)
+            # v0.32: the single hero button waits DISABLED ("Stopping…")
+            # until processing_finished restores SYNC — no double-click.
+            # _batch_running stays True: the batch is still winding down.
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("Stopping…")
 
     def update_progress(self, current, total):
         """Update the progress bar value and show `Processing X of Y` in its
@@ -283,8 +293,13 @@ class ProcessingControlMixin:
         QTimer.singleShot(delay_ms, self._hide_progress_bar)
 
     def _hide_progress_bar(self):
-        if not self.start_btn.isEnabled():
+        # v0.32: the running signal is the _batch_running flag (the hero
+        # button stays enabled while a batch runs — it is the Stop
+        # control); a disabled button still means a FETCH is in flight.
+        if getattr(self, '_batch_running', False):
             return  # a NEW batch is already running — keep the bar live
+        if hasattr(self, 'start_btn') and not self.start_btn.isEnabled():
+            return  # a fetch is in flight
         # v33: the progress row is a permanent fixture of the main view
         # (wireframe) — reset to Ready instead of hiding.
         self.progress_bar.setFormat("Ready")
@@ -297,8 +312,15 @@ class ProcessingControlMixin:
             self._set_pipeline_state('idle')
 
     def processing_finished(self, success, message):
+        # v0.32 (five-change pass): the single hero button returns to SYNC
+        # (direct enable for the stubbed/headless paths + the full render
+        # via _set_hero_state), then the retry banner re-reads the fresh
+        # manifest — unfinished links surface as the banner's live count.
         self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self._batch_running = False
+        self._set_hero_state('sync')
+        if hasattr(self, '_refresh_retry_banner'):
+            self._refresh_retry_banner()
         # v0.07: the PROCESSED counter falls back to the manifest's real
         # totals the moment a batch ends (never back to a blank "– / –").
         self._refresh_pipeline_counter()

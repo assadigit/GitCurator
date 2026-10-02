@@ -186,6 +186,11 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
         except Exception:
             pass  # best-effort — never crash on a manifest read issue
 
+        # v0.32 (five-change pass): the retry banner — the unfinished-link
+        # count as a LIVE value (its own LinkTracker read; the log lines
+        # above stay as the record).
+        self._refresh_retry_banner()
+
         # v22 Feature 7: Proxy Health Monitor — poll the proxy port every 60s
         # and update self.proxy_status_label. The check is non-blocking (2s
         # socket timeout). First check fires immediately so the dot isn't

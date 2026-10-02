@@ -485,7 +485,9 @@ class TestMixinFlow(unittest.TestCase):
             setText=lambda t: setattr(hero, "label", t),
             isEnabled=lambda: True,
             setEnabled=lambda b: None, setVisible=lambda b: None)
-        hero.stop_btn = types.SimpleNamespace(setVisible=lambda b: None)
+        # v0.32: no stop_btn anymore — the one hero button is also the Stop
+        # control; the mirror reads the _batch_running flag instead.
+        hero._batch_running = False
         hero._bot_queue_urls = ["https://github.com/o/r"]
         hero._bot_queue_pending_websites = ["https://a.org/"]
         hero._sync_run_button()

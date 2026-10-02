@@ -63,6 +63,7 @@ except ImportError:
 _APP_DIR = APP_DIR
 
 from gitcurator.gui.dead_links import DEAD_LINK_THRESHOLD
+from gitcurator.gui.link_tracker import LinkTracker
 
 from gitcurator.gui.dialogs import SettingsDialog
 
@@ -74,12 +75,23 @@ class UiMixin:
         # the global stylesheet's `font-family: 'Inter'` resolves correctly.
         self._load_fonts()
         self.setWindowTitle("GitCurator 🚀")
-        # v0.08 kept a 6:4 ratio; v0.31.0 (balance pass) makes the window
-        # RESIZABLE: the default stays the v0.08 900×600, but the owner can
-        # now resize — the log card takes every extra pixel and never
-        # collapses (the top card stays at its content height).
-        self.setGeometry(100, 100, 900, 600)
-        self.setMinimumSize(760, 540)
+        # v0.32 (five-change pass): the default height shrinks by a third
+        # (900×600 → 900×400) — the empty log used to fill most of the
+        # window. Only the LOG grows on resize (stretch 1): the header and
+        # the status card keep their content height, and the log never
+        # collapses below ~6 visible rows. The size is remembered across
+        # launches (QSettings — saved in closeEvent, restored here).
+        self.setMinimumSize(760, 380)
+        _restored = False
+        try:
+            _saved = QSettings("GitCurator", "MainWindow").value("main_window/size")
+            if isinstance(_saved, QSize) and _saved.isValid():
+                self.resize(max(_saved.width(), 760), max(_saved.height(), 380))
+                _restored = True
+        except Exception:
+            pass   # unreadable settings — the default below
+        if not _restored:
+            self.resize(900, 400)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -1128,10 +1140,11 @@ class UiMixin:
 
         # ---- Status card: the actions AND their progress in ONE card
         # (v0.31.0 balance pass — the progress row used to float between
-        # the card and the log). Top row: SYNC (⇄ STOP) + Test Connection,
-        # side by side, aligned to the card's start. Below them, inside
-        # the same card with a 12px gap: the pipeline status row. The card
-        # keeps equal padding on all four sides. ----
+        # the card and the log). Top row: SYNC + Test Connection, side by
+        # side, aligned to the card's start. Below them, inside the same
+        # card with a 12px gap: the pipeline status row, directly under
+        # the SYNC button. The card keeps equal padding on all four
+        # sides. ----
         cta_card = QWidget()
         cta_card.setObjectName("sync_card")
         cta_layout = QVBoxLayout(cta_card)
@@ -1139,44 +1152,35 @@ class UiMixin:
         cta_layout.setSpacing(12)
 
         # v0.03 two-stage hero flow (user spec): SYNC fetches all UNDONE
-        # items from the Telegram bot → the button becomes PROCESS → clicking
-        # it starts the batch. start_btn/stop_btn keep their EXACT
-        # enabled-state ownership (_start_worker disables start / enables
-        # stop; processing_finished restores it); the 200ms GUI-state mirror
-        # (see _sync_run_button) renders the stages: SYNC → PROCESS → STOP
-        # (while a batch runs) → back to SYNC.
-        run_slot = QGridLayout()
-        run_slot.setContentsMargins(0, 0, 0, 0)
-        run_slot.setSpacing(0)
+        # items from the Telegram bot → the button becomes PROCESS →
+        # clicking it starts the batch. v0.32 (five-change pass): the
+        # button is ALSO the Stop control — while a batch runs it renders
+        # as Stop (danger fill + square glyph) and changes back to SYNC
+        # when the batch ends or is cancelled. There is NO separate STOP
+        # button anymore: one primary action on screen (Hick's Law).
+        # Enabled-state ownership: _start_worker flips it to Stop mode,
+        # processing_finished restores SYNC (hero._set_hero_state and the
+        # 200ms GUI-state mirror, hero._sync_run_button).
         self._hero_state = 'sync'   # sync | fetching | process | running
-        # v0.31.0 (balance pass): SYNC no longer fills the card — a fixed
-        # 240×40 (within the 220-260px review range), first in the tab
-        # order, with Test Connection beside it at 180×40. Same height,
-        # 10px gap, both aligned to the card's start.
+        # v0.32 (five-change pass): SYNC grows to 280×56 — clearly the
+        # LARGEST control on the screen (~1.4× its old height; Fitts's
+        # Law), still first in the tab order, with Test Connection beside
+        # it at 180×40 (secondary: outline, no fill), bottom-aligned so
+        # the pair reads as one group anchored to the row's base.
         self.start_btn = QPushButton("SYNC")
-        self.start_btn.setFixedSize(240, 40)
+        self.start_btn.setFixedSize(280, 56)
         self.start_btn.setToolTip(
             "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
             "(repos already in the vault and decommissioned ones are skipped).\n"
             "The button then becomes PROCESS — click it to start the batch.\n"
-            "While a batch runs this button becomes STOP — click to cancel."
+            "While a batch runs this button becomes Stop — click to cancel."
         )
         self._style_btn(self.start_btn, 'hero_primary')
         self.start_btn.clicked.connect(self._on_hero_clicked)  # v0.03 two-stage flow
 
-        self.stop_btn = QPushButton("STOP")
-        self.stop_btn.setFixedSize(240, 40)
-        self.stop_btn.setToolTip("Cancel the running batch (SYNC returns when it stops).")
-        self._style_btn(self.stop_btn, 'hero_danger')
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_processing)  # unchanged wiring
-        run_slot.addWidget(self.start_btn, 0, 0)
-        run_slot.addWidget(self.stop_btn, 0, 0)
-        self.stop_btn.setVisible(False)
-
         cta_row = QHBoxLayout()
         cta_row.setSpacing(10)
-        cta_row.addLayout(run_slot, 0)   # hero button pair, start-aligned
+        cta_row.addWidget(self.start_btn)   # hero button, start-aligned
 
         self.test_btn = QPushButton("Test Connection")
         self.test_btn.setFixedSize(180, 40)
@@ -1189,7 +1193,7 @@ class UiMixin:
         )
         self._style_btn(self.test_btn, 'hero_secondary')
         self.test_btn.clicked.connect(self.test_all)
-        cta_row.addWidget(self.test_btn)
+        cta_row.addWidget(self.test_btn, 0, Qt.AlignmentFlag.AlignBottom)
         cta_row.addStretch(1)   # the pair packs to the card's start
         cta_layout.addLayout(cta_row)
         # v0.23.0 — the LLM quick-switch row (Detect & Set Ollama / llama.cpp)
@@ -1198,6 +1202,41 @@ class UiMixin:
         # 🧠 LLM (they were already there as the Quick switch row), and the
         # quick_detect_set_* handlers stay for that row + the CLI twin.
         main_layout.addWidget(cta_card)
+
+        # ---- Retry banner (v0.32 five-change pass): failed links are an
+        # ACTION, not a log line. An inline band directly under the status
+        # card — warning glyph · live count · Retry button — shown ONLY
+        # while the previous batch has unfinished links (the count comes
+        # from LinkTracker's reconciliation read, never parsed from log
+        # text; see _refresh_retry_banner). The log entry stays as the
+        # record; the banner is the next step that never scrolls away.
+        # Hidden widgets leave no gap in the layout. ----
+        self.retry_banner = QWidget()
+        self.retry_banner.setObjectName("retry_banner")
+        banner_lay = QHBoxLayout(self.retry_banner)
+        banner_lay.setContentsMargins(12, 8, 12, 8)
+        banner_lay.setSpacing(10)
+        self._retry_banner_icon = QLabel()
+        self._retry_banner_icon.setFixedSize(16, 16)
+        self._retry_banner_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._retry_banner_icon.setAccessibleName("Retry warning")
+        self._retry_banner_icon.setToolTip("Links from the previous batch need retry")
+        banner_lay.addWidget(self._retry_banner_icon)
+        self._retry_banner_text = QLabel("")
+        self._retry_banner_text.setObjectName("retry_banner_text")
+        self._retry_banner_text.setToolTip(
+            "Links the previous batch left failed or unfinished — retry them now")
+        banner_lay.addWidget(self._retry_banner_text)
+        banner_lay.addStretch(1)
+        self._retry_banner_btn = QPushButton("Retry")
+        self._retry_banner_btn.setToolTip(
+            "Reprocess the unfinished links from the previous batch")
+        self._retry_banner_btn.clicked.connect(self._retry_reconciliation_links)
+        self._style_btn(self._retry_banner_btn, 'secondary')
+        banner_lay.addWidget(self._retry_banner_btn)
+        self.retry_banner.setVisible(False)
+        self._refresh_retry_banner_tint()   # bake the warning glyph for the active theme
+        main_layout.addWidget(self.retry_banner)
 
         # ---- Pipeline status row (v0.31.0 balance pass: now INSIDE the
         # status card, 12px below the buttons — it used to float between
@@ -1392,8 +1431,11 @@ class UiMixin:
         # main view's ONE growable region (stretch 1) and never collapses
         # below ~200px. ----
         self.log_text = LogView()
+        self.log_text.setObjectName("log_list")   # v0.32: the flat tint's QSS hook
         self.log_text.set_rerender_callback(self._filter_log)
-        self.log_text.setMinimumHeight(176)
+        # v0.32 (five-change pass): the minimum keeps ~6 mono rows visible
+        # (12px mono ≈ 18px/row with the inter-row gap + padding).
+        self.log_text.setMinimumHeight(132)
         log_group_layout.addWidget(self.log_text, 1)
 
         # ---- The EMPTY STATE (v0.31.0): shown ONLY while the list has no
@@ -1527,6 +1569,64 @@ class UiMixin:
         except RuntimeError:
             pass  # widgets already destroyed during shutdown
 
+    def _refresh_retry_banner_tint(self):
+        """v0.32 (five-change pass): bake the retry banner's warning glyph
+        for the ACTIVE theme (pixmaps are baked at render time — a theme
+        flip re-tints, exactly like the other main-view glyphs)."""
+        icon = getattr(self, '_retry_banner_icon', None)
+        if icon is None:
+            return
+        try:
+            t = _theme.DARK if getattr(self, '_dark_mode', False) else _theme.LIGHT
+            icon.setPixmap(_icons.pixmap('triangle-alert', t['warning'], 16))
+        except RuntimeError:
+            pass  # widgets already destroyed during shutdown
+
+    def _refresh_retry_banner(self):
+        """v0.32 (five-change pass): keep the retry banner truthful — a
+        LIVE count of the links the previous batch left unfinished, read
+        from LinkTracker's reconciliation pass (the same read the startup
+        warning logs; NEVER parsed from log text). Shown only while the
+        count is positive; hidden otherwise. Called at startup, after
+        every batch (processing_finished) and before/after banner
+        retries. Best-effort: an unreadable manifest keeps the banner
+        hidden."""
+        banner = getattr(self, 'retry_banner', None)
+        if banner is None:
+            return
+        try:
+            count = 0
+            vault = self.vault_combo.currentText() if hasattr(self, 'vault_combo') else ''
+            if vault and os.path.isdir(vault):
+                tracker = LinkTracker(vault)
+                count = len(tracker.get_reconciliation_urls())
+            if count > 0:
+                self._retry_banner_text.setText(
+                    f"{count} link{'s' if count != 1 else ''} from the "
+                    "previous batch need retry")
+                self._set_status(self._retry_banner_text, 'warning', strong=True)
+                banner.setVisible(True)
+            else:
+                banner.setVisible(False)
+        except RuntimeError:
+            pass  # widgets already destroyed during shutdown
+        except Exception:
+            try:
+                banner.setVisible(False)
+            except RuntimeError:
+                pass
+
+    def _save_window_size(self):
+        """v0.32 (five-change pass): remember the window SIZE for the next
+        launch (QSettings; written from closeEvent — the position is left
+        to the window manager). Never raises: a settings write must not
+        block shutdown."""
+        try:
+            QSettings("GitCurator", "MainWindow").setValue(
+                "main_window/size", self.size())
+        except Exception:
+            pass
+
     def _build_log_empty_state(self) -> QWidget:
         """The log card's empty state: a quiet inbox glyph, a title line
         and one short helper line, centered horizontally and vertically in
@@ -1632,8 +1732,13 @@ class UiMixin:
         colors = self._log_html_colors()
         icon_color = colors.get(level, colors.get('info', '#6C6480'))
         glyph = self._LOG_LEVEL_ICONS.get(level, 'dot')
-        # v0.07: timestamps — muted, but still above 4.5:1 on both themes.
-        ts_color = '#8F89A3' if getattr(self, '_dark_mode', False) else '#7A7288'
+        # v0.32 (five-change pass): the log is visually secondary — the
+        # MESSAGE ink is one muted tone for every level (AA on the flat
+        # tint), and the meaning rides on the shape-coded glyphs. The
+        # timestamps share the quiet treatment (theme tokens, still AA).
+        t = _theme.DARK if getattr(self, '_dark_mode', False) else _theme.LIGHT
+        msg_color = t['log_text']
+        ts_color = t['log_ts']
         # v0.31.0: width-aware truncation. The row font is the QSS mono
         # (Consolas at 12px) — measure with the same spec (a resize
         # re-renders, so small platform-metric differences self-correct).
@@ -1653,7 +1758,7 @@ class UiMixin:
             f'<img src="logicon://{level}" width="12" height="12" '
             f'style="vertical-align:-2px" /> '
             f'<span style="color:{ts_color}; font-family:Consolas,monospace;">[{ts}]</span> '
-            f'<span style="color:{icon_color}; font-family:Consolas,monospace;">{safe_msg}</span>'
+            f'<span style="color:{msg_color}; font-family:Consolas,monospace;">{safe_msg}</span>'
         )
         return html_line, msg
 
@@ -1792,7 +1897,12 @@ class UiMixin:
         only in a log line; the dedicated widget said "- / -")."""
         if not hasattr(self, 'progress_count'):
             return
-        # While a batch runs, update_progress() owns the counter.
+        # While a batch runs, update_progress() owns the counter. v0.32:
+        # the running signal is the _batch_running flag (the hero button
+        # stays ENABLED now — it is the Stop control); a disabled button
+        # still means a FETCH is in flight.
+        if getattr(self, '_batch_running', False):
+            return
         if hasattr(self, 'start_btn') and not self.start_btn.isEnabled():
             return
         pending = getattr(self, '_bot_queue_urls', None) or []

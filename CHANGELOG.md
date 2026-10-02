@@ -1,3 +1,73 @@
+## [0.32.0] — The five-change pass: a shorter window, one button that knows when to stop, a quieter log, and a banner that asks for action — 2026-10-03
+
+Owner ask (session): five numbered changes, each in its own block,
+in the reviewer's own order (PyQt6 terms honored — stretch factors,
+layout spacing, QSettings). Desktop-only release — the Worker stays
+at 0.28.0 (`EXPECTED_WORKER_VERSION` unchanged). Suite stays **900**
+(zero test edits: the hero-flow stubs read the new `_batch_running`
+flag through the established getattr guards), worker 40/40, offline
+golden 30/30 + 0 invalid, 82/82 module compiles, GUI smoke rewritten
+for the new contracts (78 checks).
+
+**1. A shorter window with a flexible log.** The default height drops
+by a third — 900×600 → 900×400 (minimum 760×540 → 760×380) — the
+empty log used to fill most of the window. The log keeps every extra
+pixel (stretch 1, unchanged): the header and the status card hold
+their content height, only the log grows on resize, and it never
+collapses below ~6 mono rows (132px). The window SIZE is now
+remembered across launches (QSettings — saved in closeEvent,
+restored in initUI; the position stays with the window manager).
+
+**2. The CTA band is one group.** SYNC, Test Connection and the
+progress row already shared the status card; the progress row sits
+directly under the SYNC button. SYNC grows to a fixed 280×56 —
+clearly the largest control on the screen (~1.4× its old height;
+Fitts's Law), still first in the tab order. Test Connection stays a
+180×40 outlined secondary (no fill), now bottom-aligned so the big
+primary and the small secondary read as one anchored group.
+
+**3. One primary action: SYNC becomes Stop.** While a batch runs the
+SAME button renders as Stop — danger fill, white square glyph — and
+returns to SYNC when the batch ends or is cancelled. The separate
+STOP button is gone (one primary action on screen — Hick's Law).
+The 200ms GUI mirror reads a dedicated `_batch_running` flag (set by
+`_start_worker`, cleared by `processing_finished`; the button stays
+ENABLED while a batch runs because it IS the stop control); a stop
+click renders a disabled "Stopping…" until the worker winds down. No
+confirmation dialog, by the review's own rule: the worker's stop is
+cooperative and between-items — every processed note is complete,
+unfinished links are surfaced by the reconciliation pass (see #5), so
+stopping mid-run leaves no partial state.
+
+**4. The log is visually secondary.** The log panel loses its card
+chrome — no border, no well-in-a-card: one FLAT tinted surface (warm
+putty #F2EDE3 in light, deep plum #17131F in dark — the new
+`log_tint` token), with the list riding transparently on it. Log
+message ink is now ONE muted tone for every level (log_text 6.5:1
+light / 10.3:1 dark; timestamps 4.8:1 / 5.4:1 — AA on the tint, WCAG
+1.4.3), monospace kept, and the meaning rides on the shape-coded
+glyphs (check · triangle-alert · circle-x) exactly as before — never
+color alone. The filter chips lost their borders: muted text, accent
+fill only when checked. The empty state's three copies are unchanged.
+
+**5. The retry banner.** "N links from previous batch need retry!" is
+an action the user must take, not a log line: an inline amber band
+directly under the status card — warning triangle · the count · a
+Retry button — shown only while the count is positive. The count is a
+LIVE value from LinkTracker's reconciliation read (never parsed from
+log text), refreshed at launch and after every batch; the Retry
+button re-runs exactly those URLs (the same >10-item confirm gate as
+Retry Failed; the banner hides for the run and the fresh manifest
+re-reads on completion). The log entry stays as the record.
+
+Gate: 900/900 Python (67s), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 78/78 (900×400 default ·
+QSettings round-trip · no stop_btn · Stop toggle + restore ·
+banner live-count show/hide · flat-log tokens + QSS · 280×56 SYNC ·
+~6-row log minimum), VLM visual verification 13/13 across 8
+offscreen screenshots (light/dark × empty/rows/banner/running/
+min/tall/PROCESS).
+
 ## [0.31.0] — The main-window balance pass: one status card, a state indicator that never whispers in color alone, and a log card that speaks when empty — 2026-10-02
 
 Owner ask (session): apply the main-window layout review (paste-ready,

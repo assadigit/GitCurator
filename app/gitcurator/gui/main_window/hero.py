@@ -55,12 +55,15 @@ class HeroMixin:
         )
 
     def _sync_run_button(self):
-        """Mirror the pipeline state onto the single hero button (v0.03
-        two-stage flow): SYNC when idle → PROCESS once undone items have
-        been fetched → STOP while a batch runs → back to SYNC when it
-        finishes. Reads ONLY the existing enabled-state (owned by
-        _start_worker / processing_finished) plus the GUI-only _hero_state
-        and writes ONLY widget visibility/text — zero pipeline coupling.
+        """Mirror the pipeline state onto the SINGLE hero button (v0.03
+        two-stage flow; v0.32 five-change pass — the button is also the
+        Stop control): SYNC when idle → PROCESS once undone items have
+        been fetched → STOP while a batch runs (the same button, danger
+        fill + square glyph) → back to SYNC when it finishes or is
+        cancelled. Reads ONLY the _batch_running flag (owned by
+        _start_worker / processing_finished) plus the GUI-only
+        _hero_state, and writes ONLY label text/state — zero pipeline
+        coupling. No separate STOP button exists (one primary action).
 
         v0.24.1 — the pending count covers BOTH pipelines: pending repos
         AND pending website links (fix for "websites never sync" — with a
@@ -68,33 +71,31 @@ class HeroMixin:
         waited in the queue)."""
         try:
             state = getattr(self, '_hero_state', 'sync')
-            if state == 'fetching':
-                # Fetch in flight: keep the (disabled) FETCHING button visible.
-                self.start_btn.setVisible(True)
-                self.stop_btn.setVisible(False)
-                return
-            running = not self.start_btn.isEnabled()
+            running = getattr(self, '_batch_running', False)
             if running:
+                # A batch runs: the button IS Stop (rendered by
+                # _set_hero_state('running') from _start_worker; this
+                # mirror only catches a missed transition).
                 if state != 'running':
                     self._hero_state = 'running'
-                self.start_btn.setVisible(False)
-                self.stop_btn.setVisible(True)
-            else:
-                if state == 'running':
-                    # The batch just finished (start_btn re-enabled) → SYNC.
-                    self._hero_state = 'sync'
-                    self._set_hero_state('sync')
-                    state = 'sync'
-                self.start_btn.setVisible(True)
-                self.stop_btn.setVisible(False)
-                if state == 'process':
-                    # Keep the pending count fresh — a Settings → Bot
-                    # re-check updates self._bot_queue_urls in place.
-                    n = len(getattr(self, '_bot_queue_urls', None) or []) \
-                        + len(getattr(self, '_bot_queue_pending_websites', None) or [])
-                    txt = f"PROCESS ({n})" if n else "PROCESS"
-                    if self.start_btn.text() != txt:
-                        self.start_btn.setText(txt)
+                    self._set_hero_state('running')
+                return
+            if state == 'running':
+                # The batch just ended (flag cleared) → SYNC.
+                self._hero_state = 'sync'
+                self._set_hero_state('sync')
+                state = 'sync'
+            if state == 'fetching':
+                # Fetch in flight: keep the (disabled) FETCHING rendering.
+                return
+            if state == 'process':
+                # Keep the pending count fresh — a Settings → Bot
+                # re-check updates self._bot_queue_urls in place.
+                n = len(getattr(self, '_bot_queue_urls', None) or []) \
+                    + len(getattr(self, '_bot_queue_pending_websites', None) or [])
+                txt = f"PROCESS ({n})" if n else "PROCESS"
+                if self.start_btn.text() != txt:
+                    self.start_btn.setText(txt)
         except RuntimeError:
             pass  # widgets already destroyed during shutdown
 
@@ -107,13 +108,22 @@ class HeroMixin:
         """Hero button click. SYNC → fetch every UNDONE item from the
         Telegram bot (bot-queue check). PROCESS → start the batch (the
         fetched queue, or the selected Input mode when nothing was
-        fetched)."""
+        fetched). Stop (v0.32: the SAME button while a batch runs) →
+        cancel the running batch — a cooperative, between-items stop
+        that leaves no partial state (unfinished links are surfaced by
+        the retry banner / next reconciliation), so no confirmation
+        dialog is needed."""
         state = getattr(self, '_hero_state', 'sync')
+        if state == 'running':
+            # v0.32 (five-change pass): the one button IS the Stop
+            # control — no separate STOP button exists.
+            self.stop_processing()
+            return
         if state == 'process':
             self._begin_hero_processing()
             return
         if state != 'sync':
-            return  # fetching (button disabled) or running (STOP overlay)
+            return  # fetching (button disabled)
 
         # --- Stage 1: SYNC → fetch undone items --------------------------
         vault = self.vault_combo.currentText()
@@ -264,15 +274,30 @@ class HeroMixin:
 
     def _set_hero_state(self, state):
         """Render the GUI-only hero-button state. Never touches pipeline
-        flags — enabled-state ownership stays with _start_worker /
+        flags — the running flag stays with _start_worker /
         processing_finished. v0.07: each stage pairs its label with a unified
-        SVG glyph (refresh / loader / play / stop) tinted for the fill."""
+        SVG glyph (refresh / loader / play / stop) tinted for the fill.
+        v0.32 (five-change pass): 'running' renders the SAME button as
+        Stop (danger fill, square glyph) — the separate STOP button is
+        gone; every other state restores the hero_primary fill."""
         self._hero_state = state
         try:
-            if state == 'fetching':
+            if state == 'running':
+                # The batch runs: the one button becomes Stop.
+                self.start_btn.setText("Stop")
+                _icons.set_btn_icon(self.start_btn, 'stop', '#FFFFFF', 18)
+                self.start_btn.setEnabled(True)
+                self._style_btn(self.start_btn, 'hero_danger')
+                self.start_btn.setToolTip(
+                    "Cancel the running batch (SYNC returns when it stops).\n"
+                    "The stop is clean — already-processed notes are kept;\n"
+                    "unfinished links are surfaced for retry when it ends."
+                )
+            elif state == 'fetching':
                 self.start_btn.setText("FETCHING…")
                 _icons.set_btn_icon(self.start_btn, 'loader', '#6C6480', 18)
                 self.start_btn.setEnabled(False)
+                self._style_btn(self.start_btn, 'hero_primary')
                 self.start_btn.setToolTip("Fetching undone items from the Telegram bot…")
             elif state == 'process':
                 # v0.24.1 — the count includes pending WEBSITES links too.
@@ -281,6 +306,7 @@ class HeroMixin:
                 self.start_btn.setText(f"PROCESS ({n})" if n else "PROCESS")
                 _icons.set_btn_icon(self.start_btn, 'play', self._hero_text_color(), 18)
                 self.start_btn.setEnabled(True)
+                self._style_btn(self.start_btn, 'hero_primary')
                 if n:
                     self.start_btn.setToolTip(
                         f"Stage 2 — start curating the {n} fetched undone item(s) "
@@ -296,15 +322,14 @@ class HeroMixin:
                 self.start_btn.setText("SYNC")
                 _icons.set_btn_icon(self.start_btn, 'refresh', self._hero_text_color(), 18)
                 self.start_btn.setEnabled(True)
+                self._style_btn(self.start_btn, 'hero_primary')
                 self.start_btn.setToolTip(
                     "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
                     "(repos already in the vault and decommissioned ones are skipped;\n"
                     "website links already in the Websites vault are skipped too).\n"
                     "The button then becomes PROCESS — click it to start the batch.\n"
-                    "While a batch runs this button becomes STOP — click to cancel."
+                    "While a batch runs this button becomes Stop — click to cancel."
                 )
-            # The STOP overlay always carries the white square glyph.
-            _icons.set_btn_icon(self.stop_btn, 'stop', '#FFFFFF', 18)
         except RuntimeError:
             pass  # widgets already destroyed during shutdown
 

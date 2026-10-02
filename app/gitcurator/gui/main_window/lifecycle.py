@@ -201,6 +201,11 @@ class LifecycleMixin:
                     pass
 
         self.save_config()
+        # v0.32 (five-change pass): remember the window SIZE for the next
+        # launch (restored in initUI from QSettings; the position is left
+        # to the window manager). Never blocks shutdown.
+        if hasattr(self, '_save_window_size'):
+            self._save_window_size()
         if self.worker:
             # v30 — Fix (graceful close, W10): before waiting, UNBLOCK every
             # wait the worker could be parked on. Previously, if the worker

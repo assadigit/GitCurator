@@ -94,6 +94,13 @@ LIGHT: Dict[str, str] = {
     "warn_box_text":   "#B45309",
     # progress / scrollbars / misc chrome
     "log_well":        "#FFFFFF",
+    # v0.32 (five-change pass): the log panel is VISUALLY SECONDARY — a flat
+    # tinted surface (no card border) with muted ink (AA on the tint):
+    # log_text 6.5:1 · log_ts 4.8:1 on log_tint.
+    "log_tint":        "#F2EDE3",
+    "log_text":        "#57506B",
+    "log_ts":          "#6C6480",
+    "banner_warn_bg":  "#FAF3E3",   # the retry banner's amber wash
     "progress_track":  "#E3DACA",
     "progress_chunk":  "#5F54B4",
     "progress_text":   "#514A63",
@@ -161,6 +168,13 @@ DARK: Dict[str, str] = {
     "warn_box_text":   "#F2DCA8",
     # progress / scrollbars / misc chrome
     "log_well":        "#17131F",
+    # v0.32 (five-change pass): the flat secondary log surface — the deep
+    # plum well becomes the whole panel (no card chrome); muted ink
+    # (log_text 10.3:1 · log_ts 5.4:1 on log_tint).
+    "log_tint":        "#17131F",
+    "log_text":        "#C6BFE0",
+    "log_ts":          "#8F89A3",
+    "banner_warn_bg":  "#322B20",   # the retry banner's amber-on-plum wash
     "progress_track":  "#17131F",
     "progress_chunk":  "#C4BCF5",
     "progress_text":   "#DDD7EC",
@@ -260,6 +274,12 @@ def _app_rules(t: Dict[str, str]) -> str:
             QGroupBox {{ font-weight: 600; font-size: 14px; border: 1px solid {t['border']}; border-radius: 8px; margin-top: 14px; padding: 10px 8px 6px 8px; background: {t['sheet']}; color: {t['text']}; }}
             QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; color: {t['text_soft']}; }}
             QGroupBox#log_group {{ margin-top: 0px; padding: 2px 2px 2px 2px; }}
+            /* v0.32 (five-change pass): the log panel is FLAT — no card border,
+            no sheet fill; a quiet tinted surface one step below the cards. */
+            QGroupBox#log_group {{ border: none; background-color: {t['log_tint']}; border-radius: 10px; }}
+            /* the log LIST rides transparently on that tint (no well-in-a-card) */
+            QTextEdit#log_list {{ border: none; border-radius: 8px; background: transparent; padding: 8px 10px; }}
+            QTextEdit#log_list:focus {{ border: 1px solid {t['focus']}; padding: 7px 9px; }}
             QLineEdit {{ padding: 6px; border: 1px solid {t['border_input']}; border-radius: 6px; background: {t['sheet']}; selection-background-color: {t['select_bg']}; selection-color: {t['select_fg']}; }}
             QLineEdit:focus {{ border: 2px solid {t['accent']}; padding: 5px; outline: 2px solid {t['focus']}; outline-offset: 2px; }}
             QLineEdit:disabled {{ background: {t['disabled_bg']}; color: {t['text_disabled']}; }}
@@ -318,6 +338,11 @@ def _app_rules(t: Dict[str, str]) -> str:
             QScrollBar::add-line:horizontal {{ height: 0; width: 0; }}
             QScrollBar::add-page:horizontal {{ background: transparent; }}
             QWidget#sync_card {{ background-color: {t['sheet']}; border: 1px solid {t['border']}; border-radius: 12px; }}
+            /* v0.32 (five-change pass): the retry banner — a flat amber band
+            under the status card; the warning word rides the status-role
+            QSS (state=warning) for its AA ink. */
+            QWidget#retry_banner {{ background-color: {t['banner_warn_bg']}; border: 1px solid {t['warn_box_border']}; border-radius: 10px; }}
+            QLabel#retry_banner_text {{ background: transparent; font-size: 12px; font-weight: 600; }}
             /* v0.31.0 (balance pass): the count is the row's loudest text
                (15px bold mono); the caption stays small and quiet. */
             QLabel#progress_count {{ font-family: 'Consolas', 'Monaco', 'Menlo', monospace; font-size: 15px; font-weight: 700; color: {t['accent']}; background: transparent; }}
@@ -328,9 +353,9 @@ def _app_rules(t: Dict[str, str]) -> str:
             QWidget#log_empty {{ background: transparent; }}
             QLabel#log_empty_title {{ font-size: 14px; font-weight: 700; color: {t['text_muted']}; background: transparent; }}
             QLabel#log_empty_hint {{ font-size: 12px; color: {t['text_muted']}; background: transparent; }}
-            QPushButton#log_filter {{ background: transparent; border: 1px solid {t['border_input']}; border-radius: 6px; padding: 5px 12px; font-size: 11px; font-weight: 600; color: {t['text_muted']}; }}
-            QPushButton#log_filter:hover {{ background: {t['sheet_hover']}; border-color: {t['border_hover']}; color: {t['text_hover']}; }}
-            QPushButton#log_filter:checked {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['on_accent']}; }}
+            QPushButton#log_filter {{ background: transparent; border: none; border-radius: 6px; padding: 5px 12px; font-size: 11px; font-weight: 600; color: {t['text_muted']}; }}
+            QPushButton#log_filter:hover {{ background: {t['sheet_hover']}; color: {t['text_hover']}; }}
+            QPushButton#log_filter:checked {{ background: {t['accent']}; color: {t['on_accent']}; }}
             QPushButton#log_filter:checked:hover {{ background: {shade(t['accent'])}; }}
             QPushButton#log_filter:focus {{ outline: 2px solid {t['focus']}; outline-offset: 1px; }}
             QLineEdit#log_search {{ padding: 4px 8px; }}

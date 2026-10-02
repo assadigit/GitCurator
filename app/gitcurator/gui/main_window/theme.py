@@ -286,9 +286,11 @@ class ThemeMixin:
             self.theme_toggle_btn.setToolTip("Switch to dark mode (current: Light)")
 
     def _log_html_colors(self) -> Dict[str, str]:
-        """v31.1: log text colors matched to the ACTIVE theme so every level
-        passes AA contrast on its own background (dark shades on the light
-        log, light shades on the dark log)."""
+        """The LOG GLYPH colors, matched to the ACTIVE theme so every
+        level passes the 3:1 graphics bar on the flat log tint. v0.32
+        (five-change pass): the MESSAGE ink is now ONE muted tone for
+        every level (the log_text / log_ts tokens — see _log_row_html);
+        these per-level colors tint the shape-coded glyphs only."""
         if getattr(self, '_dark_mode', False):
             # v0.09.1 polish: saturated accents (pastels read muddy on plum).
             return {
@@ -326,14 +328,19 @@ class ThemeMixin:
             _icons.set_btn_icon(self.settings_btn, 'settings', accent, 16)
             # Test Connectivity: activity glyph in the active accent.
             _icons.set_btn_icon(self.test_btn, 'activity', accent, 18)
-            # Hero state glyph (fetching's gray loader stays neutral).
+            # Hero state glyph (fetching's gray loader stays neutral;
+            # v0.32: 'running' wears the white Stop square on the danger
+            # fill — the same button, no separate STOP control).
             state = getattr(self, '_hero_state', 'sync')
-            if state == 'fetching':
+            if state == 'running':
+                _icons.set_btn_icon(self.start_btn, 'stop', '#FFFFFF', 18)
+            elif state == 'fetching':
                 _icons.set_btn_icon(self.start_btn, 'loader', '#6C6480', 18)
             else:
                 _icons.set_btn_icon(self.start_btn, 'refresh',
                                     self._hero_text_color(), 18)
-            _icons.set_btn_icon(self.stop_btn, 'stop', '#FFFFFF', 18)
+            # v0.32: the retry banner's warning glyph re-tints too.
+            self._refresh_retry_banner_tint()
             # v0.31.0: the pipeline-state glyph + the empty-state glyph.
             self._set_pipeline_state(getattr(self, '_pipeline_state', 'idle'))
             if hasattr(self, '_log_empty_icon'):

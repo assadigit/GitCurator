@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""v0.31 GUI smoke check (offscreen): merged lineage — v0.08 redesign +
+"""v0.32 GUI smoke check (offscreen): merged lineage — v0.08 redesign +
 v0.07.2 model picker + v0.09 unified 404 quarantine + v0.31 main-window
-balance pass (one status card, resizable window, log empty state).
+balance pass + v0.32 five-change pass (shorter window, one Stop toggle,
+flat log, retry banner).
 
 Run:  QT_QPA_PLATFORM=offscreen python tests/smoke_v007.py
 Exits non-zero on any failure; prints one line per check.
@@ -14,11 +15,13 @@ _APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _APP)
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtCore import QSettings, QSize  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
 from gitcurator.gui.app import MainWindow, CacheDB, dead_link_threshold  # noqa: E402
 from gitcurator.gui import icons  # noqa: E402
+from gitcurator.gui import theme as theme_kit  # noqa: E402
 
 CHECKS = []
 
@@ -28,15 +31,24 @@ def check(name, cond):
     print(("  ok  " if cond else "  FAIL") + f"  {name}")
 
 
+# v0.32: the window SIZE persists across launches (QSettings) — scrub
+# any saved size first so the default-size contract below is tested on a
+# KNOWN first-run state (and scrub again at the end for the next run).
+_SIZE_KEY = "main_window/size"
+_SIZE_ORG, _SIZE_APP = "GitCurator", "MainWindow"
+QSettings(_SIZE_ORG, _SIZE_APP).remove(_SIZE_KEY)
+
 w = MainWindow()
 
-# 1. Window 900×600 (6:4) by default — v0.31.0: now RESIZABLE (the log
-#    card absorbs every extra pixel; the top card stays content-height)
+# 1. Window defaults — v0.32 (five-change pass): a THIRD shorter
+#    (900×600 → 900×400; the empty log used to fill most of the window).
+#    Only the log grows on resize (stretch 1); the log never collapses
+#    below ~6 visible rows; the size is remembered across launches.
 check("window width == 900", w.width() == 900)
-check("window height == 600", w.height() == 600)
+check("window height == 400 (a third shorter)", w.height() == 400)
 check("window resizable (min != max)", w.minimumSize() != w.maximumSize())
-check("window minimum 760×540",
-      w.minimumSize().width() == 760 and w.minimumSize().height() == 540)
+check("window minimum 760×380",
+      w.minimumSize().width() == 760 and w.minimumSize().height() == 380)
 
 # 2. Icon buttons: 34×34 square with SVG glyphs (v0.31.0: the gear and the
 #    theme toggle share one size/shape/border — a ≥32px click target)
@@ -76,16 +88,21 @@ try:
 except Exception:
     stretch_ok = False
 check("log group is the growable region (stretch 1)", stretch_ok)
-# v0.31.0: the log card never collapses (~200px with its toolbar)
-check("log_text minimum height >= 176", w.log_text.minimumHeight() >= 176)
+# v0.32: the log minimum keeps ~6 mono rows visible (12px mono ≈ 18px/row)
+check("log_text minimum height >= 132 (~6 rows)", w.log_text.minimumHeight() >= 132)
 
 # 5b. v0.31.0 balance pass — the status card + the log card's states
 check("status card hosts the buttons AND the progress row",
       w.progress_bar.parentWidget() is w.start_btn.parentWidget())
-check("SYNC button fixed at 240×40",
-      w.start_btn.width() == 240 and w.start_btn.height() == 40)
-check("Test Connection fixed at 180×40 (same height)",
+# v0.32 (five-change pass): SYNC grows to 280×56 — clearly the LARGEST
+# control (~1.4× its old height); Test Connection stays 180×40 secondary.
+check("SYNC button fixed at 280×56",
+      w.start_btn.width() == 280 and w.start_btn.height() == 56)
+check("Test Connection fixed at 180×40",
       w.test_btn.width() == 180 and w.test_btn.height() == 40)
+check("SYNC clearly the largest control",
+      w.start_btn.width() > w.test_btn.width()
+      and w.start_btn.height() > w.test_btn.height())
 check("SYNC narrower than the card (does not fill it)",
       w.start_btn.width() < w.progress_bar.parentWidget().width() - 100)
 check("progress bar is a 12px gauge with no text",
@@ -126,6 +143,88 @@ w.log_message("row with an icon glyph", "success")
 check("log row renders (leading icon + timestamp + message)",
       w.log_text.document().blockCount() >= 1
       and "row with an icon glyph" in w.log_text.toPlainText())
+
+# 5c. v0.32 (five-change pass) — ONE primary action: the SYNC button
+#     itself becomes Stop while a batch runs (no separate STOP button).
+check("no separate stop button exists", not hasattr(w, "stop_btn"))
+w._batch_running = True
+w._set_hero_state('running')
+check("a running batch renders the SAME button as Stop",
+      w.start_btn.text() == "Stop" and w.start_btn.isEnabled()
+      and w.start_btn.property('btn_kind') == 'hero_danger')
+_stopped = []
+w.stop_processing = lambda: _stopped.append(True)
+w._on_hero_clicked()
+check("clicking the Stop button cancels the batch",
+      _stopped == [True])
+w._batch_running = False
+w._set_hero_state('sync')
+check("batch end restores SYNC (primary fill, enabled)",
+      w.start_btn.text() == "SYNC" and w.start_btn.isEnabled()
+      and w.start_btn.property('btn_kind') == 'hero_primary')
+
+# 5d. v0.32 — the log is visually secondary: flat tint (no card border),
+#     muted ink, quiet chips — all via theme-kit tokens + QSS rules.
+for _tbl_name, _tbl in (("LIGHT", theme_kit.LIGHT), ("DARK", theme_kit.DARK)):
+    for _key in ("log_tint", "log_text", "log_ts", "banner_warn_bg"):
+        check(f"theme kit {_tbl_name}.{_key} exists", _key in _tbl)
+_qss = theme_kit.build_qss(theme_kit.LIGHT)
+_flat_rule = ("QGroupBox#log_group { border: none; background-color: "
+              + theme_kit.LIGHT["log_tint"])
+check("log panel QSS is flat (border: none, tinted)",
+      _flat_rule in _qss)
+check("log list rides transparent on the tint",
+      "QTextEdit#log_list" in _qss and "background: transparent" in _qss)
+check("retry banner QSS present", "QWidget#retry_banner" in _qss)
+check("filter chips are borderless and quiet",
+      "QPushButton#log_filter" in _qss)
+
+# 5e. v0.32 — the RETRY BANNER: a live count of unfinished links from
+#     the previous batch (LinkTracker's reconciliation read — never
+#     parsed from log text), shown only while the count is positive.
+import json as _json
+import tempfile as _tempfile
+_vault_tmp = _tempfile.mkdtemp(prefix="gc-smoke-vault-")
+def _write_manifest(links):
+    with open(os.path.join(_vault_tmp, "links_manifest.json"), "w",
+              encoding="utf-8") as fh:
+        _json.dump({"links": links}, fh)
+w.vault_combo.blockSignals(True)   # never persist the scratch vault
+w.vault_combo.setCurrentText(_vault_tmp)
+_write_manifest([])   # no manifest links → banner hidden
+w._refresh_retry_banner()
+check("retry banner hidden with nothing unfinished",
+      not w.retry_banner.isVisibleTo(w))
+_write_manifest([
+    {"url": "https://github.com/a/one", "status": "failed"},
+    {"url": "https://github.com/b/two", "status": "pending"},
+])
+w._refresh_retry_banner()
+check("retry banner shows the LIVE unfinished count",
+      w.retry_banner.isVisibleTo(w) and "2 links" in w._retry_banner_text.text())
+check("banner Retry wired to the reconciliation re-run",
+      hasattr(w, "_retry_reconciliation_links"))
+_note = os.path.join(_vault_tmp, "note.md")
+open(_note, "w", encoding="utf-8").write("ok")
+_write_manifest([
+    {"url": "https://github.com/a/one", "status": "processed",
+     "note_path": _note},
+])
+w._refresh_retry_banner()
+check("a clean batch hides the banner",
+      not w.retry_banner.isVisibleTo(w))
+w.vault_combo.blockSignals(False)
+
+# 5f. v0.32 — the window SIZE is remembered (QSettings round-trip).
+w.resize(820, 462)
+w._save_window_size()
+_saved = QSettings(_SIZE_ORG, _SIZE_APP).value(_SIZE_KEY)
+check("_save_window_size persists a QSize",
+      isinstance(_saved, QSize) and _saved == QSize(820, 462))
+w2 = MainWindow()
+check("a fresh launch restores the saved size",
+      w2.width() == 820 and w2.height() == 462)
+QSettings(_SIZE_ORG, _SIZE_APP).remove(_SIZE_KEY)
 
 # 6. Unified 404-quarantine API on the shared cache class (v0.09)
 for m in ("record_404", "is_dead_link", "get_dead_url_set", "get_dead_urls",
@@ -176,6 +275,7 @@ print(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} smoke checks passed")
 if failed:
     print("FAILED:", ", ".join(failed))
     sys.exit(1)
-print("GUI smoke OK — v0.31 merged lineage verified (v0.08 redesign + "
-      "v0.07.2 model picker + unified quarantine + balance pass: one "
-      "status card, state indicator, empty state, resizable window)")
+print("GUI smoke OK — v0.32 merged lineage verified (v0.08 redesign + "
+      "v0.07.2 model picker + unified quarantine + v0.31 balance pass + "
+      "v0.32 five-change pass: shorter window, Stop toggle, flat log, "
+      "retry banner, QSettings size)")
