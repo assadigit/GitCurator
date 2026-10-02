@@ -165,6 +165,13 @@ class ProcessingControlMixin:
         self._batch_running = True
         self._set_hero_state('running')
         self.progress_bar.setValue(0)
+        # v0.34 (follow-up review): the bar is value-driven again for this
+        # run — drop any resting RESULT segments left by the previous
+        # batch (guarded: headless test stubs replace the bar with a
+        # SimpleNamespace).
+        _seg_clear = getattr(self.progress_bar, 'clearResultSegments', None)
+        if callable(_seg_clear):
+            _seg_clear()
         # v31.1 spec: the determinate progress bar is visible ONLY while a
         # batch job runs — show it now, label it with the current item as
         # the batch progresses (update_progress / update_status).
@@ -241,6 +248,10 @@ class ProcessingControlMixin:
         """
         if total > 0:
             self.progress_bar.setMaximum(total)
+        # v0.34: a live batch owns the bar — no resting result segments.
+        _seg_clear = getattr(self.progress_bar, 'clearResultSegments', None)
+        if callable(_seg_clear):
+            _seg_clear()
         self.progress_bar.setValue(current)
         # v33: standalone X / Y counter beside the bar (wireframe: "10/20").
         # v0.07: never shows "– / –" — a determinate bar always has numbers.
@@ -321,6 +332,11 @@ class ProcessingControlMixin:
         self._set_hero_state('sync')
         if hasattr(self, '_refresh_retry_banner'):
             self._refresh_retry_banner()
+        # v0.34 (follow-up review): remember this batch for the next
+        # launch — the CTA card's quiet "Last sync" line (guarded for
+        # the headless hero-flow stubs).
+        if hasattr(self, '_record_last_sync'):
+            self._record_last_sync()
         # v0.07: the PROCESSED counter falls back to the manifest's real
         # totals the moment a batch ends (never back to a blank "– / –").
         self._refresh_pipeline_counter()

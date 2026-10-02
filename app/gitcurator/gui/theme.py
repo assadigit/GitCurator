@@ -348,6 +348,10 @@ def _app_rules(t: Dict[str, str]) -> str:
             QLabel#progress_count {{ font-family: 'Consolas', 'Monaco', 'Menlo', monospace; font-size: 15px; font-weight: 700; color: {t['accent']}; background: transparent; }}
             QLabel#pipeline_caption {{ color: {t['pipeline_caption']}; font-size: 11px; font-weight: 700; background: transparent; }}
             QLabel#pipeline_state_text {{ font-size: 12px; background: transparent; }}
+            /* v0.34 (follow-up review): the quiet LAST-SYNC line under the
+               progress row — one muted answer to "what happened last
+               time" the moment the app reopens. */
+            QLabel#last_sync_line {{ font-size: 11px; color: {t['text_muted']}; background: transparent; }}
             /* the log card's empty state — muted, so it never competes
                with the SYNC button */
             QWidget#log_empty {{ background: transparent; }}
@@ -358,6 +362,10 @@ def _app_rules(t: Dict[str, str]) -> str:
             QPushButton#log_filter:checked {{ background: {t['accent']}; color: {t['on_accent']}; }}
             QPushButton#log_filter:checked:hover {{ background: {shade(t['accent'])}; }}
             QPushButton#log_filter:focus {{ outline: 2px solid {t['focus']}; outline-offset: 1px; }}
+            /* v0.34 (follow-up review): the whole toolbar is disabled while
+               the log is empty — filters/search/clear do nothing with no
+               entries, so they grey out until the first row appears. */
+            QPushButton#log_filter:disabled {{ background: transparent; color: {t['text_disabled']}; }}
             QLineEdit#log_search {{ padding: 4px 8px; }}
             QLineEdit#log_search:focus {{ padding: 3px 7px; }}
             QLabel#logo_box {{ background-color: {t['select_bg']}; border-radius: 7px; font-size: 14px; }}
@@ -440,6 +448,15 @@ def _button_qss(t: Dict[str, str]) -> str:
             QPushButton[btn_kind="icon"] {{ background-color: {t['sheet']}; color: {t['accent']}; border: 1px solid {t['icon_border']}; font-size: 16px; font-weight: 600; padding: 0; border-radius: 8px; }}
             QPushButton[btn_kind="icon"]:hover {{ background-color: {t['sheet_hover']}; border-color: {t['accent']}; }}
             QPushButton[btn_kind="icon"]:pressed {{ background-color: {t['sheet_hover']}; }}
+            /* v0.34 (follow-up review): the icon buttons (gear + theme
+               toggle) carry Qt.TabFocus focus POLICY in ui.py — a mouse
+               click can never focus them, so this :focus outline appears
+               ONLY for keyboard Tab navigation. (QSS :focus-visible was
+               tested on Qt 6.11 and silently never matches; the policy
+               achieves the same effect version-independently. The old
+               click-then-clearFocus trick failed when the Settings
+               dialog returned focus to the gear — the "stuck" purple
+               square.) */
             QPushButton[btn_kind="icon"]:focus {{ outline: 2px solid {t['accent']}; outline-offset: 2px; }}
             QPushButton[btn_kind="hero_primary"] {{ background-color: {t['hero_fill']}; color: {t['hero_text']}; font-weight: 800; font-size: 14px; padding: 8px 22px; border: none; border-radius: 8px; }}
             QPushButton[btn_kind="hero_primary"]:hover {{ background-color: {t['hero_hover']}; }}

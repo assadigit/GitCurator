@@ -341,12 +341,18 @@ class ThemeMixin:
                                     self._hero_text_color(), 18)
             # v0.32: the retry banner's warning glyph re-tints too.
             self._refresh_retry_banner_tint()
-            # v0.31.0: the pipeline-state glyph + the empty-state glyph.
+            # v0.31.0: the pipeline-state glyph + the empty-state glyph
+            # (v0.34: the 'list' glyph replaced the inbox tray — it read
+            # as "two eyes" at 36px).
             self._set_pipeline_state(getattr(self, '_pipeline_state', 'idle'))
             if hasattr(self, '_log_empty_icon'):
                 t = _theme.DARK if dark else _theme.LIGHT
                 self._log_empty_icon.setPixmap(
-                    _icons.pixmap('inbox', t['text_muted'], 36))
+                    _icons.pixmap('list', t['text_muted'], 36))
+            # v0.34: the SegmentBar paints from the theme tokens at render
+            # time — one explicit update so the flip is immediate.
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.update()
             # Log panel controls.
             hint = COLORS['hint_dark'] if dark else COLORS['hint_light']
             if hasattr(self, '_log_search_action'):

@@ -67,6 +67,85 @@ from gitcurator.gui.link_tracker import LinkTracker
 
 from gitcurator.gui.dialogs import SettingsDialog
 
+
+class SegmentBar(QProgressBar):
+    """v0.34 (follow-up review): the progress bar that agrees with its
+    number. The old bar reset to empty at rest while the counter still
+    read "261 / 881" — the eye saw "nothing happened."
+
+    Two modes, one widget (a QProgressBar subclass, so every existing
+    setValue/setMaximum/setFormat call site keeps working):
+
+    * BATCH mode (default): the ordinary determinate fill — accent
+      chunk, value/maximum driven, exactly as before.
+    * RESULT mode (``setResultSegments(done, total)``): the resting
+      verdict of the LAST batch as two segments — green = saved, amber
+      = needs retry (the retry banner's amber) — over the track, with a
+      2px track gap between them. Same manifest read as the PROCESSED
+      counter (_refresh_pipeline_counter), so the bar and the number
+      always tell ONE story. Cleared by clearResultSegments() when a
+      new batch starts (or a fetch is merely pending — fetched is not
+      failed).
+
+    Painted from the theme kit tokens at paint time (the widget reads
+    the window's _dark_mode, so a theme flip just needs update()).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._seg_done = 0
+        self._seg_total = 0
+
+    def setResultSegments(self, done: int, total: int):
+        self._seg_done = max(0, int(done or 0))
+        self._seg_total = max(0, int(total or 0))
+        self.update()
+
+    def clearResultSegments(self):
+        if self._seg_done or self._seg_total:
+            self._seg_done = 0
+            self._seg_total = 0
+            self.update()
+
+    def resultSegments(self):
+        return (self._seg_done, self._seg_total)
+
+    def paintEvent(self, _ev):
+        win = self.window()
+        dark = bool(getattr(win, '_dark_mode', False)) if win is not None else False
+        t = _theme.DARK if dark else _theme.LIGHT
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        radius = h / 2.0
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(0.0, 0.0, w, h), radius, radius)
+        p.save()
+        p.setClipPath(clip)
+        p.fillRect(QRectF(0.0, 0.0, w, h), QColor(t['progress_track']))
+        if self._seg_total > 0:
+            # Result mode: green saved (left) · track gap · amber
+            # needs-retry (right). A one-sided result fills its side
+            # edge-to-edge with no gap.
+            failed = max(0, self._seg_total - self._seg_done)
+            gap = 2.0 if (self._seg_done and failed) else 0.0
+            usable = w - gap
+            dw = usable * (self._seg_done / self._seg_total)
+            fw = usable * (failed / self._seg_total)
+            if self._seg_done:
+                p.fillRect(QRectF(0.0, 0.0, dw, h), QColor(t['success']))
+            if failed:
+                p.fillRect(QRectF(w - fw, 0.0, fw, h), QColor(t['warning']))
+        else:
+            # Batch mode: the ordinary accent fill (value/maximum).
+            vmax = self.maximum()
+            if vmax > 0 and self.value() > 0:
+                frac = min(1.0, self.value() / float(vmax))
+                p.fillRect(QRectF(0.0, 0.0, w * frac, h),
+                           QColor(t['progress_chunk']))
+        p.restore()
+
+
 class UiMixin:
     """UiMixin"""
 
@@ -1094,8 +1173,10 @@ class UiMixin:
         # check uses a 2s socket timeout and runs on the GUI thread.
         # v0.07: the dot is the unified 'dot' SVG glyph (was a full-color
         # emoji circle); v0.31.0: the label reads "Proxy: <state>";
-        # v0.33.0: while idle it drops the state word ("Proxy —") — the
-        # pipeline state group below already spells "Idle".
+        # v0.33.0 briefly dropped the idle word ("Proxy —") — v0.34
+        # (follow-up review) restores a REAL word for every state
+        # ("Proxy: off" / "connected" / "unreachable"), which still
+        # avoids the pipeline row's "Idle".
         self.proxy_status_label = QLabel()
         self.proxy_status_label.setFixedSize(16, 16)
         self.proxy_status_label.setToolTip("Proxy status — checking...")
@@ -1103,25 +1184,31 @@ class UiMixin:
         self.proxy_status_label.setAccessibleName("Proxy status")
         self.proxy_status_label.setPixmap(_icons.pixmap('dot', '#8E8A90', 12))
         top_bar.addWidget(self.proxy_status_label)
-        self.proxy_status_text = QLabel("Proxy: Checking…")
+        self.proxy_status_text = QLabel("Proxy: checking…")
         self.proxy_status_text.setToolTip("Proxy status — checking...")
         top_bar.addWidget(self.proxy_status_text)
         top_bar.addSpacing(8)
 
         # v0.31.0 (balance pass): the gear and the theme toggle are now the
         # SAME button — 34×34 square (a ≥32px click target), one border
-        # style, and the focus ring appears only for KEYBOARD focus (a
-        # mouse click clears focus, so the outline never lingers).
+        # style, and the focus ring appears only for KEYBOARD focus.
+        # v0.34 (follow-up review): the old click-then-clearFocus trick
+        # failed when the Settings dialog RETURNED focus to the gear — a
+        # thick purple square that read as "selected" lingered on screen.
+        # The durable fix is the focus POLICY: TabFocus accepts keyboard
+        # Tab focus only, so a mouse click can never focus these buttons
+        # and the ring is genuinely keyboard-only (QSS :focus-visible was
+        # tested on Qt 6.11 and silently never matches — the policy is
+        # the version-independent equivalent).
         self.settings_btn = QPushButton()
         self.settings_btn.setFixedSize(34, 34)
+        self.settings_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.settings_btn.setToolTip(
             "Settings — credentials, proxy, vault, LLM, input modes,\n"
             "bot queue, sources, dashboard and backup (all former tabs)."
         )
         self.settings_btn.setAccessibleName("Settings")
         self.settings_btn.clicked.connect(self._open_settings)
-        self.settings_btn.clicked.connect(
-            lambda _checked=False: self.settings_btn.clearFocus())
         self._style_btn(self.settings_btn, 'icon')
         top_bar.addWidget(self.settings_btn)
 
@@ -1131,11 +1218,10 @@ class UiMixin:
         # _sync_theme_toggle_btn() on init + every flip.
         self.theme_toggle_btn = QPushButton()
         self.theme_toggle_btn.setFixedSize(34, 34)
+        self.theme_toggle_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)   # v0.34: keyboard-only focus
         self.theme_toggle_btn.setToolTip("Switch to dark mode (current: Light)")
         self.theme_toggle_btn.setAccessibleName("Toggle dark or light theme")
         self.theme_toggle_btn.clicked.connect(self.toggle_theme)
-        self.theme_toggle_btn.clicked.connect(
-            lambda _checked=False: self.theme_toggle_btn.clearFocus())
         self._style_btn(self.theme_toggle_btn, 'icon')
         top_bar.addWidget(self.theme_toggle_btn)
         main_layout.addLayout(top_bar)
@@ -1164,13 +1250,19 @@ class UiMixin:
         # processing_finished restores SYNC (hero._set_hero_state and the
         # 200ms GUI-state mirror, hero._sync_run_button).
         self._hero_state = 'sync'   # sync | fetching | process | running
-        # v0.32 (five-change pass): SYNC grows to 280×56 — clearly the
-        # LARGEST control on the screen (~1.4× its old height; Fitts's
-        # Law), still first in the tab order, with Test Connection beside
-        # it at 180×40 (secondary: outline, no fill), bottom-aligned so
-        # the pair reads as one group anchored to the row's base.
+        # v0.34 (follow-up review): the CTA band is ONE balanced group —
+        # both buttons share the 56px height (the old 40px Test Connection
+        # bottom-aligned beside the tall hero read as mismatched), and
+        # they FILL the row: SYNC takes two-thirds of the card's width
+        # (Fitts's Law — the primary action owns the room), Test
+        # Connection the remaining third, so the right half of the card
+        # is never empty. The fill contrast still marks ONE primary
+        # action (accent fill vs outline — Hick's Law kept).
         self.start_btn = QPushButton("SYNC")
-        self.start_btn.setFixedSize(280, 56)
+        self.start_btn.setFixedHeight(56)
+        self.start_btn.setMinimumWidth(220)
+        self.start_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.start_btn.setToolTip(
             "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
             "(repos already in the vault and decommissioned ones are skipped).\n"
@@ -1182,10 +1274,13 @@ class UiMixin:
 
         cta_row = QHBoxLayout()
         cta_row.setSpacing(10)
-        cta_row.addWidget(self.start_btn)   # hero button, start-aligned
+        cta_row.addWidget(self.start_btn, 2)   # two-thirds of the row
 
         self.test_btn = QPushButton("Test Connection")
-        self.test_btn.setFixedSize(180, 40)
+        self.test_btn.setFixedHeight(56)
+        self.test_btn.setMinimumWidth(170)
+        self.test_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.test_btn.setToolTip(
             "Check that everything is up and ready, and show it in the log:\n"
             "① Vaults — found + writable (ready to receive notes)\n"
@@ -1195,8 +1290,7 @@ class UiMixin:
         )
         self._style_btn(self.test_btn, 'hero_secondary')
         self.test_btn.clicked.connect(self.test_all)
-        cta_row.addWidget(self.test_btn, 0, Qt.AlignmentFlag.AlignBottom)
-        cta_row.addStretch(1)   # the pair packs to the card's start
+        cta_row.addWidget(self.test_btn, 1)    # the remaining third
         cta_layout.addLayout(cta_row)
         # v0.23.0 — the LLM quick-switch row (Detect & Set Ollama / llama.cpp)
         # is GONE from the main view (owner request: "remove from the main
@@ -1274,9 +1368,14 @@ class UiMixin:
         # Progress bar — determinate, a permanent fixture of the status
         # card. v0.31.0: a pure 12px fill gauge — NO text inside (the old
         # "Ready" label moved out; the state word lives at the row's end).
-        # Labeled "Processing X of Y — repo-name" via update_progress()/
-        # update_status() while a batch runs (kept for tooltips/log).
-        self.progress_bar = QProgressBar()
+        # v0.34 (follow-up review): the widget is now a SegmentBar — at
+        # rest it renders the LAST batch's verdict as green-saved /
+        # amber-needs-retry segments, so the bar never contradicts its
+        # own number ("261 / 881" over an empty track read as "nothing
+        # happened"). Labeled "Processing X of Y — repo-name" via
+        # update_progress()/update_status() while a batch runs (kept for
+        # tooltips/log).
+        self.progress_bar = SegmentBar()
         self.progress_bar.setFormat("Ready")
         self.progress_bar.setFixedHeight(12)
         self.progress_bar.setTextVisible(False)
@@ -1304,6 +1403,19 @@ class UiMixin:
         self._pipeline_state = 'idle'
         self._set_pipeline_state('idle')
         cta_layout.addLayout(prog_row)
+
+        # v0.34 (follow-up review): the quiet LAST-SYNC line — one muted
+        # row under the progress row that answers "what happened last
+        # time" the moment the app reopens (the log always starts
+        # empty). Rendered from the QSettings record written at every
+        # batch end (see _record_last_sync); hidden until a first batch
+        # has ever finished.
+        self.last_sync_label = QLabel("")
+        self.last_sync_label.setObjectName("last_sync_line")
+        self.last_sync_label.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.last_sync_label.setVisible(False)
+        cta_layout.addWidget(self.last_sync_label)
         # v0.23.0 — the LLM quick-switch row (Detect & Set Ollama / llama.cpp)
         # is GONE from the main view (owner request: "remove from the main
         # view — the settings is enough"). Both buttons live on in Settings →
@@ -1492,6 +1604,9 @@ class UiMixin:
         # REAL numbers in the PROCESSED counter (manifest totals, not "- / -").
         self._refresh_main_icons()
         self._refresh_pipeline_counter()
+        # v0.34 (follow-up review): the quiet Last-sync line from the
+        # previous session's record (the log always reopens empty).
+        self._restore_last_sync()
 
         # Auto-check bot queue on startup (after proxy validation)
         # (QTimer comes from the module-level PyQt6 wildcard import — the old
@@ -1607,6 +1722,12 @@ class UiMixin:
                     f"{count} link{'s' if count != 1 else ''} from the "
                     "previous batch need retry")
                 self._set_status(self._retry_banner_text, 'warning', strong=True)
+                # v0.34 (follow-up review, small point): the button carries
+                # the count — "Retry 620" says what it will do.
+                self._retry_banner_btn.setText(f"Retry {count}")
+                self._retry_banner_btn.setToolTip(
+                    f"Reprocess the {count} unfinished link"
+                    f"{'s' if count != 1 else ''} from the previous batch")
                 banner.setVisible(True)
             else:
                 banner.setVisible(False)
@@ -1630,10 +1751,12 @@ class UiMixin:
             pass
 
     def _build_log_empty_state(self) -> QWidget:
-        """The log card's empty state: a quiet inbox glyph, a title line
-        and one short helper line, centered horizontally and vertically in
-        the LIST area. Kept muted (muted ink, no fill) so it never
-        competes with the SYNC button. The copy is chosen per context by
+        """The log card's empty state: a quiet LIST glyph (v0.34: the old
+        inbox tray read as "two eyes" at 36px — three plain rows say
+        "no entries" at one glance), a title line and one short helper
+        line, centered horizontally and vertically in the LIST area. Kept
+        muted (muted ink, no fill) so it never competes with the SYNC
+        button. The copy is chosen per context by
         _update_log_empty_state()."""
         box = QWidget()
         box.setObjectName("log_empty")
@@ -1644,7 +1767,7 @@ class UiMixin:
         self._log_empty_icon = QLabel()
         self._log_empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._log_empty_icon.setPixmap(
-            _icons.pixmap('inbox', '#8E8A90', 36))
+            _icons.pixmap('list', '#8E8A90', 36))
         self._log_empty_icon.setAccessibleName("No log entries")
         lay.addWidget(self._log_empty_icon)
         self._log_empty_title = QLabel("No activity yet")
@@ -1661,15 +1784,33 @@ class UiMixin:
         lay.addStretch(1)
         return box
 
+    def _set_log_toolbar_enabled(self, enabled: bool):
+        """v0.34 (follow-up review): the log toolbar (filter chips · search
+        · clear) does NOTHING on an empty log — grey it out until the
+        first entry appears, and grey it again after a clear. Purely
+        presentational: the handlers already no-op safely."""
+        widgets = [getattr(self, name, None) for name in (
+            'log_filter_all', 'log_filter_errors', 'log_filter_warnings',
+            'log_filter_success', 'log_search', '_clear_log_btn')]
+        for w in widgets:
+            if w is not None:
+                try:
+                    w.setEnabled(enabled)
+                except RuntimeError:
+                    pass  # widget already destroyed during shutdown
+
     def _update_log_empty_state(self):
         """Show the empty state ONLY while the list has no visible entries,
         and pick the copy for the context: a first run with nothing yet ·
         a sync that found nothing new · a filter/search with no matches.
-        The first visible entry removes it."""
+        The first visible entry removes it. v0.34: the toolbar follows
+        suit — disabled while there are no ENTRIES at all (filters and
+        search still work the moment rows exist)."""
         if not hasattr(self, '_log_empty'):
             return
         try:
             entries = getattr(self, '_all_log_entries', None) or []
+            self._set_log_toolbar_enabled(bool(entries))
             filt = getattr(self, '_log_filter', 'all')
             search = self.log_search.text().lower() if hasattr(self, 'log_search') else ""
             visible = 0
@@ -1891,12 +2032,35 @@ class UiMixin:
         self.log_text.reset_full_texts()
         self._update_log_empty_state()
 
+    def _manifest_counts(self):
+        """(done, total) from the current vault's links manifest — the ONE
+        read shared by the PROCESSED counter, the SegmentBar's resting
+        verdict and the Last-sync line (v0.34). Best-effort: (0, 0) when
+        there is no manifest yet or it is unreadable."""
+        try:
+            vault = self.vault_combo.currentText() if hasattr(self, 'vault_combo') else ''
+            if vault and os.path.isdir(vault):
+                manifest_path = os.path.join(vault, 'links_manifest.json')
+                with open(manifest_path, 'r', encoding='utf-8') as fh:
+                    manifest = json.load(fh)
+                entries = manifest.get('links', []) or []
+                total = len(entries)
+                done = sum(1 for e in entries
+                           if e.get('status') in ('processed', 'recorded', 'skipped'))
+                return done, total
+        except Exception:
+            pass
+        return 0, 0
+
     def _refresh_pipeline_counter(self):
         """v0.07 (design review “make the status readout say something”):
         keep the PROCESSED x / y counter truthful at ALL times — live counts
         while a batch runs, fetched-pending counts after SYNC, and the last
         batch manifest's real totals while idle (the numbers used to live
-        only in a log line; the dedicated widget said "- / -")."""
+        only in a log line; the dedicated widget said "- / -").
+        v0.34 (follow-up review): the SegmentBar rides along — at rest it
+        renders the same manifest's verdict as green-saved / amber-needs-
+        retry segments, so the bar never contradicts its own number."""
         if not hasattr(self, 'progress_count'):
             return
         # While a batch runs, update_progress() owns the counter. v0.32:
@@ -1908,28 +2072,95 @@ class UiMixin:
         if hasattr(self, 'start_btn') and not self.start_btn.isEnabled():
             return
         pending = getattr(self, '_bot_queue_urls', None) or []
-        try:
-            if pending:
-                self.progress_count.setText(f"0 / {len(pending)}")
-                self.progress_count.setToolTip(
-                    f"{len(pending)} fetched item(s) ready to process")
-                return
-            done = total = 0
-            vault = self.vault_combo.currentText() if hasattr(self, 'vault_combo') else ''
-            if vault and os.path.isdir(vault):
-                manifest_path = os.path.join(vault, 'links_manifest.json')
-                with open(manifest_path, 'r', encoding='utf-8') as fh:
-                    manifest = json.load(fh)
-                entries = manifest.get('links', []) or []
-                total = len(entries)
-                done = sum(1 for e in entries
-                           if e.get('status') in ('processed', 'recorded', 'skipped'))
-        except Exception:
-            done = total = 0   # no manifest yet (or unreadable) — honest zero
+        _bar = getattr(self, 'progress_bar', None)
+        if pending:
+            self.progress_count.setText(f"0 / {len(pending)}")
+            self.progress_count.setToolTip(
+                f"{len(pending)} fetched item(s) ready to process")
+            # Fetched is NOT failed — no result segments while a fetch
+            # merely waits to be processed (the track stays honest).
+            if _bar is not None and hasattr(_bar, 'clearResultSegments'):
+                _bar.clearResultSegments()
+            return
+        done, total = self._manifest_counts()
         self.progress_count.setText(f"{done} / {total}")
         if total:
             self.progress_count.setToolTip(
                 f"{done} of {total} links processed (last batch manifest)")
         else:
             self.progress_count.setToolTip("No batch manifest yet — SYNC to fetch items")
+        # v0.34: the bar tells the same story as the number — green saved
+        # + amber needs-retry (never an empty track under "261 / 881").
+        if _bar is not None and hasattr(_bar, 'setResultSegments'):
+            _bar.setResultSegments(done, total)
+
+    # -- v0.34 (follow-up review): the Last-sync record + line ----------
+
+    _LAST_SYNC_KEY = "last_sync"
+
+    def _record_last_sync(self):
+        """After every batch: remember WHEN it ended and its saved /
+        needs-retry counts (QSettings) — the next launch renders the CTA
+        card's quiet "Last sync" line from this record, so a reopened
+        app answers “what happened last time” without opening anything.
+        Best-effort — never raises."""
+        try:
+            done, total = self._manifest_counts()
+            QSettings("GitCurator", "MainWindow").setValue(
+                self._LAST_SYNC_KEY,
+                f"{datetime.now().isoformat(timespec='seconds')}|{done}|{total}")
+            self._render_last_sync()
+        except Exception:
+            pass
+
+    def _restore_last_sync(self):
+        """Startup half of the Last-sync record (see _record_last_sync):
+        render the line from whatever the last session recorded."""
+        try:
+            self._render_last_sync()
+        except Exception:
+            pass
+
+    def _render_last_sync(self):
+        """Paint the Last-sync line from the QSettings record; hidden when
+        no batch has ever finished (or the record is unreadable)."""
+        if not hasattr(self, 'last_sync_label'):
+            return
+        try:
+            raw = QSettings("GitCurator", "MainWindow").value(
+                self._LAST_SYNC_KEY, "")
+            text = ""
+            if raw:
+                try:
+                    stamp, done_s, total_s = str(raw).split("|")
+                    done, total = int(done_s), int(total_s)
+                    when = self._last_sync_when(stamp)
+                    if total <= 0:
+                        text = f"Last sync: {when}"
+                    elif done >= total:
+                        text = f"Last sync: {when} · {total} saved"
+                    else:
+                        text = (f"Last sync: {when} · {done} saved · "
+                                f"{total - done} need retry")
+                except (ValueError, TypeError):
+                    text = ""
+            self.last_sync_label.setText(text)
+            self.last_sync_label.setToolTip(
+                text + " (the log starts empty each launch)" if text else "")
+            self.last_sync_label.setVisible(bool(text))
+        except RuntimeError:
+            pass  # widgets already destroyed during shutdown
+
+    @staticmethod
+    def _last_sync_when(stamp: str) -> str:
+        """"today 23:03" for a same-day record, otherwise the full date —
+        the reviewer's quiet-line copy."""
+        try:
+            when = datetime.fromisoformat(stamp)
+        except (ValueError, TypeError):
+            return stamp
+        now = datetime.now()
+        if when.date() == now.date():
+            return f"today {when:%H:%M}"
+        return f"{when:%Y-%m-%d %H:%M}"
 

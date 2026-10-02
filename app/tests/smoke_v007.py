@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""v0.32 GUI smoke check (offscreen): merged lineage — v0.08 redesign +
+"""v0.34 GUI smoke check (offscreen): merged lineage — v0.08 redesign +
 v0.07.2 model picker + v0.09 unified 404 quarantine + v0.31 main-window
 balance pass + v0.32 five-change pass (shorter window, one Stop toggle,
-flat log, retry banner) + v0.33 idle dedup (proxy label).
+flat log, retry banner) + v0.33 idle dedup + v0.34 follow-up review
+(segmented result bar, balanced CTA band, real proxy words, keyboard-only
+focus on the icon buttons, empty-log toolbar disabled, Last-sync line).
 
 Run:  QT_QPA_PLATFORM=offscreen python tests/smoke_v007.py
 Exits non-zero on any failure; prints one line per check.
@@ -15,7 +17,7 @@ _APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _APP)
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
-from PyQt6.QtCore import QSettings, QSize  # noqa: E402
+from PyQt6.QtCore import QSettings, QSize, Qt  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
@@ -37,8 +39,16 @@ def check(name, cond):
 _SIZE_KEY = "main_window/size"
 _SIZE_ORG, _SIZE_APP = "GitCurator", "MainWindow"
 QSettings(_SIZE_ORG, _SIZE_APP).remove(_SIZE_KEY)
+# v0.34: scrub the Last-sync record too — the line's contract below is
+# tested on a KNOWN first-run state.
+QSettings(_SIZE_ORG, _SIZE_APP).remove("last_sync")
 
 w = MainWindow()
+# v0.34: the CTA-band width contracts need a real layout pass — show the
+# window offscreen and let the layout settle (state checks elsewhere in
+# this file are geometry-free and unaffected).
+w.show()
+app.processEvents()
 
 # 1. Window defaults — v0.32 (five-change pass): a THIRD shorter
 #    (900×600 → 900×400; the empty log used to fill most of the window).
@@ -57,12 +67,14 @@ for label, btn in (("settings_btn", w.settings_btn), ("theme_toggle_btn", w.them
     check(f"{label}.height() == 34", btn.height() == 34)
     check(f"{label} has an icon (no text glyph to clip)", not btn.icon().isNull() or not btn.text())
 
-# 3. Icons module: official Lucide pack (25 glyphs — 12 v0.08 + 9 sidebar
-#    v0.30.0 + 4 state glyphs v0.31.0), renderable
-check("icons.ICON pack is loaded (25 official Lucide glyphs)",
-      len(icons.ICONS) == 25 and "settings" in icons.ICONS and "sun" in icons.ICONS
+# 3. Icons module: official Lucide pack (26 glyphs — 12 v0.08 + 9 sidebar
+#    v0.30.0 + 4 state glyphs v0.31.0 + the list empty-state glyph v0.34),
+#    renderable
+check("icons.ICON pack is loaded (26 official Lucide glyphs)",
+      len(icons.ICONS) == 26 and "settings" in icons.ICONS and "sun" in icons.ICONS
       and "circle" in icons.ICONS and "check" in icons.ICONS
-      and "triangle-alert" in icons.ICONS and "circle-x" in icons.ICONS)
+      and "triangle-alert" in icons.ICONS and "circle-x" in icons.ICONS
+      and "list" in icons.ICONS and "inbox" in icons.ICONS)
 check("QtSvg available in this env", icons._HAS_SVG)
 if icons._HAS_SVG:
     pm = icons.pixmap('settings', '#5F54B4', 16)
@@ -94,17 +106,16 @@ check("log_text minimum height >= 132 (~6 rows)", w.log_text.minimumHeight() >= 
 # 5b. v0.31.0 balance pass — the status card + the log card's states
 check("status card hosts the buttons AND the progress row",
       w.progress_bar.parentWidget() is w.start_btn.parentWidget())
-# v0.32 (five-change pass): SYNC grows to 280×56 — clearly the LARGEST
-# control (~1.4× its old height); Test Connection stays 180×40 secondary.
-check("SYNC button fixed at 280×56",
-      w.start_btn.width() == 280 and w.start_btn.height() == 56)
-check("Test Connection fixed at 180×40",
-      w.test_btn.width() == 180 and w.test_btn.height() == 40)
-check("SYNC clearly the largest control",
-      w.start_btn.width() > w.test_btn.width()
-      and w.start_btn.height() > w.test_btn.height())
-check("SYNC narrower than the card (does not fill it)",
-      w.start_btn.width() < w.progress_bar.parentWidget().width() - 100)
+# v0.34 (follow-up review): the CTA band is ONE balanced group — BOTH
+# buttons share the 56px height (no more mismatched 40px secondary) and
+# they FILL the row: SYNC two-thirds, Test Connection one third.
+check("SYNC and Test Connection share the 56px height",
+      w.start_btn.height() == 56 and w.test_btn.height() == 56)
+check("SYNC takes ~two-thirds, Test the remaining third",
+      abs(w.start_btn.width() - 2 * w.test_btn.width()) <= 4)
+check("the pair fills the CTA row (no empty right half)",
+      abs(w.start_btn.width() + 10 + w.test_btn.width()
+          - (w.start_btn.parentWidget().width() - 28)) <= 2)
 check("progress bar is a 12px gauge with no text",
       w.progress_bar.height() == 12 and not w.progress_bar.isTextVisible())
 check("pipeline state word renders",
@@ -178,6 +189,9 @@ check("log list rides transparent on the tint",
 check("retry banner QSS present", "QWidget#retry_banner" in _qss)
 check("filter chips are borderless and quiet",
       "QPushButton#log_filter" in _qss)
+check("empty-log toolbar greys out (QSS disabled rule)",
+      "QPushButton#log_filter:disabled" in _qss)
+check("last-sync line QSS present", "QLabel#last_sync_line" in _qss)
 
 # 5e. v0.32 — the RETRY BANNER: a live count of unfinished links from
 #     the previous batch (LinkTracker's reconciliation read — never
@@ -202,6 +216,9 @@ _write_manifest([
 w._refresh_retry_banner()
 check("retry banner shows the LIVE unfinished count",
       w.retry_banner.isVisibleTo(w) and "2 links" in w._retry_banner_text.text())
+check("banner Retry button carries the count",
+      w._retry_banner_btn.text() == "Retry 2"
+      and "2" in w._retry_banner_btn.toolTip())
 check("banner Retry wired to the reconciliation re-run",
       hasattr(w, "_retry_reconciliation_links"))
 _note = os.path.join(_vault_tmp, "note.md")
@@ -226,32 +243,77 @@ check("a fresh launch restores the saved size",
       w2.width() == 820 and w2.height() == 462)
 QSettings(_SIZE_ORG, _SIZE_APP).remove(_SIZE_KEY)
 
-# 5g. v0.33 (idle dedup) — at rest "Idle" appears ONCE: the pipeline state
-#     group keeps the word; the header proxy monitor drops it ("Proxy —")
-#     and leans on the dot, the tooltip and the accessible name instead.
+# 5g. v0.34 (follow-up review) — the header proxy label SPELLS its
+#     state (the v0.33 dash "Proxy —" read as nothing): "Proxy: off",
+#     still never colliding with the pipeline row's "Idle". The icon
+#     buttons also take KEYBOARD focus only — a click can no longer
+#     leave the focus ring lingering (the "stuck purple square").
 w._set_pipeline_state('idle')
-w._set_proxy_status_text('Idle', 'Proxy disabled')
 check("pipeline state word still spells Idle at rest",
       w.pipeline_state_text.text() == 'Idle')
-check("idle proxy label drops the state word (no second 'Idle')",
-      w.proxy_status_text.text() == "Proxy —")
-check("idle label still has companion text for the dot (WCAG 1.4.1)",
-      w.proxy_status_text.text().strip() != "")
-check("idle accessible name contains the visible label (2.5.3)",
-      w.proxy_status_text.accessibleName().startswith("Proxy —"))
-check("idle accessible name says what the dash means (disabled)",
-      "disabled" in w.proxy_status_text.accessibleName())
-check("idle tooltip keeps the full meaning",
+w._set_proxy_status_text('Idle', 'Proxy disabled')
+check("idle proxy label spells a real word",
+      w.proxy_status_text.text() == "Proxy: off")
+check("accessible name matches the visible label (2.5.3)",
+      w.proxy_status_text.accessibleName() == "Proxy: off")
+check("idle tooltip keeps the detail",
       w.proxy_status_text.toolTip() == "Proxy disabled")
 w._set_proxy_status_text('Connected', 'Proxy OK (127.0.0.1:10808)')
-check("connected keeps its word (no collision with pipeline states)",
-      w.proxy_status_text.text() == "Proxy: Connected"
-      and w.proxy_status_text.accessibleName() == "Proxy: Connected")
+check("connected keeps its word",
+      w.proxy_status_text.text() == "Proxy: connected")
 w._set_proxy_status_text('Error', 'Proxy unreachable (127.0.0.1:10808)')
-check("error keeps its word",
-      w.proxy_status_text.text() == "Proxy: Error")
-check("no proxy state word ever duplicates the pipeline's 'Idle'",
+check("error becomes the honest word",
+      w.proxy_status_text.text() == "Proxy: unreachable")
+check("no proxy word ever duplicates the pipeline's 'Idle'",
       'Idle' not in w.proxy_status_text.text())
+check("icon buttons take KEYBOARD focus only (no click-focus ring)",
+      w.settings_btn.focusPolicy() == Qt.FocusPolicy.TabFocus
+      and w.theme_toggle_btn.focusPolicy() == Qt.FocusPolicy.TabFocus)
+check("the app opens with NO widget wearing the focus ring",
+      w.focusWidget() in (w, None) and not w.settings_btn.hasFocus()
+      and not w.start_btn.hasFocus())
+
+# 5h. v0.34 (follow-up review) — the bar that agrees with its number
+#     (SegmentBar: green saved / amber needs-retry at rest), the quiet
+#     Last-sync line (persisted across launches), and the toolbar that
+#     greys out while the log is empty.
+from gitcurator.gui.main_window.ui import SegmentBar as _SegmentBar  # noqa: E402
+check("progress bar is a SegmentBar",
+      isinstance(w.progress_bar, _SegmentBar))
+_write_manifest([
+    {"url": "https://github.com/a/one", "status": "processed"},
+    {"url": "https://github.com/b/two", "status": "failed"},
+    {"url": "https://github.com/c/three", "status": "pending"},
+])
+w._refresh_pipeline_counter()
+check("counter reads the manifest (1 / 3)", w.progress_count.text() == "1 / 3")
+check("the bar carries the SAME verdict as segments",
+      w.progress_bar.resultSegments() == (1, 3))
+w.update_progress(2, 3)
+check("a live batch owns the bar (segments cleared, value-driven)",
+      w.progress_bar.resultSegments() == (0, 0) and w.progress_bar.value() == 2)
+w._record_last_sync()
+check("last-sync line renders the record",
+      w.last_sync_label.isVisibleTo(w)
+      and "1 saved" in w.last_sync_label.text()
+      and "2 need retry" in w.last_sync_label.text())
+w4 = MainWindow()
+check("a fresh launch restores the Last-sync line",
+      w4.last_sync_label.isVisibleTo(w4)
+      and "1 saved" in w4.last_sync_label.text())
+QSettings(_SIZE_ORG, _SIZE_APP).remove("last_sync")
+w._clear_log()
+check("log toolbar disabled while the log is empty",
+      not w.log_filter_all.isEnabled() and not w.log_search.isEnabled()
+      and not w._clear_log_btn.isEnabled())
+w.log_message("one row", "info")
+check("the first entry enables the toolbar",
+      w.log_filter_all.isEnabled() and w.log_search.isEnabled()
+      and w._clear_log_btn.isEnabled())
+w._clear_log()
+check("clear re-disables the toolbar",
+      not w.log_filter_all.isEnabled()
+      and not w._clear_log_btn.isEnabled())
 
 # 6. Unified 404-quarantine API on the shared cache class (v0.09)
 for m in ("record_404", "is_dead_link", "get_dead_url_set", "get_dead_urls",
@@ -302,7 +364,8 @@ print(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} smoke checks passed")
 if failed:
     print("FAILED:", ", ".join(failed))
     sys.exit(1)
-print("GUI smoke OK — v0.32 merged lineage verified (v0.08 redesign + "
+print("GUI smoke OK — v0.34 merged lineage verified (v0.08 redesign + "
       "v0.07.2 model picker + unified quarantine + v0.31 balance pass + "
-      "v0.32 five-change pass: shorter window, Stop toggle, flat log, "
-      "retry banner, QSettings size + v0.33 idle dedup: proxy label)")
+      "v0.32 five-change pass + v0.33 idle dedup + v0.34 follow-up review: "
+      "segmented bar, balanced CTA, real proxy words, keyboard-only focus, "
+      "empty-log toolbar, Last-sync line, Retry N)")

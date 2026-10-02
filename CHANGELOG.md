@@ -1,3 +1,75 @@
+## [0.34.0] — The follow-up review: a bar that agrees with its number, a balanced band, words that say what they mean — 2026-10-03
+
+Owner ask (session): the five-point follow-up review of the v0.33
+window, plus its small point. Picks: the segmented bar (the reviewer's
+own), equal-height CTA with SYNC at two-thirds (option a), and the
+"optional" Last-sync line INCLUDED (it completes the story the bar
+starts). Desktop-only release — the Worker stays at 0.28.0
+(`EXPECTED_WORKER_VERSION` unchanged). Suite stays **900** (zero test
+edits — the new bar calls are getattr-guarded for the headless
+hero-flow stubs), worker 40/40, offline golden 30/30 + 0 invalid,
+82/82 compiles, GUI smoke rewritten for the v0.34 contracts (98
+checks).
+
+**1. The segmented result bar.** "261 / 881" over an empty track read
+as "nothing happened" — the number and the bar disagreed. The bar is
+now a SegmentBar (a QProgressBar subclass — every existing
+setValue/setMaximum call site untouched): at rest it paints the last
+batch's verdict as two segments over the track — GREEN saved · a 2px
+track gap · AMBER needs-retry (the banner's amber), proportions from
+the same manifest read as the counter. While a batch runs it is the
+ordinary accent fill (value/maximum); a fetch that is merely pending
+clears the segments (fetched is not failed); a new batch clears them
+in `_start_worker`. Both themes, tokens read at paint time.
+
+**2. The CTA band is one balanced group.** Both buttons now share the
+56px height (the 40px bottom-aligned Test Connection read as
+mismatched beside the tall hero), and they FILL the row: SYNC takes
+two-thirds (stretch 2), Test Connection the remaining third (stretch
+1) — no more empty right half of the card. The fill contrast keeps
+ONE primary action (accent vs outline — Hick's Law held).
+
+**3. Words that say what they mean — and no stuck square.** The
+header proxy label spells a real word for every state: "Proxy: off ·
+connected · unreachable · checking…" (the v0.33 dash read as nothing;
+"off" still never collides with the pipeline row's "Idle"), dot and
+semantic ink matching as before. The gear's "thick purple square" was
+NOT a click leftover — the gear is the first tabbable child, so plain
+Qt handed it the initial focus at every launch and the keyboard-focus
+outline sat there from the first frame. Fixed at the root: the WINDOW
+now takes the initial focus (showEvent, once) and the icon buttons
+carry TabFocus policy — a click can never ring them; Tab still walks
+in and rings them properly (QSS `:focus-visible` was tested on Qt 6.11
+and silently never matches — the policy is the version-independent
+equivalent).
+
+**4. The log toolbar rests when the log is empty.** The filter chips,
+search box and clear button grey out until the first entry appears
+(and again after a clear) — they do nothing with no rows. The
+empty-state glyph is now the plain LIST glyph (three rows · bullet
+dots; the inbox tray read as "two eyes").
+
+**5. The Last-sync line.** One quiet muted row under the progress
+row: "Last sync: today 23:16 · 261 saved · 620 need retry" — written
+to QSettings at every batch end (timestamp + counts), restored at the
+next launch, so a reopened app answers "what happened last time"
+without opening anything. Hidden until a first batch has ever
+finished; an all-saved batch reads "· N saved".
+
+**Small point.** The banner button carries its count — "Retry 620"
+says what it will do (tooltip too).
+
+Gate: 900/900 Python (63s), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 98/98 (equal 56px heights ·
+2:1 fill · SegmentBar segments + batch-mode clear · "Proxy: off"
+words · TabFocus + no launch focus ring · empty-log toolbar ·
+Last-sync round-trip · Retry N · 26 glyphs), VLM visual verification
+across 7 offscreen screenshots + 3 focused crops (the reviewer's
+exact 261/620/881 story: counter "261 / 881" over a green-30% /
+amber-70% bar, banner "Retry 620", the Last-sync line, no ring on
+either header button, greyed toolbar, three-line list glyph, single
+accent fill while Syncing, no clipping in either theme).
+
 ## [0.33.0] — The idle dedup: the proxy label keeps quiet at rest, so "Idle" is said once — 2026-10-03
 
 Owner ask (session): the follow-up to the five-change pass — the user

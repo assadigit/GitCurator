@@ -233,6 +233,22 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
         except Exception:
             pass  # best-effort — never crash on a timer issue
 
+    # v0.34 (follow-up review): the app opens with NO focus ring anywhere.
+    # The gear button is the FIRST tabbable child, so plain Qt behavior
+    # hands it the initial focus at every launch — the keyboard-focus
+    # outline sat on the gear from the first frame (the reviewer's "stuck
+    # purple square"). The WINDOW itself now takes the initial focus;
+    # Tab still walks into the children and rings them properly (the
+    # icon buttons are TabFocus-only, so a click can never ring them).
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, '_gc_initial_focus_done', False):
+            self._gc_initial_focus_done = True
+            try:
+                self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
+            except RuntimeError:
+                pass  # never crash on a focus issue
 
     def _open_settings(self):
         """Open the Settings window (every former tab in a sidebar layout).
