@@ -1093,7 +1093,9 @@ class UiMixin:
         # 60 seconds by a QTimer (see __init__ end). Non-blocking: the
         # check uses a 2s socket timeout and runs on the GUI thread.
         # v0.07: the dot is the unified 'dot' SVG glyph (was a full-color
-        # emoji circle); v0.31.0: the label reads "Proxy: <state>".
+        # emoji circle); v0.31.0: the label reads "Proxy: <state>";
+        # v0.33.0: while idle it drops the state word ("Proxy —") — the
+        # pipeline state group below already spells "Idle".
         self.proxy_status_label = QLabel()
         self.proxy_status_label.setFixedSize(16, 16)
         self.proxy_status_label.setToolTip("Proxy status — checking...")

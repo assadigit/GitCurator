@@ -2,7 +2,7 @@
 """v0.32 GUI smoke check (offscreen): merged lineage — v0.08 redesign +
 v0.07.2 model picker + v0.09 unified 404 quarantine + v0.31 main-window
 balance pass + v0.32 five-change pass (shorter window, one Stop toggle,
-flat log, retry banner).
+flat log, retry banner) + v0.33 idle dedup (proxy label).
 
 Run:  QT_QPA_PLATFORM=offscreen python tests/smoke_v007.py
 Exits non-zero on any failure; prints one line per check.
@@ -226,6 +226,33 @@ check("a fresh launch restores the saved size",
       w2.width() == 820 and w2.height() == 462)
 QSettings(_SIZE_ORG, _SIZE_APP).remove(_SIZE_KEY)
 
+# 5g. v0.33 (idle dedup) — at rest "Idle" appears ONCE: the pipeline state
+#     group keeps the word; the header proxy monitor drops it ("Proxy —")
+#     and leans on the dot, the tooltip and the accessible name instead.
+w._set_pipeline_state('idle')
+w._set_proxy_status_text('Idle', 'Proxy disabled')
+check("pipeline state word still spells Idle at rest",
+      w.pipeline_state_text.text() == 'Idle')
+check("idle proxy label drops the state word (no second 'Idle')",
+      w.proxy_status_text.text() == "Proxy —")
+check("idle label still has companion text for the dot (WCAG 1.4.1)",
+      w.proxy_status_text.text().strip() != "")
+check("idle accessible name contains the visible label (2.5.3)",
+      w.proxy_status_text.accessibleName().startswith("Proxy —"))
+check("idle accessible name says what the dash means (disabled)",
+      "disabled" in w.proxy_status_text.accessibleName())
+check("idle tooltip keeps the full meaning",
+      w.proxy_status_text.toolTip() == "Proxy disabled")
+w._set_proxy_status_text('Connected', 'Proxy OK (127.0.0.1:10808)')
+check("connected keeps its word (no collision with pipeline states)",
+      w.proxy_status_text.text() == "Proxy: Connected"
+      and w.proxy_status_text.accessibleName() == "Proxy: Connected")
+w._set_proxy_status_text('Error', 'Proxy unreachable (127.0.0.1:10808)')
+check("error keeps its word",
+      w.proxy_status_text.text() == "Proxy: Error")
+check("no proxy state word ever duplicates the pipeline's 'Idle'",
+      'Idle' not in w.proxy_status_text.text())
+
 # 6. Unified 404-quarantine API on the shared cache class (v0.09)
 for m in ("record_404", "is_dead_link", "get_dead_url_set", "get_dead_urls",
           "get_quarantine_stats", "reset_dead_links"):
@@ -278,4 +305,4 @@ if failed:
 print("GUI smoke OK — v0.32 merged lineage verified (v0.08 redesign + "
       "v0.07.2 model picker + unified quarantine + v0.31 balance pass + "
       "v0.32 five-change pass: shorter window, Stop toggle, flat log, "
-      "retry banner, QSettings size)")
+      "retry banner, QSettings size + v0.33 idle dedup: proxy label)")

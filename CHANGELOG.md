@@ -1,3 +1,39 @@
+## [0.33.0] — The idle dedup: the proxy label keeps quiet at rest, so "Idle" is said once — 2026-10-03
+
+Owner ask (session): the follow-up to the five-change pass — the user
+flagged that "Idle" appeared TWICE at rest (the header's proxy health
+label "Proxy: Idle" beside the progress row's state word) and approved
+the recorded recommendation: keep the pipeline's shape-coded state
+group, quiet the proxy label. Desktop-only release — the Worker stays
+at 0.28.0 (`EXPECTED_WORKER_VERSION` unchanged). Suite stays **900**
+(zero test edits), worker 40/40, offline golden 30/30 + 0 invalid,
+82/82 compiles, GUI smoke extended with the v0.33 contracts (87
+checks).
+
+**1. One "Idle" at rest.** While the proxy is disabled the header
+monitor drops the state WORD — the label reads "Proxy —" (subject +
+em dash: nothing to report) instead of "Proxy: Idle". The pipeline
+state group below keeps its word — the hollow-ring "Idle" stays THE
+idle indicator on the screen. Nothing else changes state vocabulary:
+"Connected", "Error" and "Checking…" keep their words (none collides
+with a pipeline state at rest), and the dot + tooltip + accessible
+name still carry the full meaning (WCAG 1.4.1 held — the dot is never
+alone).
+
+**2. Label in Name (WCAG 2.5.3).** The proxy label's accessible name
+now CONTAINS its visible text: at rest it is announced "Proxy —
+disabled" (the dash never reads as the pipeline's "Idle"), and every
+other state matches its visible label exactly ("Proxy: Connected") —
+replacing the older "Proxy status: X" names, which did not contain
+the visible string.
+
+Gate: 900/900 Python (64s), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 87/87 (idle label drops the
+state word · pipeline word kept · 2.5.3 names · connected/error keep
+their words · tooltip intact), VLM visual verification 5/5 across 3
+offscreen screenshots (light/dark full window + 2× header crop —
+"Idle" exactly once per theme, no clipping in either).
+
 ## [0.32.0] — The five-change pass: a shorter window, one button that knows when to stop, a quieter log, and a banner that asks for action — 2026-10-03
 
 Owner ask (session): five numbered changes, each in its own block,

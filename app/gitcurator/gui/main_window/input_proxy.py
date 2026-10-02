@@ -156,9 +156,26 @@ class InputProxyMixin:
         # to the pipeline state word, so the label names its subject —
         # "Proxy: Connected" — instead of a bare state word that could be
         # mistaken for the app state.
-        self.proxy_status_text.setText(f"Proxy: {state}")
         self.proxy_status_text.setToolTip(tooltip)
-        self.proxy_status_text.setAccessibleName(f"Proxy status: {state}")
+        # v0.33.0 (idle dedup): at rest the pipeline state group right below
+        # the header ALREADY spells "Idle" — so while idle the monitor drops
+        # the state WORD and reads "Proxy —" (subject + em dash: nothing to
+        # report). The dot, tooltip and accessible name keep the meaning;
+        # every other state ("Connected"/"Error"/"Checking…") keeps its
+        # word, and none of those collides with a pipeline state at rest.
+        if state == 'Idle':
+            self.proxy_status_text.setText("Proxy —")
+            # WCAG 2.5.3 (Label in Name): the accessible name contains the
+            # visible label, then says what the dash stands for — "Proxy
+            # disabled" → "Proxy — disabled" (never the word "Idle", which
+            # belongs to the pipeline state group).
+            detail = tooltip.removeprefix("Proxy ") or "disabled"
+            self.proxy_status_text.setAccessibleName(f"Proxy — {detail}")
+        else:
+            self.proxy_status_text.setText(f"Proxy: {state}")
+            # 2.5.3 here too: the old "Proxy status: X" name did not contain
+            # the visible "Proxy: X" — the name now matches the label.
+            self.proxy_status_text.setAccessibleName(f"Proxy: {state}")
         semantic = {
             'Connected': 'success',
             'Error':     'error',
