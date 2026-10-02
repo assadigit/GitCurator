@@ -209,4 +209,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate: 82 compiles + 900 tests + worker 40 + offline golden run (v0.31.0). Mirrors the removed dashboard's POST /api/verify one-to-one."
+        run: "echo \"Gate: 82 compiles + 900 tests + worker 40 + offline golden run (v0.31.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
