@@ -31,7 +31,7 @@
 # into 28 focused modules — gui/{link_helpers,dead_links,telegram_lazy,
 # platform_intake,vault_index,cache_db,link_tracker,log_bridge,
 # worker_jobs,processing_worker,dialogs,headless}.py plus the
-# gui/main_window/ package (window.py + 15 domain mixins). app.py is now
+# gui/main_window/ package (window.py + log_view.py + 15 domain mixins). app.py is now
 # the ~470-line facade; zero behavior change, verified per-move by the
 # fingerprint/surface/import gate and the 24-case characterization suite
 # (tests/test_refactor_surface.py joins the run: 796).
@@ -111,7 +111,7 @@ jobs:
       - name: Install app requirements (the quarantine suite imports the GUI package)
         run: python -m pip install --quiet -r requirements.txt
 
-      - name: Compile the 81 audited modules
+      - name: Compile the 82 audited modules
         run: >
           python -m py_compile
           main.py
@@ -140,6 +140,7 @@ jobs:
           gitcurator/gui/headless.py
           gitcurator/gui/main_window/__init__.py
           gitcurator/gui/main_window/window.py
+          gitcurator/gui/main_window/log_view.py
           gitcurator/gui/main_window/theme.py
           gitcurator/gui/main_window/ui.py
           gitcurator/gui/main_window/hero.py
@@ -208,4 +209,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: echo "Gate: 81 compiles + 900 tests + worker 40 + offline golden run (v0.30.0). Mirrors the removed dashboard's POST /api/verify one-to-one."
+        run: echo "Gate: 82 compiles + 900 tests + worker 40 + offline golden run (v0.31.0). Mirrors the removed dashboard's POST /api/verify one-to-one."
