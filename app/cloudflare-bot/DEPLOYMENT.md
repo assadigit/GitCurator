@@ -38,6 +38,28 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.34.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-03** (worker version ID
+> `dc5345b5-cb54-4ba0-b682-a413a75190d5`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.34.0 is a DESKTOP-ONLY release (the follow-up review — the
+> segmented green/amber result bar, the balanced two-thirds CTA band,
+> real proxy words "off/connected/unreachable" with the launch-focus
+> fix, the greyed-out empty-log toolbar with the list glyph, and the
+> Last-sync line); the Worker's code is unchanged since v0.28.0, so
+> this deploy re-ships the exact same 0.28.0 bundle per the house
+> pattern. Verified after the deploy: `/health` answers
+> `"version":"0.28.0"` with `"status":"ok"`, both queue consumers
+> registered (ingest **and** DLQ, plus both producers), all four
+> secrets persisted (BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS,
+> HMAC_SECRET), D1 row counts identical before/after (385 ledger /
+> 2 dead / 342 activity / 0 mirror). The D1 export taken just before
+> the deploy:
+> `/home/z/backups/d1-backup-20261003-pre-v034-deploy.sql` (742
+> INSERTs — byte-count identical to the pre-v0.33 backup;
+> belt-and-braces).
+
 ## 📦 v0.33.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-03** (worker version ID
