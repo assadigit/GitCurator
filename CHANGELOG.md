@@ -1,3 +1,81 @@
+## [0.31.0] — The main-window balance pass: one status card, a state indicator that never whispers in color alone, and a log card that speaks when empty — 2026-10-02
+
+Owner ask (session): apply the main-window layout review (paste-ready,
+layout/spacing/states only — features, logic and the accent hue
+untouched). Desktop-only release — the Worker stays at 0.28.0
+(`EXPECTED_WORKER_VERSION` unchanged). Suite stays **900** (zero test
+edits needed — the hero-flow stubs run the new chrome through the
+established hasattr/getattr guards), worker 40/40, offline golden
+30/30 + 0 invalid, CI compiles the 82 audited modules (new:
+`gui/main_window/log_view.py`), GUI smoke rewritten for the new
+contracts (55 checks).
+
+**1. ONE status card.** The progress row no longer floats between the
+cards: the PROCESSED count, the bar and the state indicator moved INTO
+the action card, 12px below the buttons. The card keeps equal padding
+on all four sides (14px), the window's outer margins are equal too
+(16px), and one 14px gap separates the header, the status card and the
+log card. SYNC shrank from full-card fill to a fixed 240×40 — still
+first in the tab order, beside a 180×40 Test Connection (same height,
+10px apart, both start-aligned).
+
+**2. SYNC is the dominant button — and now it's PROVABLY dominant.**
+The old pastel lavender fill sat at 2.2:1 against a white card (below
+the 3:1 review bar). The fill is now theme-aware: the accent violet
+#5F54B4 with a white label in light mode (6.2:1 fill / 6.2:1 label),
+the lavender accent with the plum label in dark (8.2:1 / 9.2:1). Test
+Connection stays an outlined secondary, its outline softened 2px → 1px
+so the fill clearly outranks it. The hero glyph tints follow the active
+theme's hero token (`_hero_text_color`).
+
+**3. The progress row reads as one status group.** The count is the
+row's loudest text (15px bold mono); PROCESSED stays small and quiet;
+the bar is a pure 12px gauge with NO text inside (the old "Ready"
+label is gone). At the row's end sits the new PIPELINE STATE
+INDICATOR — a shape-coded glyph + word pair (idle = hollow ring ·
+syncing = arc loader · done = check · error = triangle; WCAG 1.4.1 —
+never color alone), driven by the hero flow (SYNC → FETCHING →
+PROCESS) and the batch lifecycle (`_start_worker` →
+`processing_finished`), settling Done/Error → Idle via the existing
+2.5s hide timer. The proxy health monitor moved to the HEADER (same
+widgets, same 60s refresher — feature unchanged) so the row stays one
+story; its label now names its subject ("Proxy: Connected").
+
+**4. The log card earns its space.** The window is now RESIZABLE
+(default still 900×600, min 760×540): the top card keeps its content
+height and the log card takes every extra pixel, never collapsing
+below ~200px. Only the list area below the fixed toolbar scrolls. New
+`gui/main_window/log_view.py` (LogView) owns the row contract: a
+leading shape-coded status glyph (check / triangle / circle-x / dot),
+a muted timestamp, the message — single-line rows (NoWrap +
+width-aware elision), the FULL text in a per-row tooltip, a 2px
+inter-row gap, and a debounced re-render on resize so truncation
+follows the width.
+
+**5. The empty state.** An empty list no longer looks like a dead
+void: a quiet inbox glyph, a title and one helper line, centered in
+the list area, muted so they never compete with SYNC. Three copies,
+picked by context — first run ("No activity yet · Press Sync to fetch
+new messages…") · a sync that found nothing new (the log's fetch
+chatter is cleared and "Everything is up to date · Last sync: … · No
+new messages found." takes over) · a filter/search with no matches
+("No matching entries · Clear the search or choose All."). The first
+visible entry removes it. A fresh batch clears the entry cache AND
+the view together (the old view-only clear resurrected pre-batch rows
+on the next filter change); a theme flip re-renders the rows so the
+new mode's colors/glyphs apply retroactively.
+
+**6. Header chrome cleanup.** The gear and the theme toggle are now
+the same button: 34×34 square (a ≥32px target), one border style —
+and the focus ring appears only for KEYBOARD focus (a mouse click
+clears focus, so the outline never lingers). The Lucide pack gains
+four official glyphs (circle / check / triangle-alert / circle-x —
+25 total), all verbatim lucide-static v0.544.0.
+
+Gate: 900/900 Python (65s), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 55/55 (window resizable · 34×34
+header buttons · status card hosts buttons + progress · 12px textless
+bar · state flips · all three empty-state copies · iconed log rows).
 ## [0.30.0] — The Settings-UI audit: one theme kit, three flat cards, real sidebar icons — 2026-10-02
 
 Owner ask (session): implement the external Settings-UI audit (Settings ›

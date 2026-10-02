@@ -70,6 +70,15 @@ ICONS: dict = {
     'search': '<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />',  # official lucide-static 'search'
     'trash': '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',  # official lucide-static 'trash-2'
     'dot': '<circle cx="12" cy="12" r="10" fill="{color}" stroke="none"/>',  # official lucide-static 'circle' (solid render of official geometry)
+    # v0.31.0 (main-window balance pass) — four state glyphs, same verbatim
+    # lucide-static v0.544.0 set. The pipeline-state indicator and the log
+    # rows code state by SHAPE (WCAG 1.4.1 — never color alone):
+    #   circle (hollow ring) = idle · loader (arc) = syncing
+    #   check = done/success · triangle-alert = warning · circle-x = error
+    'circle': '<circle cx="12" cy="12" r="10"/>',  # official lucide-static 'circle' (stroked hollow ring)
+    'check': '<path d="M20 6 9 17l-5-5"/>',  # official lucide-static 'check'
+    'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',  # official lucide-static 'triangle-alert'
+    'circle-x': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',  # official lucide-static 'circle-x'
     # v0.30.0 (Settings-UI audit) — the Settings sidebar's nine section
     # glyphs, same verbatim lucide-static v0.544.0 set ('currentColor'
     # fills swapped for the render-time {color} tint).

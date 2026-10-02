@@ -152,7 +152,11 @@ class InputProxyMixin:
         a glance without reading the word."""
         if not hasattr(self, 'proxy_status_text'):
             return
-        self.proxy_status_text.setText(state)
+        # v0.31.0 (balance pass): the monitor now lives in the HEADER next
+        # to the pipeline state word, so the label names its subject —
+        # "Proxy: Connected" — instead of a bare state word that could be
+        # mistaken for the app state.
+        self.proxy_status_text.setText(f"Proxy: {state}")
         self.proxy_status_text.setToolTip(tooltip)
         self.proxy_status_text.setAccessibleName(f"Proxy status: {state}")
         semantic = {

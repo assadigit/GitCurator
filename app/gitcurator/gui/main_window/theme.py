@@ -264,6 +264,14 @@ class ThemeMixin:
                 except RuntimeError:
                     pass  # dialog mid-close
 
+    def _hero_text_color(self) -> str:
+        """v0.31.0 (balance pass): the SYNC fill is theme-aware (deep
+        violet in light mode, pastel lavender in dark), so the baked glyph
+        tint must follow the ACTIVE theme's hero_text token instead of the
+        old shared constant."""
+        t = _theme.DARK if getattr(self, '_dark_mode', False) else _theme.LIGHT
+        return t['hero_text']
+
     def _sync_theme_toggle_btn(self):
         """v32.1: keep the ALWAYS-VISIBLE header light/dark toggle in sync.
 
@@ -300,6 +308,12 @@ class ThemeMixin:
         """v0.07: re-tint the theme-dependent main-screen glyphs after a
         theme flip (the icon colors are baked into pixmaps at render time,
         so they need one explicit refresh — like _refresh_button_styles).
+
+        v0.31.0 (balance pass): also re-renders the pipeline-state glyph,
+        the empty-state glyph and the LOG ROWS themselves — row colors and
+        level glyphs are baked into the HTML at render time, so a flip
+        re-renders the list (via _filter_log) instead of leaving the old
+        mode's colors behind.
         """
         try:
             dark = getattr(self, '_dark_mode', False)
@@ -317,8 +331,15 @@ class ThemeMixin:
             if state == 'fetching':
                 _icons.set_btn_icon(self.start_btn, 'loader', '#6C6480', 18)
             else:
-                _icons.set_btn_icon(self.start_btn, 'refresh', COLORS['hero_text'], 18)
+                _icons.set_btn_icon(self.start_btn, 'refresh',
+                                    self._hero_text_color(), 18)
             _icons.set_btn_icon(self.stop_btn, 'stop', '#FFFFFF', 18)
+            # v0.31.0: the pipeline-state glyph + the empty-state glyph.
+            self._set_pipeline_state(getattr(self, '_pipeline_state', 'idle'))
+            if hasattr(self, '_log_empty_icon'):
+                t = _theme.DARK if dark else _theme.LIGHT
+                self._log_empty_icon.setPixmap(
+                    _icons.pixmap('inbox', t['text_muted'], 36))
             # Log panel controls.
             hint = COLORS['hint_dark'] if dark else COLORS['hint_light']
             if hasattr(self, '_log_search_action'):
@@ -326,6 +347,10 @@ class ThemeMixin:
             if getattr(self, '_clear_log_btn', None) is not None:
                 trash_color = '#B7AFC9' if dark else '#6C6480'
                 _icons.set_btn_icon(self._clear_log_btn, 'trash', trash_color, 14)
+            # v0.31.0: the log rows re-render with the new mode's colors
+            # (level glyphs re-register inside _filter_log).
+            self._log_icons_theme = None
+            self._filter_log()
         except RuntimeError:
             pass  # widgets already destroyed during shutdown
 

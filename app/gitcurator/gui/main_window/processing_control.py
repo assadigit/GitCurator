@@ -164,7 +164,12 @@ class ProcessingControlMixin:
         # the batch progresses (update_progress / update_status).
         self.progress_bar.setVisible(True)
         self.progress_bar.setFormat("Processing…")
-        self.log_text.clear()
+        # v0.31.0 (balance pass): a fresh batch starts a FRESH log — clear
+        # the entry CACHE and the view together (the old view-only clear
+        # resurrected pre-batch rows on the next filter change) and flip
+        # the end-of-row state indicator to Syncing.
+        self._clear_log()
+        self._set_pipeline_state('syncing')
         # Track processing start time for elapsed display
         self._processing_start_time = datetime.now()
 
@@ -286,6 +291,10 @@ class ProcessingControlMixin:
         self.progress_bar.setValue(0)
         # v0.07: fall back to the manifest's REAL totals instead of "– / –".
         self._refresh_pipeline_counter()
+        # v0.31.0 (balance pass): the Done/Error flash settles back to
+        # Idle once the readout resets (a fresh batch keeps its Syncing).
+        if getattr(self, '_pipeline_state', 'idle') != 'idle':
+            self._set_pipeline_state('idle')
 
     def processing_finished(self, success, message):
         self.start_btn.setEnabled(True)
@@ -357,6 +366,7 @@ class ProcessingControlMixin:
             # Hint: new messages may have arrived during processing
             self.log_message("💡 Tip: New messages may have arrived during processing — click Check Queue again.", "info")
             self.progress_bar.setFormat(f"✅ Done{elapsed_str}")
+            self._set_pipeline_state('done')
             self._schedule_progress_hide()
 
             # v23 — Phase 5: CLEAR — only mark bot messages as read if ALL
@@ -462,6 +472,7 @@ class ProcessingControlMixin:
         else:
             self.log_message(f"❌ {message}", "error")
             self.progress_bar.setFormat("❌ Failed")
+            self._set_pipeline_state('error')
             self._schedule_progress_hide()
             self._show_custom_message_box("Processing Error", message, success=False)
 

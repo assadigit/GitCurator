@@ -140,12 +140,19 @@ class HeroMixin:
 
         self._set_hero_state('fetching')
         self.progress_bar.setFormat("Fetching undone items…")
+        # v0.31.0 (balance pass): the fetch IS the syncing stage — flip the
+        # end-of-row state indicator (guarded: the headless hero-flow test
+        # stubs have no chrome).
+        if hasattr(self, '_set_pipeline_state'):
+            self._set_pipeline_state('syncing')
         started = self.check_bot_queue(on_done=self._after_sync_fetch)
         if not started:
             # Early bail (busy Telegram lock / missing fields) — the reason
             # was already logged; restore the SYNC button.
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
+            if hasattr(self, '_set_pipeline_state'):
+                self._set_pipeline_state('idle')
 
     def _after_sync_fetch(self, _name, result):
         """Fires when check_bot_queue's worker finishes (connected AFTER its
@@ -164,6 +171,15 @@ class HeroMixin:
         # (Settings → 📥 Input): PROCESS runs it when the queue is caught
         # up AND a file is picked.
         import_ready = bool(self.import_file.text().strip())
+        # v0.31.0 (balance pass): the fetch just completed — flash the
+        # end-of-row state to Done, then settle back to Idle (the shared
+        # hide timer owns the reset). Guarded for the headless stubs.
+        _state = getattr(self, '_set_pipeline_state', None)
+        if callable(_state):
+            _state('done')
+            _settle = getattr(self, '_schedule_progress_hide', None)
+            if callable(_settle):
+                _settle()
         if result.get('success') and n_total:
             self._set_hero_state('process')
             self.progress_bar.setFormat(f"{n_total} ready to process")
@@ -193,10 +209,41 @@ class HeroMixin:
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
             self.log_message("✅ All caught up — nothing undone in the bot queue.", "success")
+            # v0.31.0 (balance pass): a sync that finds nothing new ends
+            # with a clean, meaningful log card — the fetch chatter is
+            # cleared and the EMPTY STATE carries the summary ("Everything
+            # is up to date — last sync …").
+            self._log_caught_up_state()
         else:
             # The fetch error was already logged by check_bot_queue.
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
+            _fail_state = getattr(self, '_set_pipeline_state', None)
+            if callable(_fail_state):
+                _fail_state('error')
+                _settle = getattr(self, '_schedule_progress_hide', None)
+                if callable(_settle):
+                    _settle()
+
+    def _log_caught_up_state(self):
+        """v0.31.0 (balance pass): record the caught-up sync time and clear
+        the log card so its EMPTY STATE can speak ("Everything is up to
+        date · Last sync: … · No new messages found."). Guarded throughout:
+        the headless hero-flow test stubs run this method with NO widgets
+        and must keep working unchanged."""
+        self._log_last_uptodate = datetime.now().strftime("%H:%M:%S")
+        entries = getattr(self, '_all_log_entries', None)
+        if entries is not None:
+            entries.clear()
+        view = getattr(self, 'log_text', None)
+        if view is not None:
+            view.clear()
+            reset_map = getattr(view, 'reset_full_texts', None)
+            if callable(reset_map):
+                reset_map()
+        updater = getattr(self, '_update_log_empty_state', None)
+        if callable(updater):
+            updater()
 
     def _begin_hero_processing(self):
         """Stage 2: PROCESS click → run the batch. The fetched undone items
@@ -232,7 +279,7 @@ class HeroMixin:
                 n = len(getattr(self, '_bot_queue_urls', None) or []) \
                     + len(getattr(self, '_bot_queue_pending_websites', None) or [])
                 self.start_btn.setText(f"PROCESS ({n})" if n else "PROCESS")
-                _icons.set_btn_icon(self.start_btn, 'play', COLORS['hero_text'], 18)
+                _icons.set_btn_icon(self.start_btn, 'play', self._hero_text_color(), 18)
                 self.start_btn.setEnabled(True)
                 if n:
                     self.start_btn.setToolTip(
@@ -247,7 +294,7 @@ class HeroMixin:
                     )
             else:   # 'sync' — also restores after running/fetching
                 self.start_btn.setText("SYNC")
-                _icons.set_btn_icon(self.start_btn, 'refresh', COLORS['hero_text'], 18)
+                _icons.set_btn_icon(self.start_btn, 'refresh', self._hero_text_color(), 18)
                 self.start_btn.setEnabled(True)
                 self.start_btn.setToolTip(
                     "Stage 1 — fetch every UNDONE item from the Telegram bot\n"

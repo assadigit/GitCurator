@@ -37,10 +37,17 @@ ACCENT = "#5F54B4"
 # --- button fills (theme-independent pastel pairs, AA-verified) -----------
 _CTA_FILL, _CTA_HOVER, _CTA_TEXT = "#B9E3C9", "#A8DABA", "#17402B"
 _ERR_FILL, _ERR_HOVER, _ERR_TEXT = "#F6C6CD", "#F0B2BC", "#5E1120"
-_HERO_FILL, _HERO_HOVER, _HERO_TEXT = "#B3A7F2", "#A296EC", "#241D3F"
 _DANGER_FILL, _DANGER_HOVER, _DANGER_PRESS = "#D63A24", "#C43320", "#B32D1D"
 _VIOLET_HOVER = "#514699"          # pressed/hover fill carrying white text
 _OUTLINE_HOVER_FILL = "#ECE9FA"    # secondary hover wash (both modes)
+
+# v0.31.0 (main-window balance pass): the SYNC fill is now THEME-AWARE so
+# the dominant button clears 3:1 against the card in BOTH modes (the old
+# shared pastel #B3A7F2 sat at 2.2:1 on a white card). Light mode wears the
+# accent violet itself with a white label (6.2:1); dark mode wears the
+# lavender accent with the plum label (8.2:1 fill / 9.2:1 label).
+_HERO_FILL_L, _HERO_HOVER_L, _HERO_TEXT_L = "#5F54B4", "#514699", "#FFFFFF"
+_HERO_FILL_D, _HERO_HOVER_D, _HERO_TEXT_D = "#C4BCF5", "#B3A7F2", "#221E2E"
 
 # ---------------------------------------------------------------------------
 # Token tables. Every value is ported from the v32 pastel QSS the app has
@@ -100,10 +107,10 @@ LIGHT: Dict[str, str] = {
     "msg_success":   "#16A34A",
     "msg_error":     "#DC2626",
     "msg_warning":   "#EA580C",
-    # button fills (theme-independent pastels; outline chrome is themed)
+    # button fills (the hero pair is themed — see the v0.31.0 note above)
     "cta_fill": _CTA_FILL, "cta_hover": _CTA_HOVER, "cta_text": _CTA_TEXT,
     "err_fill": _ERR_FILL, "err_hover": _ERR_HOVER, "err_text": _ERR_TEXT,
-    "hero_fill": _HERO_FILL, "hero_hover": _HERO_HOVER, "hero_text": _HERO_TEXT,
+    "hero_fill": _HERO_FILL_L, "hero_hover": _HERO_HOVER_L, "hero_text": _HERO_TEXT_L,
     "danger_fill": _DANGER_FILL, "danger_hover": _DANGER_HOVER,
     "danger_press": _DANGER_PRESS,
     "outline_hover": _OUTLINE_HOVER_FILL,
@@ -167,10 +174,10 @@ DARK: Dict[str, str] = {
     "msg_success":   "#4ADE80",
     "msg_error":     "#F87171",
     "msg_warning":   "#FB923C",
-    # button fills
+    # button fills (the hero pair is themed — see the v0.31.0 note above)
     "cta_fill": _CTA_FILL, "cta_hover": _CTA_HOVER, "cta_text": _CTA_TEXT,
     "err_fill": _ERR_FILL, "err_hover": _ERR_HOVER, "err_text": _ERR_TEXT,
-    "hero_fill": _HERO_FILL, "hero_hover": _HERO_HOVER, "hero_text": _HERO_TEXT,
+    "hero_fill": _HERO_FILL_D, "hero_hover": _HERO_HOVER_D, "hero_text": _HERO_TEXT_D,
     "danger_fill": _DANGER_FILL, "danger_hover": _DANGER_HOVER,
     "danger_press": _DANGER_PRESS,
     "outline_hover": _OUTLINE_HOVER_FILL,
@@ -289,7 +296,9 @@ def _app_rules(t: Dict[str, str]) -> str:
             QTextEdit {{ border: 1px solid {t['border']}; border-radius: 8px; background: {t['log_well']}; padding: 8px; selection-background-color: {t['select_bg']}; selection-color: {t['select_fg']}; }}
             QTextEdit:read-only {{ font-family: 'Consolas', 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 12px; }}
             QTextEdit:focus {{ border: 2px solid {t['accent']}; padding: 7px; outline: 2px solid {t['focus']}; outline-offset: 2px; }}
-            QProgressBar {{ border: none; border-radius: 6px; background: {t['progress_track']}; text-align: center; height: 16px; font-size: 10px; color: {t['progress_text']}; }}
+            /* v0.31.0 (balance pass): the bar is a pure fill gauge — 12px,
+               no text inside (the state word + count live at the row ends). */
+            QProgressBar {{ border: none; border-radius: 6px; background: {t['progress_track']}; max-height: 12px; }}
             QProgressBar::chunk {{ background: {t['progress_chunk']}; border-radius: 6px; }}
             QLabel {{ color: {t['text']}; }}
             QLabel#proxy_status_text {{ color: {t['text_muted']}; font-size: 12px; }}
@@ -309,8 +318,16 @@ def _app_rules(t: Dict[str, str]) -> str:
             QScrollBar::add-line:horizontal {{ height: 0; width: 0; }}
             QScrollBar::add-page:horizontal {{ background: transparent; }}
             QWidget#sync_card {{ background-color: {t['sheet']}; border: 1px solid {t['border']}; border-radius: 12px; }}
-            QLabel#progress_count {{ font-family: 'Consolas', 'Monaco', 'Menlo', monospace; font-size: 13px; font-weight: 700; color: {t['accent']}; }}
+            /* v0.31.0 (balance pass): the count is the row's loudest text
+               (15px bold mono); the caption stays small and quiet. */
+            QLabel#progress_count {{ font-family: 'Consolas', 'Monaco', 'Menlo', monospace; font-size: 15px; font-weight: 700; color: {t['accent']}; background: transparent; }}
             QLabel#pipeline_caption {{ color: {t['pipeline_caption']}; font-size: 11px; font-weight: 700; background: transparent; }}
+            QLabel#pipeline_state_text {{ font-size: 12px; background: transparent; }}
+            /* the log card's empty state — muted, so it never competes
+               with the SYNC button */
+            QWidget#log_empty {{ background: transparent; }}
+            QLabel#log_empty_title {{ font-size: 14px; font-weight: 700; color: {t['text_muted']}; background: transparent; }}
+            QLabel#log_empty_hint {{ font-size: 12px; color: {t['text_muted']}; background: transparent; }}
             QPushButton#log_filter {{ background: transparent; border: 1px solid {t['border_input']}; border-radius: 6px; padding: 5px 12px; font-size: 11px; font-weight: 600; color: {t['text_muted']}; }}
             QPushButton#log_filter:hover {{ background: {t['sheet_hover']}; border-color: {t['border_hover']}; color: {t['text_hover']}; }}
             QPushButton#log_filter:checked {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['on_accent']}; }}
@@ -357,6 +374,7 @@ def _cards_and_nav_qss(t: Dict[str, str]) -> str:
             QLabel[role="status"][state="warning"] {{ color: {t['warning']}; }}
             QLabel[role="status"][state="error"] {{ color: {t['error']}; }}
             QLabel[role="status"][state="muted"] {{ color: {t['text_muted']}; }}
+            QLabel[role="status"][state="accent"] {{ color: {t['accent']}; }}
             QLabel[role="badge"] {{ padding: 4px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; }}
             QLabel[role="badge"][state="pending"] {{ background-color: {t['text_muted']}; color: #FFFFFF; }}
             QLabel[role="badge"][state="ok"] {{ background-color: {t['cta_fill']}; color: {t['cta_text']}; }}
@@ -408,7 +426,7 @@ def _button_qss(t: Dict[str, str]) -> str:
             QPushButton[btn_kind="hero_danger"]:pressed {{ background-color: {t['danger_press']}; }}
             QPushButton[btn_kind="hero_danger"]:disabled {{ background-color: {t['disabled_bg']}; color: {t['disabled_fg']}; }}
             QPushButton[btn_kind="hero_danger"]:focus {{ outline: 2px solid {t['accent']}; outline-offset: 2px; }}
-            QPushButton[btn_kind="hero_secondary"] {{ background-color: {t['hero2_bg']}; color: {t['accent']}; border: 2px solid {t['accent']}; font-weight: 700; font-size: 13px; padding: 5px 20px; border-radius: 8px; }}
+            QPushButton[btn_kind="hero_secondary"] {{ background-color: {t['hero2_bg']}; color: {t['accent']}; border: 1px solid {t['accent']}; font-weight: 700; font-size: 13px; padding: 5px 20px; border-radius: 8px; }}
             QPushButton[btn_kind="hero_secondary"]:hover {{ background-color: {t['outline_hover']}; color: {t['outline_press']}; border-color: {t['outline_press']}; }}
             QPushButton[btn_kind="hero_secondary"]:pressed {{ background-color: {t['outline_press']}; color: #FFFFFF; }}
             QPushButton[btn_kind="hero_secondary"]:disabled {{ color: {t['text_disabled']}; border-color: {t['border']}; background-color: {t['hero2_bg']}; }}

@@ -33,6 +33,8 @@ from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
 from gitcurator.gui.telegram_lock import TelegramLockManager
 from gitcurator.gui import icons as _icons
+from gitcurator.gui import theme as _theme
+from gitcurator.gui.main_window.log_view import LogView
 from gitcurator.integrations.subprocess_runner import (
     run_telegram_worker as _run_worker_subprocess,
     kill_all_workers as _kill_all_telegram_workers,
@@ -72,15 +74,12 @@ class UiMixin:
         # the global stylesheet's `font-family: 'Inter'` resolves correctly.
         self._load_fonts()
         self.setWindowTitle("GitCurator 🚀")
-        # v0.08 — Fix (owner report: "the app is unnecessarily long — too
-        # much width, low height; I prefer a ratio like 6×4"): the v33
-        # 1000×375 window was a 2.67:1 ultra-wide strip. Now 900×600 — an
-        # exact 6:4 (3:2) ratio: 100px narrower, 225px taller. The extra
-        # height goes to the log panel (the main view's ONE growable
-        # region, stretch 1), so long batches show far more history
-        # without scrolling.
+        # v0.08 kept a 6:4 ratio; v0.31.0 (balance pass) makes the window
+        # RESIZABLE: the default stays the v0.08 900×600, but the owner can
+        # now resize — the log card takes every extra pixel and never
+        # collapses (the top card stays at its content height).
         self.setGeometry(100, 100, 900, 600)
-        self.setFixedSize(900, 600)
+        self.setMinimumSize(760, 540)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -89,13 +88,12 @@ class UiMixin:
         # labeled progress row and the always-visible Progress Logs panel.
         # EVERY former tab moved to the Settings window (SettingsDialog,
         # opened from the ⚙️ button top-right).
+        # v0.31.0 (balance pass): one rhythm — equal 16px outer margins on
+        # all four sides and one 14px gap between the three bands (top bar
+        # / status card / log card).
         main_layout = QVBoxLayout(central)
-        # v0.07 rhythm: one spacing scale (10px between the three bands —
-        # top bar / CTA card / pipeline strip / log) instead of the old
-        # uneven 8px gaps; breathing room comes from the margins, not from
-        # dead space inside an empty log box.
-        main_layout.setContentsMargins(20, 12, 20, 12)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(14)
 
         # Every former tab page is collected here and handed to the Settings
         # window at the end of initUI. The page-creation code below is
@@ -1067,20 +1065,49 @@ class UiMixin:
         # matched) and is removed with the tab strip itself — every page now
         # lives in the Settings window's sidebar navigation.
 
-        # ---- Top bar: logo lockup (left) · settings + theme buttons (right)
+        # ---- Top bar: logo lockup (left) · proxy health · settings + theme
+        # (right). v0.31.0 (balance pass): the proxy health monitor moves
+        # here from the progress row — same widgets, same 60s QTimer
+        # refresher (feature unchanged) — so the card's progress row reads
+        # as ONE status group: count · bar · state. ----
         top_bar = QHBoxLayout()
         top_bar.setSpacing(10)
         self._build_logo_lockup(top_bar)
         top_bar.addStretch()
 
+        # v22 Feature 7: Proxy Health Monitor — small colored dot + TEXT
+        # label (v31.1: color alone never conveys state — WCAG 1.4.1) that
+        # reflect whether the configured proxy is reachable. Updated every
+        # 60 seconds by a QTimer (see __init__ end). Non-blocking: the
+        # check uses a 2s socket timeout and runs on the GUI thread.
+        # v0.07: the dot is the unified 'dot' SVG glyph (was a full-color
+        # emoji circle); v0.31.0: the label reads "Proxy: <state>".
+        self.proxy_status_label = QLabel()
+        self.proxy_status_label.setFixedSize(16, 16)
+        self.proxy_status_label.setToolTip("Proxy status — checking...")
+        self.proxy_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.proxy_status_label.setAccessibleName("Proxy status")
+        self.proxy_status_label.setPixmap(_icons.pixmap('dot', '#8E8A90', 12))
+        top_bar.addWidget(self.proxy_status_label)
+        self.proxy_status_text = QLabel("Proxy: Checking…")
+        self.proxy_status_text.setToolTip("Proxy status — checking...")
+        top_bar.addWidget(self.proxy_status_text)
+        top_bar.addSpacing(8)
+
+        # v0.31.0 (balance pass): the gear and the theme toggle are now the
+        # SAME button — 34×34 square (a ≥32px click target), one border
+        # style, and the focus ring appears only for KEYBOARD focus (a
+        # mouse click clears focus, so the outline never lingers).
         self.settings_btn = QPushButton()
-        self.settings_btn.setFixedSize(34, 30)
+        self.settings_btn.setFixedSize(34, 34)
         self.settings_btn.setToolTip(
             "Settings — credentials, proxy, vault, LLM, input modes,\n"
             "bot queue, sources, dashboard and backup (all former tabs)."
         )
         self.settings_btn.setAccessibleName("Settings")
         self.settings_btn.clicked.connect(self._open_settings)
+        self.settings_btn.clicked.connect(
+            lambda _checked=False: self.settings_btn.clearFocus())
         self._style_btn(self.settings_btn, 'icon')
         top_bar.addWidget(self.settings_btn)
 
@@ -1089,24 +1116,27 @@ class UiMixin:
         # mode, ☀️ in dark mode); the tooltip spells it out. Synced by
         # _sync_theme_toggle_btn() on init + every flip.
         self.theme_toggle_btn = QPushButton()
-        self.theme_toggle_btn.setFixedSize(34, 30)
+        self.theme_toggle_btn.setFixedSize(34, 34)
         self.theme_toggle_btn.setToolTip("Switch to dark mode (current: Light)")
         self.theme_toggle_btn.setAccessibleName("Toggle dark or light theme")
         self.theme_toggle_btn.clicked.connect(self.toggle_theme)
+        self.theme_toggle_btn.clicked.connect(
+            lambda _checked=False: self.theme_toggle_btn.clearFocus())
         self._style_btn(self.theme_toggle_btn, 'icon')
         top_bar.addWidget(self.theme_toggle_btn)
         main_layout.addLayout(top_bar)
 
-        # ---- Hero CTA card: SYNC (⇄ STOP) + Test Connectivity, side by side.
-        # v0.07 (design review "balance/hierarchy"): the two CTAs share ONE
-        # row — SYNC grows, Test Connectivity keeps its natural width — so
-        # the vertical space the stacked layout wasted now belongs to the
-        # log panel (the main view's growable region).
+        # ---- Status card: the actions AND their progress in ONE card
+        # (v0.31.0 balance pass — the progress row used to float between
+        # the card and the log). Top row: SYNC (⇄ STOP) + Test Connection,
+        # side by side, aligned to the card's start. Below them, inside
+        # the same card with a 12px gap: the pipeline status row. The card
+        # keeps equal padding on all four sides. ----
         cta_card = QWidget()
         cta_card.setObjectName("sync_card")
         cta_layout = QVBoxLayout(cta_card)
-        cta_layout.setContentsMargins(16, 10, 16, 10)
-        cta_layout.setSpacing(0)
+        cta_layout.setContentsMargins(14, 14, 14, 14)
+        cta_layout.setSpacing(12)
 
         # v0.03 two-stage hero flow (user spec): SYNC fetches all UNDONE
         # items from the Telegram bot → the button becomes PROCESS → clicking
@@ -1119,8 +1149,12 @@ class UiMixin:
         run_slot.setContentsMargins(0, 0, 0, 0)
         run_slot.setSpacing(0)
         self._hero_state = 'sync'   # sync | fetching | process | running
+        # v0.31.0 (balance pass): SYNC no longer fills the card — a fixed
+        # 240×40 (within the 220-260px review range), first in the tab
+        # order, with Test Connection beside it at 180×40. Same height,
+        # 10px gap, both aligned to the card's start.
         self.start_btn = QPushButton("SYNC")
-        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setFixedSize(240, 40)
         self.start_btn.setToolTip(
             "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
             "(repos already in the vault and decommissioned ones are skipped).\n"
@@ -1131,7 +1165,7 @@ class UiMixin:
         self.start_btn.clicked.connect(self._on_hero_clicked)  # v0.03 two-stage flow
 
         self.stop_btn = QPushButton("STOP")
-        self.stop_btn.setMinimumHeight(40)
+        self.stop_btn.setFixedSize(240, 40)
         self.stop_btn.setToolTip("Cancel the running batch (SYNC returns when it stops).")
         self._style_btn(self.stop_btn, 'hero_danger')
         self.stop_btn.setEnabled(False)
@@ -1142,10 +1176,10 @@ class UiMixin:
 
         cta_row = QHBoxLayout()
         cta_row.setSpacing(10)
-        cta_row.addLayout(run_slot, 1)   # hero button grows
+        cta_row.addLayout(run_slot, 0)   # hero button pair, start-aligned
 
         self.test_btn = QPushButton("Test Connection")
-        self.test_btn.setMinimumHeight(40)
+        self.test_btn.setFixedSize(180, 40)
         self.test_btn.setToolTip(
             "Check that everything is up and ready, and show it in the log:\n"
             "① Vaults — found + writable (ready to receive notes)\n"
@@ -1156,6 +1190,7 @@ class UiMixin:
         self._style_btn(self.test_btn, 'hero_secondary')
         self.test_btn.clicked.connect(self.test_all)
         cta_row.addWidget(self.test_btn)
+        cta_row.addStretch(1)   # the pair packs to the card's start
         cta_layout.addLayout(cta_row)
         # v0.23.0 — the LLM quick-switch row (Detect & Set Ollama / llama.cpp)
         # is GONE from the main view (owner request: "remove from the main
@@ -1164,38 +1199,46 @@ class UiMixin:
         # quick_detect_set_* handlers stay for that row + the CLI twin.
         main_layout.addWidget(cta_card)
 
-        # ---- Pipeline strip: PROCESSED x / y counter · determinate bar ·
-        # proxy health — ONE connected story (design review: the counter and
-        # the "Connected" status are two halves of the same pipeline-health
-        # readout, so they share one row with the bar bridging them). ----
+        # ---- Pipeline status row (v0.31.0 balance pass: now INSIDE the
+        # status card, 12px below the buttons — it used to float between
+        # the card and the log): PROCESSED count · determinate bar · state
+        # indicator — one connected story. The count, bar and state share
+        # one row and one vertical center line, so they read as ONE
+        # status group. ----
         prog_row = QHBoxLayout()
         prog_row.setSpacing(10)
 
         # v0.07: the counter gets a LABEL (proximity) — "- / -" with no
         # label told the user nothing. _refresh_pipeline_counter() keeps the
         # numbers real (manifest totals while idle, live counts in a batch).
+        # v0.31.0: the caption stays small and quiet; the count itself is
+        # now the row's loudest text (15px bold mono via QSS).
         pipeline_caption = QLabel("PROCESSED")
         pipeline_caption.setObjectName("pipeline_caption")
         _cap_font = pipeline_caption.font()
         _cap_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.2)
         pipeline_caption.setFont(_cap_font)
         pipeline_caption.setToolTip("Links processed out of the current batch")
+        pipeline_caption.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         prog_row.addWidget(pipeline_caption)
 
         self.progress_count = QLabel("0 / 0")
         self.progress_count.setObjectName("progress_count")
-        self.progress_count.setMinimumWidth(64)
-        self.progress_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_count.setMinimumWidth(72)
+        self.progress_count.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.progress_count.setToolTip("No batch manifest yet — SYNC to fetch items")
         prog_row.addWidget(self.progress_count)
 
-        # Progress bar — determinate, NOW a permanent fixture of the main
-        # view (v33 wireframe); labeled "Processing X of Y — repo-name" via
-        # update_progress()/update_status() while a batch runs.
+        # Progress bar — determinate, a permanent fixture of the status
+        # card. v0.31.0: a pure 12px fill gauge — NO text inside (the old
+        # "Ready" label moved out; the state word lives at the row's end).
+        # Labeled "Processing X of Y — repo-name" via update_progress()/
+        # update_status() while a batch runs (kept for tooltips/log).
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("Ready")
-        self.progress_bar.setFixedHeight(16)
-        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedHeight(12)
+        self.progress_bar.setTextVisible(False)
         # v0.03 fix: a fresh QProgressBar holds value = -1 (unset), which is
         # OUT OF RANGE — a QSS-styled bar then renders NO text at all, so the
         # idle "Ready" label (and the v0.03 "N ready to process" state) was
@@ -1203,24 +1246,27 @@ class UiMixin:
         self.progress_bar.setValue(0)
         prog_row.addWidget(self.progress_bar, 1)
 
-        # v22 Feature 7: Proxy Health Monitor — small colored dot + TEXT label
-        # (v31.1: color alone never conveys state — WCAG 1.4.1) that reflect
-        # whether the configured proxy is reachable. Updated every 60 seconds
-        # by a QTimer (see __init__ end). Non-blocking: the check uses a 2s
-        # socket timeout and runs on the GUI thread.
-        # v0.07: the dot is the unified 'dot' SVG glyph (was a full-color
-        # emoji circle) and the label carries a semantic text color.
-        self.proxy_status_label = QLabel()
-        self.proxy_status_label.setFixedSize(16, 16)
-        self.proxy_status_label.setToolTip("Proxy status — checking...")
-        self.proxy_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.proxy_status_label.setAccessibleName("Proxy status")
-        self.proxy_status_label.setPixmap(_icons.pixmap('dot', '#8E8A90', 12))
-        prog_row.addWidget(self.proxy_status_label)
-        self.proxy_status_text = QLabel("Checking…")
-        self.proxy_status_text.setToolTip("Proxy status — checking...")
-        prog_row.addWidget(self.proxy_status_text)
-        main_layout.addLayout(prog_row)
+        # v0.31.0 (balance pass): the row's terminal readout — the PIPELINE
+        # STATE as a shape-coded glyph + word pair (never color alone,
+        # WCAG 1.4.1): idle = hollow ring · syncing = arc · done = check ·
+        # error = triangle. Rendered by _set_pipeline_state().
+        self.pipeline_state_icon = QLabel()
+        self.pipeline_state_icon.setFixedSize(16, 16)
+        self.pipeline_state_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pipeline_state_icon.setAccessibleName("Pipeline state")
+        prog_row.addWidget(self.pipeline_state_icon)
+        self.pipeline_state_text = QLabel("Idle")
+        self.pipeline_state_text.setObjectName("pipeline_state_text")
+        self.pipeline_state_text.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.pipeline_state_text.setAccessibleName("Pipeline state")
+        prog_row.addWidget(self.pipeline_state_text)
+        self._pipeline_state = 'idle'
+        self._set_pipeline_state('idle')
+        cta_layout.addLayout(prog_row)
+        # v0.23.0 — the LLM quick-switch row (Detect & Set Ollama / llama.cpp)
+        # is GONE from the main view (owner request: "remove from the main
+        # view — the settings is enough"). Both buttons live on in Settings →
+        # 🧠 LLM (they were already there as the Quick switch row), and the
 
         # ---- 'More' overflow menu (v31.1: one menu for infrequent actions).
         # v33: the SAME menu, now hosted in the Settings window's header so
@@ -1337,14 +1383,26 @@ class UiMixin:
 
         log_group_layout.addLayout(log_header)
 
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        # Mono 12px comes from the global QSS (QTextEdit:read-only) — the
-        # log panel is the main view's ONE growable region and always scrolls.
-        # v0.07: the CTA row went horizontal, so the well reclaimed ~46px of
-        # vertical space — the empty state no longer looks like dead void.
-        self.log_text.setMinimumHeight(72)
-        log_group_layout.addWidget(self.log_text)
+        # ---- The LIST area (v0.31.0 balance pass). Only this region
+        # scrolls — the toolbar above is fixed. LogView owns the row
+        # contract: one line per entry (leading status glyph · muted
+        # timestamp · message), width-aware truncation with the full text
+        # in a per-row tooltip, and a 2px inter-row gap. Mono 12px comes
+        # from the global QSS (QTextEdit:read-only). The log card is the
+        # main view's ONE growable region (stretch 1) and never collapses
+        # below ~200px. ----
+        self.log_text = LogView()
+        self.log_text.set_rerender_callback(self._filter_log)
+        self.log_text.setMinimumHeight(176)
+        log_group_layout.addWidget(self.log_text, 1)
+
+        # ---- The EMPTY STATE (v0.31.0): shown ONLY while the list has no
+        # visible entries — a quiet inbox glyph, a title and one helper
+        # line, centered in the list area (see _update_log_empty_state for
+        # the three copy variants). Hidden widgets are ignored by the
+        # layout, so it shares the stretch with the list for free. ----
+        self._log_empty = self._build_log_empty_state()
+        log_group_layout.addWidget(self._log_empty, 1)
         log_group.setLayout(log_group_layout)
         main_layout.addWidget(log_group, 1)
 
@@ -1422,18 +1480,209 @@ class UiMixin:
         layout.addLayout(text_col)
         layout.addSpacing(8)
 
+    # ------------------------------------------------------------------
+    # v0.31.0 (balance pass) — the pipeline STATE indicator + the log card's
+    # row grammar and empty state (pure GUI chrome — no pipeline logic).
+    # ------------------------------------------------------------------
+    # One DISTINCT GLYPH SHAPE per pipeline state / log level (WCAG 1.4.1 —
+    # color never carries the state alone; the semantic color is painted
+    # on TOP of the shape).
+    _PIPELINE_STATE_GLYPHS = {
+        'idle':    ('circle',         'muted',   'Idle'),
+        'syncing': ('loader',         'accent',  'Syncing'),
+        'done':    ('check',          'success', 'Done'),
+        'error':   ('triangle-alert', 'error',   'Error'),
+    }
+    _LOG_LEVEL_ICONS = {
+        'success': 'check',
+        'warning': 'triangle-alert',
+        'error':   'circle-x',
+        'info':    'dot',
+    }
+
+    def _set_pipeline_state(self, state: str):
+        """Render the end-of-row pipeline state: a shape-coded glyph (idle =
+        hollow ring · syncing = arc loader · done = check · error =
+        triangle), the semantic color on top, and the state WORD next to
+        it. Owned by the hero flow (sync | fetching → PROCESS) and the
+        batch lifecycle (_start_worker → processing_finished); the
+        Done/Error flash settles back to Idle via _hide_progress_bar."""
+        self._pipeline_state = state
+        try:
+            if not hasattr(self, 'pipeline_state_icon'):
+                return
+            t = _theme.DARK if getattr(self, '_dark_mode', False) else _theme.LIGHT
+            glyph, semantic, word = self._PIPELINE_STATE_GLYPHS.get(
+                state, self._PIPELINE_STATE_GLYPHS['idle'])
+            color = {'muted': t['text_muted'], 'accent': t['accent'],
+                     'success': t['success'], 'error': t['error']}[semantic]
+            self.pipeline_state_icon.setPixmap(_icons.pixmap(glyph, color, 14))
+            self.pipeline_state_text.setText(word)
+            self._set_status(self.pipeline_state_text, semantic, strong=True)
+            tip = f"Pipeline state: {word}"
+            self.pipeline_state_icon.setToolTip(tip)
+            self.pipeline_state_text.setToolTip(tip)
+            self.pipeline_state_icon.setAccessibleName(tip)
+            self.pipeline_state_text.setAccessibleName(tip)
+        except RuntimeError:
+            pass  # widgets already destroyed during shutdown
+
+    def _build_log_empty_state(self) -> QWidget:
+        """The log card's empty state: a quiet inbox glyph, a title line
+        and one short helper line, centered horizontally and vertically in
+        the LIST area. Kept muted (muted ink, no fill) so it never
+        competes with the SYNC button. The copy is chosen per context by
+        _update_log_empty_state()."""
+        box = QWidget()
+        box.setObjectName("log_empty")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(16, 8, 16, 8)
+        lay.setSpacing(6)
+        lay.addStretch(1)
+        self._log_empty_icon = QLabel()
+        self._log_empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._log_empty_icon.setPixmap(
+            _icons.pixmap('inbox', '#8E8A90', 36))
+        self._log_empty_icon.setAccessibleName("No log entries")
+        lay.addWidget(self._log_empty_icon)
+        self._log_empty_title = QLabel("No activity yet")
+        self._log_empty_title.setObjectName("log_empty_title")
+        self._log_empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._log_empty_title)
+        self._log_empty_hint = QLabel(
+            "Press Sync to fetch new messages from Telegram. "
+            "Notes appear here as they are created.")
+        self._log_empty_hint.setObjectName("log_empty_hint")
+        self._log_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._log_empty_hint.setWordWrap(True)
+        lay.addWidget(self._log_empty_hint)
+        lay.addStretch(1)
+        return box
+
+    def _update_log_empty_state(self):
+        """Show the empty state ONLY while the list has no visible entries,
+        and pick the copy for the context: a first run with nothing yet ·
+        a sync that found nothing new · a filter/search with no matches.
+        The first visible entry removes it."""
+        if not hasattr(self, '_log_empty'):
+            return
+        try:
+            entries = getattr(self, '_all_log_entries', None) or []
+            filt = getattr(self, '_log_filter', 'all')
+            search = self.log_search.text().lower() if hasattr(self, 'log_search') else ""
+            visible = 0
+            for e in entries:
+                if filt != 'all' and e.get('level', 'info') != filt:
+                    continue
+                if search and search not in str(e.get('msg', '')).lower():
+                    continue
+                visible += 1
+            if visible > 0:
+                self._log_empty.setVisible(False)
+                self.log_text.setVisible(True)
+                return
+            # The list is empty: swap the well for the empty state so it
+            # centers in the WHOLE list area (both share the stretch —
+            # Qt layouts ignore hidden widgets).
+            self._log_empty.setVisible(True)
+            self.log_text.setVisible(False)
+            if entries:
+                # Entries exist but the filter/search hides them all.
+                title = "No matching entries"
+                hint = "Clear the search or choose All."
+            elif getattr(self, '_log_last_uptodate', None):
+                # The last sync completed and found nothing new.
+                title = "Everything is up to date"
+                hint = (f"Last sync: {self._log_last_uptodate}. "
+                        "No new messages found.")
+            else:
+                # A first run (or a manually cleared log) with no entries.
+                title = "No activity yet"
+                hint = ("Press Sync to fetch new messages from Telegram. "
+                        "Notes appear here as they are created.")
+            self._log_empty_title.setText(title)
+            self._log_empty_hint.setText(hint)
+        except RuntimeError:
+            pass  # widgets already destroyed during shutdown
+
+    def _register_log_icon_resources(self):
+        """Register the four tinted level glyphs as QTextDocument image
+        resources for the row HTML (once per theme — a flip re-tints)."""
+        if not hasattr(self, 'log_text'):
+            return
+        dark = getattr(self, '_dark_mode', False)
+        if getattr(self, '_log_icons_theme', None) == dark:
+            return
+        colors = self._log_html_colors()
+        doc = self.log_text.document()
+        for level, glyph in self._LOG_LEVEL_ICONS.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource.value,
+                            QUrl(f"logicon://{level}"),
+                            _icons.pixmap(glyph, colors.get(level, '#6C6480'), 12))
+        self._log_icons_theme = dark
+
+    def _log_row_html(self, entry) -> Tuple[str, str]:
+        """Compose ONE log row — leading status glyph · muted timestamp ·
+        message — as HTML, truncating the message to the view width (the
+        list is NoWrap; rows keep one consistent height). Returns
+        (html, full_message) — the full text rides in the row tooltip."""
+        level = entry.get('level', 'info')
+        msg = str(entry.get('msg', ''))
+        ts = entry.get('timestamp', '')
+        colors = self._log_html_colors()
+        icon_color = colors.get(level, colors.get('info', '#6C6480'))
+        glyph = self._LOG_LEVEL_ICONS.get(level, 'dot')
+        # v0.07: timestamps — muted, but still above 4.5:1 on both themes.
+        ts_color = '#8F89A3' if getattr(self, '_dark_mode', False) else '#7A7288'
+        # v0.31.0: width-aware truncation. The row font is the QSS mono
+        # (Consolas at 12px) — measure with the same spec (a resize
+        # re-renders, so small platform-metric differences self-correct).
+        shown = msg
+        if hasattr(self, 'log_text'):
+            row_font = QFont('Consolas', 12)
+            row_font.setStyleHint(QFont.StyleHint.Monospace)
+            fm = QFontMetrics(row_font)
+            prefix = fm.horizontalAdvance(f"[{ts}] ") + 18   # glyph + gap
+            avail = (self.log_text.viewport().width()
+                     - 18                          # QSS padding (8×2) + border
+                     - prefix - 8)                 # scrollbar + safety
+            if avail > 40 and fm.horizontalAdvance(msg) > avail:
+                shown = fm.elidedText(msg, Qt.TextElideMode.ElideRight, avail)
+        safe_msg = _html_module.escape(shown, quote=False)
+        html_line = (
+            f'<img src="logicon://{level}" width="12" height="12" '
+            f'style="vertical-align:-2px" /> '
+            f'<span style="color:{ts_color}; font-family:Consolas,monospace;">[{ts}]</span> '
+            f'<span style="color:{icon_color}; font-family:Consolas,monospace;">{safe_msg}</span>'
+        )
+        return html_line, msg
+
+    def _append_log_row(self, entry):
+        """Append one rendered row (glyph · timestamp · message) to the
+        list, give it the inter-row gap, remember the full text for the
+        tooltip, and auto-scroll to the newest line."""
+        self._register_log_icon_resources()
+        html_line, full_text = self._log_row_html(entry)
+        self.log_text.append(html_line)
+        self.log_text.apply_row_format()
+        self.log_text.remember_full_text(
+            self.log_text.document().blockCount() - 1, full_text)
+        cursor = self.log_text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.log_text.setTextCursor(cursor)
+
     def log_message(self, msg, level="info"):
-        """Append a colored line to the GUI log and auto-scroll to the bottom.
-
-        Uses HTML coloring so different log levels are visually distinct:
-          - error   -> red   (#f44336 — visible on both light & dark)
-          - warning -> amber (#FF9800 — visible on both light & dark)
-          - success -> green (#4CAF50 — visible on both light & dark)
-          - info    -> gray  (#9E9E9E — visible on both light & dark)
-
-        Also stores the entry in `self._all_log_entries` so the GUI log can
-        be re-rendered when the user changes the active filter or search text
+        """Append one rendered row to the GUI log and auto-scroll to the
+        bottom. The entry is stored in `self._all_log_entries` so the log
+        can be re-rendered when the filter/search changes
         (see `_set_log_filter` / `_filter_log`).
+
+        v0.31.0 (balance pass): a row is a leading SHAPE-CODED status
+        glyph (success=check · warning=triangle · error=circle-x ·
+        info=filled dot — the semantic color rides on top of the shape,
+        never alone), a muted timestamp, and the message, truncated to
+        the view width with the full text in the row tooltip. Colors are
+        theme-aware (see _log_html_colors).
         """
         # Terminal colors (for console output)
         color_map = {
@@ -1450,37 +1699,31 @@ class UiMixin:
         if not hasattr(self, '_all_log_entries'):
             self._all_log_entries = []
         self._all_log_entries.append({'msg': str(msg), 'level': level, 'timestamp': timestamp})
-        # Prevent memory leak — cap at 1000 entries (oldest are dropped)
+        # Prevent memory leak — cap at 1000 entries (oldest are dropped).
+        # v0.31.0: a cap trim also rebuilds the view so the dropped rows
+        # really leave the list (they used to linger until the next
+        # filter change re-rendered the cache).
         if len(self._all_log_entries) > 1000:
             self._all_log_entries = self._all_log_entries[-1000:]
+            self._filter_log()
+            return
 
-        # HTML colors chosen to be readable on the ACTIVE theme background
-        # (v31.1: theme-aware — dark shades in light mode, light in dark).
-        html_color = self._log_html_colors().get(level, "#6C6480")
-        # v0.07: timestamps too — the old fixed #666 sat at ~2.4:1 on the
-        # recessed log well. Muted, but still above 4.5:1 on both themes.
-        ts_color = '#8F89A3' if getattr(self, '_dark_mode', False) else '#7A7288'
-
-        # Apply current filter — skip rendering if the entry doesn't match.
+        # Apply current filter — skip rendering if the entry doesn't match
+        # (the empty state may still change: a no-match filter is a
+        # context of its own).
         if self._log_filter != "all" and level != self._log_filter:
+            self._update_log_empty_state()
             return
         search = self.log_search.text().lower() if hasattr(self, 'log_search') else ""
         if search and search not in str(msg).lower():
+            self._update_log_empty_state()
             return
+        if not hasattr(self, 'log_text'):
+            return  # early init (before the log card exists)
 
-        # Escape HTML special chars in the message
-
-        safe_msg = _html_module.escape(str(msg), quote=False)
-        html_line = (
-            f'<span style="color:{ts_color}; font-family:Consolas,monospace;">[{timestamp}]</span> '
-            f'<span style="color:{html_color}; font-family:Consolas,monospace;">{safe_msg}</span>'
-        )
-        self.log_text.append(html_line)
-
-        # Auto-scroll to newest line
-        cursor = self.log_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.log_text.setTextCursor(cursor)
+        self._append_log_row({'msg': str(msg), 'level': level,
+                              'timestamp': timestamp})
+        self._update_log_empty_state()
 
     def _toggle_log_panel(self):
         """v33: the Progress Logs panel is a permanent fixture of the main
@@ -1500,21 +1743,23 @@ class UiMixin:
 
     def _filter_log(self):
         """Re-render the log panel from `self._all_log_entries` applying the
-        current level filter + search text."""
+        current level filter + search text. Also the resize path (LogView
+        re-renders so truncation follows the new width) and the theme-flip
+        path (row colors are baked into the HTML at render time)."""
+        if not hasattr(self, 'log_text'):
+            return
         search = self.log_search.text().lower() if hasattr(self, 'log_search') else ""
         if not hasattr(self, '_all_log_entries'):
             self._all_log_entries = []
 
-        # v31.1: theme-aware log colors (see _log_html_colors).
-        html_color_map = self._log_html_colors()
-
+        self._register_log_icon_resources()
 
         # Suppress auto-scroll flicker while we rebuild the log.
         self.log_text.clear()
+        self.log_text.reset_full_texts()
         for entry in self._all_log_entries:
             level = entry.get('level', 'info')
             msg = entry.get('msg', '')
-            timestamp = entry.get('timestamp', '')
 
             # Filter by level
             if self._log_filter != "all" and level != self._log_filter:
@@ -1523,25 +1768,21 @@ class UiMixin:
             if search and search not in msg.lower():
                 continue
 
-            color = html_color_map.get(level, "#9E9E9E")
-            safe_msg = _html_module.escape(msg, quote=False)
-            ts_color = '#8F89A3' if getattr(self, '_dark_mode', False) else '#7A7288'
-            html_line = (
-                f'<span style="color:{ts_color}; font-family:Consolas,monospace;">[{timestamp}]</span> '
-                f'<span style="color:{color}; font-family:Consolas,monospace;">{safe_msg}</span>'
-            )
-            self.log_text.append(html_line)
+            self._append_log_row(entry)
 
         # Jump to the bottom after re-rendering.
         cursor = self.log_text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.log_text.setTextCursor(cursor)
+        self._update_log_empty_state()
 
     def _clear_log(self):
         """Clear both the visible log and the stored entry cache."""
         if hasattr(self, '_all_log_entries'):
             self._all_log_entries.clear()
         self.log_text.clear()
+        self.log_text.reset_full_texts()
+        self._update_log_empty_state()
 
     def _refresh_pipeline_counter(self):
         """v0.07 (design review “make the status readout say something”):

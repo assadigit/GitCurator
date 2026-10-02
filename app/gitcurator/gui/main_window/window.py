@@ -118,6 +118,10 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
         self._log_filter = "all"
         self._log_search = ""
         self._all_log_entries: List[Dict[str, str]] = []
+        # v0.31.0 (balance pass): the timestamp of the last sync that found
+        # NOTHING new — powers the log card's "Everything is up to date"
+        # empty state (None = no caught-up sync recorded yet).
+        self._log_last_uptodate = None
         # v0.06 — Fix (zombie process / stale app.lock): set as soon as the
         # user closes the window. Every timer-driven callback (startup
         # auto-check, proxy monitor) and every modal helper checks this flag
