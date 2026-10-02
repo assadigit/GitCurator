@@ -38,6 +38,23 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.31.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-02** (worker version ID
+> `a66084bf-3185-4e3a-b6c7-49569962dfb8`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.31.0 is a DESKTOP-ONLY release (the main-window balance pass — one
+> status card, shape-coded state indicator, resizable window, the log
+> card's row grammar + empty state); the Worker's code is unchanged
+> since v0.28.0, so this deploy re-ships the exact same 0.28.0 bundle
+> at the owner's request. Verified after the deploy: `/health` answers
+> `"version":"0.28.0"` with `"status":"ok"`, both queue consumers
+> registered (ingest **and** DLQ, plus both producers), all four secrets
+> persisted (BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET), D1
+> row counts identical before/after (385 ledger / 2 dead / 342 activity /
+> 0 mirror). The D1 export taken just before the deploy:
+> `/home/z/backups/d1-backup-20261002-pre-v031-deploy.sql` (belt-and-braces).
+
 ## 📦 v0.30.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-02** (worker version ID
