@@ -38,14 +38,14 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
-## 📦 v0.37.0 deploy record — the 0.29.0 worker, batch pastes (PREPARED ⏳ — awaiting the Cloudflare API token)
+## 📦 v0.37.0 deploy record — the 0.29.0 worker, batch pastes (DEPLOYED ✅)
 
-> **NOT yet deployed to production** (as of 2026-10-05). The sandbox
-> that built v0.37.0 has no Cloudflare API token (`CLOUDFLARE_API_TOKEN`
-> unset, no wrangler OAuth cache — the 4th sandbox reset cleared it).
-> The bundle is READY: `wrangler deploy --dry-run` passes (bindings
-> valid: DB curator-bot · CACHE KV · curator-ingest + DLQ queues), the
-> worker suite is 48/48, and `src/version.js` reports 0.29.0.
+> **Deployed to production on 2026-10-05** (worker version ID
+> `09079fd8-3063-4e81-81e9-b58f4363bf03`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> The deploy ran from the v0.39.0 tree (`0c5c6dd`, CI green) after the
+> owner re-supplied the Cloudflare API token — the same 0.29.0 bundle
+> that was prepared and dry-run-verified at v0.37.0.
 >
 > **What ships in 0.29.0** (a REAL worker change this time):
 > - `extractUrls` captures a line that is exactly ONE bare address
@@ -59,20 +59,25 @@ First time here instead? Follow the from-scratch guide below.
 > - The no-link hint says you can paste as many links as you like in
 >   one message.
 >
-> **To deploy** (any machine with the Cloudflare API token, 2 minutes):
-> ```bash
-> cd app/cloudflare-bot
-> export CLOUDFLARE_API_TOKEN=cfut_…   # Workers+Queues+D1 token
-> npm install --ignore-scripts
-> npx wrangler d1 execute curator-bot --remote --file=schema.sql  # idempotent
-> npx wrangler deploy
-> curl https://github-to-obsidian-bot.aliassadi-plus.workers.dev/health
-> #   → {"status":"ok","version":"0.29.0",...}
-> ```
-> Until then, the DESKTOP app (v0.37.0) expects Worker 0.29.0 — its
-> Test Connection → Bot Worker line shows an older-bot warning
-> (harmless: the bot stays backward compatible; batch pastes with
-> bare addresses just need the new worker).
+> **Deploy ritual** (as executed, 2 minutes): D1 export backup FIRST →
+> `/home/z/backups/d1-backup-20261005-pre-029-deploy.sql` (2,293 INSERTs,
+> 1,128,765 bytes; ledger 1,158 · activity_log 1,113 · dead_letters 9 ·
+> vault_mirror 0 · sync_state 9 · dashboard_sessions 2), then the
+> idempotent `schema.sql` re-apply (10 tables, no-op), then
+> `wrangler deploy`. Pre-flight: worker suite 48/48 + `--dry-run` PASS.
+>
+> **Verified live after the deploy**: `/health` →
+> `{"status":"ok","version":"0.29.0",...}` ✓ · Telegram
+> `getWebhookInfo` → url = the worker's `/webhook`, `pending_update_count`
+> 0, no `last_error` ✓ · producers + consumers registered for BOTH
+> `curator-ingest` and `curator-ingest-dlq` ✓ · all 4 secrets persisted
+> (BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET) ✓ · D1 parity
+> after the deploy IDENTICAL to the pre-deploy backup (ledger 1,158 ·
+> activity 1,113 · dead 9 · mirror 0) ✓.
+>
+> The DESKTOP app has expected Worker 0.29.0 since v0.37.0 — its
+> Test Connection → Bot Worker older-bot warning is now resolved
+> (bot and expectation in lockstep at 0.29.0).
 
 ---
 
