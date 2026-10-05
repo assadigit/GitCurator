@@ -45,17 +45,34 @@ from gitcurator.gui.link_helpers import normalize_url
 # v25 pre-flight: non-GitHub link platform classification.
 # Used by _create_inbox_notes (worker) and MainWindow.check_bot_queue to
 # route each link to the right per-platform file in _inbox/.
-PLATFORM_INFO = {
-    'x_twitter':       ('🐦 X / Twitter',       'x_twitter_links.md'),
-    'reddit':          ('👽 Reddit',             'reddit_links.md'),
-    'youtube':         ('📺 YouTube',            'youtube_links.md'),
-    'linkedin':        ('💼 LinkedIn',           'linkedin_links.md'),
-    'medium':          ('✍️ Medium',             'medium_links.md'),
-    'huggingface':     ('🤗 HuggingFace',        'huggingface_links.md'),
-    'arxiv':           ('📄 arXiv',              'arxiv_links.md'),
-    'package_registry':('📦 Package Registry',   'package_registry_links.md'),
-    'other':           ('🔗 Other',              'other_links.md'),
+#
+# v0.35.0 — the recognition logic (classify_platform + the domain and
+# table-file maps) moved to core/links.py so the law sweep shares ONE
+# source of truth; this module keeps the DISPLAY names and re-exports the
+# classifier for every existing import site.
+_PLATFORM_DISPLAY = {
+    'x_twitter':       '🐦 X / Twitter',
+    'reddit':          '👽 Reddit',
+    'youtube':         '📺 YouTube',
+    'linkedin':        '💼 LinkedIn',
+    'medium':          '✍️ Medium',
+    'huggingface':     '🤗 HuggingFace',
+    'arxiv':           '📄 arXiv',
+    'package_registry':'📦 Package Registry',
+    'other':           '🔗 Other',
 }
+
+#: platform key -> (display name, _inbox table filename). The filenames
+#: come from core/links.PLATFORM_TABLE_FILES (single source of truth) —
+#: the display names live only here (pure presentation).
+PLATFORM_INFO = {
+    key: (display, _links.PLATFORM_TABLE_FILES.get(key, 'other_links.md'))
+    for key, display in _PLATFORM_DISPLAY.items()
+}
+
+# v0.35.0 — re-export the core classifier (suffix-anchored host match;
+# the old local copy also matched look-alike hosts like notyoutube.com).
+classify_platform = _links.classify_platform
 
 def _inbox_table_vault(config) -> str:
     """v0.20.0 — WHICH vault receives the per-platform _inbox tables.
@@ -71,42 +88,37 @@ def _inbox_table_vault(config) -> str:
         return web_vault
     return cfg.get('vault_path', '') or ''
 
-def classify_platform(url: str) -> str:
-    """Return the platform key for a non-GitHub URL.
-
-    Recognises: X/Twitter, Reddit, YouTube, LinkedIn, Medium, HuggingFace,
-    arXiv, npm/PyPI. Anything else (including unparseable URLs) returns
-    'other'. GitHub URLs return 'github' (callers should never send GitHub
-    URLs here, but we handle it defensively)."""
-    from urllib.parse import urlparse
+def _stored_urls_probe(vault_path):
+    """v0.35.0 — a ``url -> bool`` probe for "this link is ALREADY a note
+    in the vault". The Websites VaultIndex (the same ground-truth dedupe
+    layer the pipeline uses) over the TABLE vault, keyed with the website
+    normalizer. Returns None when the vault can't be scanned (the caller
+    then skips the stored-check rather than false-positive rows)."""
     try:
-        parsed = urlparse(url)
-        domain = (parsed.netloc or '').lower()
+        from gitcurator.gui.vault_index import VaultIndex
+        vi = VaultIndex(vault_path,
+                        normalizer=_links.normalize_website_url)
+        vi.rebuild(log_signal=None)
+        return vi.has_url
     except Exception:
-        return 'other'
-    if not domain:
-        return 'other'
-    if 'x.com' in domain or 'twitter.com' in domain:
-        return 'x_twitter'
-    if 'reddit.com' in domain:
-        return 'reddit'
-    if 'youtube.com' in domain or 'youtu.be' in domain:
-        return 'youtube'
-    if 'linkedin.com' in domain:
-        return 'linkedin'
-    if 'medium.com' in domain:
-        return 'medium'
-    if 'github.com' in domain:
-        return 'github'
-    if 'huggingface.co' in domain:
-        return 'huggingface'
-    if 'arxiv.org' in domain:
-        return 'arxiv'
-    if 'npmjs.com' in domain or 'pypi.org' in domain:
-        return 'package_registry'
-    return 'other'
+        return None
 
-def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", log_callback=None):
+
+def _inbox_row_url(line):
+    """The URL column of one _inbox table row (column 4, same parse the
+    writer's dedupe reader uses). '' when the line is not a data row."""
+    if not (line.startswith('| ') and 'http' in line):
+        return ''
+    parts = line.split('|')
+    if len(parts) < 4:
+        return ''
+    u = parts[3].strip()
+    return u if u.startswith('http') else ''
+
+
+def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved",
+                                   log_callback=None, blocked_domains=None,
+                                   vault_index_has=None):
     """Write non-GitHub links to per-platform files in `<vault>/_inbox/`.
 
     Each platform gets its own .md file with a markdown table. The function
@@ -114,18 +126,85 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
     normalized URL) are skipped. The file is written atomically
     (tempfile + os.replace) so a crash mid-write cannot corrupt the table.
 
+    v0.35.0 — the owner's omission rule, enforced at the intake: links on
+    ``blocked_domains`` (THE LAW + the config's extras — YouTube, X/t.co,
+    HuggingFace, Google share/drive/docs, the social-media majors, …) are
+    NEVER collected — no note, no _review, no _inbox row (the manifest's
+    blocked bucket is the count). Links already stored as notes in the
+    vault are not re-collected either ("already addressed and stored in
+    correct notes and formats inside the vault"). After writing, every
+    table is PRUNED so legacy rows of both kinds disappear (see
+    ``prune_inbox_tables``).
+
+    ``blocked_domains`` — the ban list (None = no ban filter; production
+    callers pass ``_links.blocked_domains_from_config(config)``).
+    ``vault_index_has`` — an existing ``url -> bool`` "is a note in the
+    vault" probe to reuse; when None a fresh VaultIndex over the table
+    vault is built (only when there is something left to check).
+
     Returns: total number of NEW rows added across all platforms.
     Logs per-platform counts via ``log_callback(msg, level)`` if supplied."""
     try:
         if not vault_path or not non_github_urls:
             return 0
         inbox_folder = os.path.join(vault_path, "_inbox")
-        # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-        _dryrun.makedirs(inbox_folder, exist_ok=True)
+
+        # v0.35.0 — filter 1: banned domains are never collected.
+        _kept_urls = list(non_github_urls)
+        _omitted = 0
+        if blocked_domains:
+            _kept_urls = []
+            for url in non_github_urls:
+                if _links.domain_is_blocked(url, blocked_domains):
+                    _omitted += 1
+                else:
+                    _kept_urls.append(url)
+            if _omitted and log_callback:
+                try:
+                    log_callback(
+                        f"🚫 {_omitted} banned-domain link(s) omitted — "
+                        f"never collected (no note, no _review, no _inbox "
+                        f"row)", "info")
+                except Exception:
+                    pass
+        if not _kept_urls:
+            # Nothing to write — but still prune the legacy tables so old
+            # banned/stored rows leave on this pass too.
+            prune_inbox_tables(vault_path,
+                               blocked_domains=blocked_domains,
+                               vault_index_has=vault_index_has,
+                               log_callback=log_callback)
+            return 0
+        # v0.35.0 — filter 2: links already stored as notes in the vault
+        # are not re-collected. The probe is built lazily (a vault scan)
+        # and only when at least one link survived the ban filter.
+        _already_stored = 0
+        _stored_probe = vault_index_has
+        if _stored_probe is None:
+            _stored_probe = _stored_urls_probe(vault_path)
+        if _stored_probe is not None:
+            _survivors = []
+            for url in _kept_urls:
+                try:
+                    if _stored_probe(url):
+                        _already_stored += 1
+                    else:
+                        _survivors.append(url)
+                except Exception:
+                    _survivors.append(url)   # probe trouble → keep the row
+            _kept_urls = _survivors
+            if _already_stored and log_callback:
+                try:
+                    log_callback(
+                        f"🔗 {_already_stored} link(s) already stored as "
+                        f"note(s) in the vault — not re-added to _inbox",
+                        "info")
+                except Exception:
+                    pass
 
         # Group URLs by platform
         platform_urls = {}  # platform -> [urls]
-        for url in non_github_urls:
+        for url in _kept_urls:
             platform = classify_platform(url)
             # Defensive: GitHub URLs should never reach here, but if they
             # do, route them to 'other' rather than dropping them.
@@ -137,6 +216,10 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
         for platform, urls in platform_urls.items():
             display_name, filename = PLATFORM_INFO.get(platform, ('🔗 Other', 'other_links.md'))
             table_path = os.path.join(inbox_folder, filename)
+            # v0.09.5 — Phase 0 (dry-run): recorded, not performed. Only
+            # created when there is at least one row to write (v0.35.0 —
+            # an all-banned batch must not leave an empty _inbox/ dir).
+            _dryrun.makedirs(inbox_folder, exist_ok=True)
 
             # Read existing URLs for dedup
             existing_urls = set()
@@ -244,6 +327,14 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
                 )
             except Exception:
                 pass
+        # v0.35.0 — after every write, prune the tables: legacy banned
+        # rows (x, t.co, youtube, …) and rows for links that are already
+        # stored as notes leave the review queue for good. The probe built
+        # for filter 2 is reused — no second vault scan.
+        prune_inbox_tables(vault_path,
+                           blocked_domains=blocked_domains,
+                           vault_index_has=_stored_probe,
+                           log_callback=log_callback)
         return total_new
     except Exception as e:
         if log_callback:
@@ -252,3 +343,100 @@ def write_inbox_links_by_platform(vault_path, non_github_urls, source="Saved", l
             except Exception:
                 pass
         return 0
+
+
+def prune_inbox_tables(vault_path, blocked_domains=None, vault_index_has=None,
+                       log_callback=None, stored_urls=None):
+    """v0.35.0 — drop the rows the app must not collect from every
+    ``<vault>/_inbox/*.md`` platform table:
+
+    * rows whose URL is on a ``blocked_domains`` domain (x.com, t.co,
+      youtube, share.google, … — THE LAW's platforms are never collected),
+    * rows whose URL is ALREADY a note in the vault (``vault_index_has``
+      probe, or a fresh Websites VaultIndex over the table vault), or in
+      ``stored_urls`` (a set of canonical website URLs — the batch's
+      just-processed results, passed by the websites phase).
+
+    Everything else is kept VERBATIM (the owner's ✅ reviewed / ❌ ignored
+    Status marks included). The rewritten file stays byte-identical apart
+    from the dropped rows and the "Last updated:" stamp. Never raises;
+    unreadable tables are skipped; dry-run aware (the rewrite is recorded,
+    not performed). Returns the number of rows dropped."""
+    dropped_total = 0
+    try:
+        if not vault_path:
+            return 0
+        inbox_folder = os.path.join(vault_path, "_inbox")
+        if not os.path.isdir(inbox_folder):
+            return 0
+        _stored_probe = vault_index_has
+        _stored_set = {str(u) for u in (stored_urls or ())}
+        for fname in sorted(os.listdir(inbox_folder)):
+            if not fname.endswith('.md'):
+                continue
+            table_path = os.path.join(inbox_folder, fname)
+            if not os.path.isfile(table_path):
+                continue
+            try:
+                with open(table_path, 'r', encoding='utf-8') as f:
+                    lines = f.read().split('\n')
+            except Exception:
+                continue
+            # Lazy shared probe: only build the vault scan when the first
+            # candidate row actually needs the "is it a note?" answer.
+            _dropped = 0
+            _kept_lines = []
+            _dirty = False
+            for line in lines:
+                row_url = _inbox_row_url(line)
+                if not row_url:
+                    _kept_lines.append(line)
+                    continue
+                _drop = False
+                if blocked_domains and _links.domain_is_blocked(
+                        row_url, blocked_domains):
+                    _drop = True
+                if not _drop:
+                    _canon = _links.normalize_website_url(row_url)
+                    if _canon in _stored_set:
+                        _drop = True
+                if not _drop and (vault_index_has is not None
+                                  or stored_urls is None):
+                    if _stored_probe is None:
+                        _stored_probe = _stored_urls_probe(vault_path)
+                    if _stored_probe is not None:
+                        try:
+                            _drop = bool(_stored_probe(row_url))
+                        except Exception:
+                            _drop = False
+                if _drop:
+                    _dropped += 1
+                    _dirty = True
+                else:
+                    _kept_lines.append(line)
+            if not _dirty:
+                continue
+            content = '\n'.join(_kept_lines)
+            # Refresh the "Last updated:" stamp like the writer does.
+            _now = datetime.now().strftime('%Y-%m-%d %H:%M')
+            content = '\n'.join(
+                (f"> Last updated: {_now}" if 'Last updated:' in ln else ln)
+                for ln in content.split('\n'))
+            _storage.atomic_write_text(table_path, content)
+            dropped_total += _dropped
+            if log_callback:
+                try:
+                    log_callback(
+                        f"🧹 {fname}: pruned {_dropped} row(s) — banned "
+                        f"domain(s) and link(s) already stored as note(s) "
+                        f"in the vault", "info")
+                except Exception:
+                    pass
+        return dropped_total
+    except Exception as e:
+        if log_callback:
+            try:
+                log_callback(f"⚠️ _inbox prune skipped: {e}", "warning")
+            except Exception:
+                pass
+        return dropped_total

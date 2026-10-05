@@ -318,6 +318,11 @@ class WebsitePipeline:
                     self.web_proxy = None
         self.taxonomy = taxonomy or load_taxonomy_from_config(self.config)
         self.vault_path = (self.config.get('website_vault_path') or '').strip()
+        # v0.35.0 — the display name of the Websites vault for the
+        # per-item destination logs ("[Vault Name] Item X processed and
+        # stored" — the owner asked the log to show where each link goes).
+        self._vault_name = os.path.basename(self.vault_path) \
+            if self.vault_path else 'Websites vault'
         self.taxonomy_path = resolve_taxonomy_path(self.config)
         # v0.20.0 — blocked domains (the X fix): these links are already
         # addressed as rows in the _inbox platform tables; the pipeline
@@ -393,8 +398,9 @@ class WebsitePipeline:
                     f"🚫 Blocked domains ({', '.join(self.blocked_domains)}): "
                     f"purged {report['retries']} queued retry(ies) + "
                     f"{len(report['placeholders'])} _review placeholder(s) "
-                    f"({deleted_files} file(s) deleted) — these links stay "
-                    f"in the _inbox table only (Settings → 📁 Vault)",
+                    f"({deleted_files} file(s) deleted) — banned links "
+                    f"are never collected (no note, no _review, no _inbox "
+                    f"row)",
                     "info")
         except Exception as e:
             self.log(f"⚠️ Blocked-domain purge skipped: {e}", "warning")
@@ -706,17 +712,19 @@ class WebsitePipeline:
         result['canonical'] = canonical
 
         # ---- 1b. never-fetch domains (v0.20.0 blocked + v0.21.0 self) ---
-        # Already addressed as rows in the _inbox platform tables; never
-        # fetched, never noted, never retried — whatever path brought the
-        # link here (batch, retry, direct, import).
+        # Never fetched, never noted, never retried — whatever path
+        # brought the link here (batch, retry, direct, import). v0.35.0:
+        # banned links are omitted ENTIRELY (no _inbox row either — the
+        # manifest's blocked bucket is the count).
         if self.blocked_domains and _links.domain_is_blocked(
                 url, self.blocked_domains):
             result['outcome'] = 'skipped'
-            result['error'] = 'blocked domain — recorded in _inbox only'
+            result['error'] = 'blocked domain — omitted (never collected)'
             self.counters['skipped'] += 1
             self.last_results.append(result)
-            self.log(f"🚫 {url}: blocked domain — skipped (the _inbox "
-                     f"table keeps the record)", "info")
+            self.log(f"🚫 [{self._vault_name}] {url}: banned domain — "
+                     "omitted (never fetched, never noted, never "
+                     "collected)", "info")
             return result
         if self.self_domains and _links.domain_is_self(url, self.self_domains):
             result['outcome'] = 'skipped'
@@ -803,8 +811,9 @@ class WebsitePipeline:
                           error=f"fetch failed: {fetch.reason}")
             self.counters['review' if not upgraded else 'upgraded'] += 1
             self.last_results.append(result)
-            self.log(f"📥 {url}: fetch failed ({fetch.reason}) — minimal "
-                     "note in _review, retry scheduled", "warning")
+            self.log(f"📥 [{self._vault_name}] {url}: fetch failed "
+                     f"({fetch.reason}) — minimal note in _review, retry "
+                     "scheduled", "warning")
             return result
 
         # ---- 4. extract ----------------------------------------------------
@@ -846,7 +855,8 @@ class WebsitePipeline:
                               fetch_status=fetch_status)
                 self.counters['review'] += 1
                 self.last_results.append(result)
-                self.log(f"🗂️ {url}: {reason} — filed under _review", "warning")
+                self.log(f"🗂️ [{self._vault_name}] {url}: {reason} — filed "
+                         "under _review", "warning")
                 return result
 
             subcategory, conf2 = self._classify_subcategory(
@@ -899,9 +909,17 @@ class WebsitePipeline:
                       error='')
         self.counters['processed' if not upgraded else 'upgraded'] += 1
         self.last_results.append(result)
-        self.log(f"✅ {url} → {category}"
-                 + (f" / {subcategory}" if subcategory else "")
-                 + f" ({fetch_status})", "success")
+        # v0.35.0 — the owner asked the log to SHOW where each link goes:
+        # "[Vault Name] Item X processed and stored". The vault name is
+        # the configured Websites vault's folder; the arrow is the note's
+        # path INSIDE the vault (category folders included).
+        _rel = os.path.relpath(path, self.vault_path).replace(os.sep, '/') \
+            if self.vault_path else path
+        self.log(
+            f"✅ [{self._vault_name}] {name} processed and stored "
+            f"→ {_rel}"
+            + (f" ({fetch_status})" if fetch_status != 'full' else ''),
+            "success")
         return result
 
     def _review_path(self, canonical: str, prior: Optional[Dict] = None) -> str:

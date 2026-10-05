@@ -225,11 +225,16 @@ class BotQueueMixin:
                     # v0.20.0 — the tables land in the WEBSITES vault when
                     # one is set ("the github vault only manages its
                     # domains"); fallback = the GitHub vault.
+                    # v0.35.0 — THE LAW's domains are passed in so banned
+                    # links (YouTube, X/t.co, share.google, …) are never
+                    # collected — and legacy rows get pruned.
                     _table_vault = _inbox_table_vault(self.config)
                     if _table_vault:
                         write_inbox_links_by_platform(
                             _table_vault, non_github, source="Bot",
                             log_callback=lambda msg, lvl: self.log_message(msg, lvl),
+                            blocked_domains=_links.blocked_domains_from_config(
+                                self.config),
                         )
 
                 # Q1/Q6: Filter URLs against VaultIndex + decommissioned —
@@ -654,11 +659,16 @@ class BotQueueMixin:
             if non_github:
                 # v0.20.0 — the tables land in the WEBSITES vault when one
                 # is set ("the github vault only manages its domains").
+                # v0.35.0 — THE LAW's domains are passed in so banned
+                # links (YouTube, X/t.co, share.google, …) are never
+                # collected — and legacy rows get pruned.
                 _table_vault = _inbox_table_vault(self.config)
                 if _table_vault:
                     write_inbox_links_by_platform(
                         _table_vault, non_github, source="Bot",
                         log_callback=lambda msg, lvl: self.log_message(msg, lvl),
+                        blocked_domains=_links.blocked_domains_from_config(
+                            self.config),
                     )
 
             # Start the worker. processing_finished will advance

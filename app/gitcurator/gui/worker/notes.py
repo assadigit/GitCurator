@@ -186,9 +186,13 @@ class WorkerNotesMixin:
         # platform tables land in the WEBSITES vault when one is set
         # (fallback: the GitHub vault, the pre-v0.20 behavior, so links
         # are never lost on a vault-less setup).
+        # v0.35.0 — THE LAW's domains are passed in so banned links
+        # (YouTube, X/t.co, share.google, the social majors, …) are
+        # never collected — no note, no _review, no _inbox row.
         write_inbox_links_by_platform(
             _inbox_table_vault(self.config),
             non_github_urls,
             source=source,
             log_callback=self.log_message.emit,
+            blocked_domains=_links.blocked_domains_from_config(self.config),
         )

@@ -174,16 +174,58 @@ class TestLawSweep(_VaultCase):
             self.note('Notes/my_own_x_thread.md')))
         self.assertIn('hand-written', self.all_logs())
 
-    def test_sweep_never_touches_the_inbox_record(self):
-        """_inbox platform tables ARE the record for banned links."""
-        inbox = self.note('_inbox/x_twitter_links.md')
-        os.makedirs(os.path.dirname(inbox), exist_ok=True)
-        with open(inbox, 'w', encoding='utf-8') as f:
-            f.write('| x.com/a | x.com | 2026-10-01 |\n')
+    def test_sweep_quarantines_banned_platform_tables(self):
+        """v0.35.0 — the owner's omission rule ("must not collect youtube
+        links for note or review, same for X, and hugging face"): a
+        platform whose EVERY domain is banned has its _inbox table
+        quarantined whole; partially-banned platforms and the 'other'
+        catch-all keep theirs (their banned ROWS are pruned by the intake
+        writer's prune pass instead)."""
+        inbox = self.note('_inbox')
+        os.makedirs(inbox, exist_ok=True)
+        for fname in ('x_twitter_links.md', 'youtube_links.md',
+                      'linkedin_links.md', 'huggingface_links.md',
+                      'reddit_links.md', 'medium_links.md',
+                      'other_links.md'):
+            with open(os.path.join(inbox, fname), 'w',
+                      encoding='utf-8') as f:
+                f.write(f'# {fname}\n\n| - | 2026-10-05 | '
+                        f'https://{fname.split("_")[0]}.example/x '
+                        f'| x | Bot | unreviewed | |\n')
         report = wd.sweep_banned_notes(
             self.vault, L.blocked_domains_from_config({}), log=self.log)
-        self.assertEqual(report['scanned'], 0)   # _inbox skipped wholesale
-        self.assertTrue(os.path.exists(inbox))
+        # the four fully-banned platforms' tables left the vault…
+        self.assertEqual(
+            sorted(t[0] for t in report['moved_tables']),
+            ['huggingface', 'linkedin', 'x_twitter', 'youtube'])
+        for platform in ('x_twitter', 'youtube', 'linkedin',
+                         'huggingface'):
+            self.assertFalse(os.path.exists(
+                os.path.join(inbox, f'{platform}_links.md')), platform)
+            self.assertTrue(os.path.exists(
+                os.path.join(self.quarantine(),
+                             f'{platform}_links.md')), platform)
+        # …while reddit (allowed), medium (allowed) and the 'other'
+        # catch-all stay untouched in place.
+        for fname in ('reddit_links.md', 'medium_links.md',
+                      'other_links.md'):
+            self.assertTrue(os.path.exists(os.path.join(inbox, fname)),
+                            fname)
+        self.assertIn('never collected', self.all_logs())
+
+    def test_sweep_keeps_a_partially_banned_platforms_table(self):
+        """A platform with only SOME domains banned keeps its table — the
+        ban list decides, not the platform's existence."""
+        inbox = self.note('_inbox')
+        os.makedirs(inbox, exist_ok=True)
+        table = os.path.join(inbox, 'reddit_links.md')
+        with open(table, 'w', encoding='utf-8') as f:
+            f.write('# reddit\n')
+        report = wd.sweep_banned_notes(
+            self.vault, ['x.com', 't.co', 'twitter.com', 'youtube.com'],
+            log=self.log)
+        self.assertEqual(report['moved_tables'], [])
+        self.assertTrue(os.path.exists(table))
 
     def test_sweep_is_idempotent(self):
         _write_note(self.note('_review/x_com_1.md'), 'https://x.com/1')
@@ -223,7 +265,7 @@ class TestLawSweep(_VaultCase):
         report = wd.sweep_banned_notes(
             os.path.join(self.tmp, 'nope'), ['x.com'], log=self.log)
         self.assertEqual(report, {'moved': [], 'kept_handwritten': 0,
-                                  'scanned': 0})
+                                  'scanned': 0, 'moved_tables': []})
 
 
 # ---------------------------------------------------------------------------

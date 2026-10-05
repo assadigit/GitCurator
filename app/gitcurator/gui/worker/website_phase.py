@@ -80,6 +80,7 @@ from gitcurator.gui.platform_intake import (
     PLATFORM_INFO,
     _inbox_table_vault,
     classify_platform,
+    prune_inbox_tables,
     write_inbox_links_by_platform,
 )
 
@@ -104,15 +105,20 @@ class WorkerWebsitePhaseMixin:
                 return None
             website_vault = (self.config.get('website_vault_path') or '').strip()
             links = list(getattr(self, '_non_github_urls', []) or [])
-            # v0.20.0 — blocked domains at INTAKE (the X fix): these links
-            # are already addressed as rows in the _inbox platform tables
-            # and never reach the fetcher. The pipeline's own guard is the
-            # second layer (due-retries, any other entry path).
+            # v0.20.0 — blocked domains at INTAKE (the X fix): these
+            # links are never fetched and never noted. The pipeline's own
+            # guard is the second layer (due-retries, any other entry
+            # path).
             # v0.21.0 — SELF domains (the app's own bot) get the same
-            # intake treatment: its auth links (…/auth/?token=…) are never
-            # fetched and never noted; the _inbox row (token scrubbed) is
-            # the record. Both marked 'blocked' in the manifest so the
-            # verification report accounts for them explicitly.
+            # intake treatment: its auth links (…/auth/?token=…) are
+            # never fetched and never noted; the _inbox row (token
+            # scrubbed) is the record. Both marked 'blocked' in the
+            # manifest so the verification report accounts for them
+            # explicitly.
+            # v0.35.0 — THE LAW grew (YouTube, Google share/drive/docs,
+            # the social-media majors): banned links are omitted ENTIRELY
+            # — never fetched, never noted, never collected in _inbox
+            # (the manifest's blocked bucket is the count).
             _blocked = _links.blocked_domains_from_config(self.config)
             _self = _links.self_domains_from_config(self.config)
             if (_blocked or _self) and links:
@@ -126,9 +132,9 @@ class WorkerWebsitePhaseMixin:
                         _kept.append(_u)
                 if _drop_blocked:
                     self.log_message.emit(
-                        f"🚫 {len(_drop_blocked)} link(s) on blocked domains "
-                        f"({', '.join(_blocked)}) — never fetched; the "
-                        f"_inbox table keeps the record", "info")
+                        f"🚫 {len(_drop_blocked)} link(s) on banned domains "
+                        f"({', '.join(_blocked)}) — omitted entirely: "
+                        f"never fetched, never noted, never collected", "info")
                     if self.link_tracker:
                         for _u in _drop_blocked:
                             try:
@@ -285,6 +291,36 @@ class WorkerWebsitePhaseMixin:
                     self.log_message.emit(
                         f"⚠️ Website Directory rebuild skipped: "
                         f"{_dir_err}", "warning")
+
+                # v0.35.0 — prune the _inbox tables now that the batch is
+                # done: every link this run stored as a note (processed or
+                # _review) leaves the review queue ("already addressed and
+                # stored in correct notes"), and any lingering banned-
+                # domain row goes too. The phase's VaultIndex (pre-run) +
+                # the batch's results together see the whole truth.
+                try:
+                    _tbl_vault = _inbox_table_vault(self.config)
+                    if _tbl_vault:
+                        _stored = {
+                            _links.normalize_website_url(r['url'])
+                            for r in results
+                            if r.get('outcome') in ('processed', 'review')
+                        } | {
+                            r.get('canonical') for r in results
+                            if r.get('outcome') in ('processed', 'review')
+                        }
+                        _stored.discard(None)
+                        _stored.discard('')
+                        prune_inbox_tables(
+                            _tbl_vault,
+                            blocked_domains=_blocked,
+                            vault_index_has=index.has_url,
+                            log_callback=self.log_message.emit,
+                            stored_urls=_stored)
+                except Exception as _prune_err:
+                    self.log_message.emit(
+                        f"⚠️ _inbox table prune skipped: {_prune_err}",
+                        "warning")
 
                 summary = {'counters': dict(pipeline.counters),
                            'results': list(pipeline.last_results),

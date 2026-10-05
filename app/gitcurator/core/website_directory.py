@@ -8,14 +8,21 @@ Two jobs, both run-side, both idempotent, both dry-run aware:
 1. ``sweep_banned_notes`` — enforce the owner's law ("EVERY X And GITHUB
    domain (all of its group) must be banned from showing on websites
    directory … Hugginface, Github, Twitter (X), Instagram, Facebook,
-   Linkedin") against the vault ON DISK, not just the intake: every
-   APP-OWNED note whose ``source:`` frontmatter is on a banned domain is
-   moved to ``<vault>/.trash/banned-domains/`` (Obsidian's hidden trash;
+   Linkedin" — extended at v0.35.0 with YouTube, the Google
+   share/drive/docs family and the social-media majors) against the vault
+   ON DISK, not just the intake: every APP-OWNED note whose ``source:``
+   frontmatter is on a banned domain is moved to
+   ``<vault>/.trash/banned-domains/`` (Obsidian's hidden trash;
    VaultSeal never backs it up, VaultIndex/mirror/note_state never read
    it). Hand-written notes are never touched — the user's own content is
    sacred; they are counted and reported instead. This is what cleans
    the legacy ``x_com_i_status_*.md`` review pile written before the law
    existed — the first run after updating moves it out, once, forever.
+   v0.35.0 — the law's PLATFORM tables under ``_inbox`` leave too: a
+   platform whose every domain is banned (X/Twitter, YouTube, LinkedIn,
+   HuggingFace) is never collected anymore, so its review-queue table is
+   quarantined to the same .trash folder instead of lingering as a
+   dead "collection" the owner would have to curate by hand.
 
 2. ``build_website_directory`` — regenerate ``<vault>/000 📚 Website
    Directory.md``: the consolidated, categorized, clickable index the
@@ -56,7 +63,9 @@ _SKIP_DIRS = {"_inbox", "_review", "_missing", "_moc", "attachments",
 
 # The SWEEP is broader: it ENTERS _review/_missing/_moc (the legacy
 # banned-domain pile lives in _review — the owner's screenshot) and
-# only skips the _inbox record tables and the dot-folders.
+# only skips the dot-folders. The _inbox NOTE walk is skipped (the
+# tables are handled separately below — v0.35.0 quarantines the banned
+# platforms' tables whole).
 _SKIP_DIRS_SWEEP = {"_inbox", ".obsidian", ".trash", ".git"}
 
 # Frontmatter keys the parsers look for (light regex — notes are small).
@@ -165,15 +174,26 @@ def sweep_banned_notes(vault_path: str, blocked_domains: List[str],
 
     Only APP-OWNED notes move (``managed_by: gitcurator`` in the
     frontmatter). Hand-written notes with a banned ``source:`` are the
-    owner's — counted, reported, never touched. The ``_inbox`` platform
-    tables are the RECORD for banned links and are never swept.
+    owner's — counted, reported, never touched.
+
+    v0.35.0 — after the note walk, the banned PLATFORMS' _inbox tables
+    (``_inbox/x_twitter_links.md``, ``youtube_links.md``, …) are
+    quarantined to the same ``.trash/banned-domains/`` folder: the
+    owner's omission rule ("must not collect youtube links for note or
+    review, same for X, and hugging face") retires those collections
+    entirely. A table moves only when EVERY domain of its platform is
+    on the ban list (partially-banned platforms — and 'other', which is
+    not a platform — keep their tables; their banned ROWS are pruned by
+    the intake writer's prune pass instead).
 
     Dry-run aware (moves are recorded, not performed). Idempotent — the
     quarantine folder is skipped by the walk. Returns
-    ``{'moved': [(url, src, dst)], 'kept_handwritten': n, 'scanned': n}``.
+    ``{'moved': [(url, src, dst)], 'kept_handwritten': n, 'scanned': n,
+    'moved_tables': [(platform, src, dst)]}``.
     """
     log = log or (lambda *a, **k: None)
-    report = {'moved': [], 'kept_handwritten': 0, 'scanned': 0}
+    report = {'moved': [], 'kept_handwritten': 0, 'scanned': 0,
+              'moved_tables': []}
     if not vault_path or not os.path.isdir(vault_path):
         return report
     if not blocked_domains:
@@ -212,11 +232,43 @@ def sweep_banned_notes(vault_path: str, blocked_domains: List[str],
     if report['moved']:
         log(f"🧹 Law sweep: moved {len(report['moved'])} banned-domain "
             f"note(s) to {QUARANTINE_RELPATH.replace(os.sep, '/')} — the "
-            f"_inbox tables and the bot's ledger keep the record", "info")
+            f"manifest's blocked bucket is the record", "info")
     if report['kept_handwritten']:
         log(f"✍️ Law sweep: {report['kept_handwritten']} hand-written "
             f"note(s) with banned sources kept — they are yours; delete "
             f"them by hand if you want them gone", "info")
+    # v0.35.0 — the banned platforms' _inbox tables are collections of
+    # links the app must never collect anymore; quarantine them whole.
+    # (Row-level pruning for the remaining tables happens in the intake
+    # writer's prune pass — gui/platform_intake.prune_inbox_tables.)
+    _banned = {str(d).strip().lower().lstrip('.') for d in blocked_domains}
+    _banned.discard('')
+    for platform, table_file in _links.PLATFORM_TABLE_FILES.items():
+        domains = [str(d).strip().lower().lstrip('.')
+                   for d in _links.PLATFORM_DOMAINS.get(platform, ())]
+        if not domains or not all(d in _banned for d in domains):
+            continue   # not a platform, or partially banned → keep the table
+        src = os.path.join(vault_path, '_inbox', table_file)
+        if not os.path.isfile(src):
+            continue
+        dst = unique_path(os.path.join(quarantine_dir, table_file))
+        try:
+            with open(src, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            _dryrun.makedirs(quarantine_dir, exist_ok=True)
+            _dryrun.write_text(dst, content)
+            _dryrun.remove(src)
+        except OSError as e:
+            log(f"⚠️ Law sweep could not move _inbox/{table_file}: {e}",
+                "warning")
+            continue
+        report['moved_tables'].append((platform, src, dst))
+    if report['moved_tables']:
+        _names = ', '.join(sorted(f"_inbox/{os.path.basename(s)}"
+                                  for _, s, _ in report['moved_tables']))
+        log(f"🧹 Law sweep: quarantined {len(report['moved_tables'])} "
+            f"banned-platform table(s) ({_names}) — those platforms are "
+            f"never collected (notes or review) anymore", "info")
     return report
 
 

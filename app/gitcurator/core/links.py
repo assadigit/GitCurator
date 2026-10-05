@@ -251,12 +251,29 @@ def domain_of(url: str) -> str:
 # directory. … This 3 are forbiddan: Hugginface, Github, Twitter (X),
 # Instagram, Facebook, Linkedin." The law is the FLOOR: the config's
 # ``web_blocked_domains`` can only ADD domains, never remove these.
+#
+# v0.35.0 — THE LAW, second reading (the owner's words, 2026-10-05):
+# "omit all youtube and every social media links. ONLY ONLY ONLY websites
+# that aren't social media domains, and github" + "app must not process
+# [share.google] google drive /sheets/docs link(s)" + "must not collect
+# youtube links for note or review, same for X, and hugging face links".
+# The extension: the whole YouTube group, the Google share/drive/docs
+# family, and the social-media majors (TikTok, Threads, Snapchat,
+# Pinterest, Twitch, Discord, Telegram/WhatsApp share links, VK, Bluesky,
+# Weibo). Banned links are now omitted ENTIRELY — never fetched, never
+# noted, never collected in the _inbox review-queue tables (the manifest's
+# blocked bucket is the count). Deliberately NOT banned: Reddit and Medium
+# (content platforms the owner curates — the golden set's reddit wiki is
+# an approved Knowledge/Research link), arXiv + the package registries
+# (knowledge), and GitHub (explicitly allowed by the owner's rule).
 
 #: THE LAW — domains that can NEVER appear in the Websites vault, whatever
 #: the config says. The Websites pipeline refuses them (never fetched,
-#: never noted, never retried — the _inbox platform table / D1 ledger row
-#: is the record), and a run-start sweep quarantines any legacy note that
-#: carries one in its ``source:`` frontmatter (v0.28.0).
+#: never noted, never retried, never collected — v0.35.0: the _inbox
+#: tables stopped being the record for them), and a run-start sweep
+#: quarantines any legacy note that carries one in its ``source:``
+#: frontmatter (v0.28.0) plus the banned platforms' _inbox tables
+#: themselves (v0.35.0).
 LAW_BLOCKED_DOMAINS = (
     # X / Twitter (the original v0.20.0 fix)
     'x.com', 'twitter.com', 't.co',
@@ -273,6 +290,27 @@ LAW_BLOCKED_DOMAINS = (
     'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
     # LinkedIn
     'linkedin.com', 'lnkd.in',
+    # v0.35.0 — YouTube (the whole group; m./music./www. hosts match the
+    # youtube.com entry by suffix, so they need no row of their own)
+    'youtube.com', 'youtu.be', 'youtube-nocookie.com',
+    # v0.35.0 — Google share/drive/docs family: shared files are never
+    # "websites" (share.google is the Google-app share shortener;
+    # docs.google.com covers docs + sheets + slides + forms-by-docs)
+    'share.google', 'drive.google.com', 'docs.google.com',
+    'forms.google.com',
+    # v0.35.0 — the social-media majors ("ONLY websites that aren't
+    # social media domains, and github")
+    'tiktok.com',                                          # TikTok (+vm.*)
+    'threads.net', 'threads.com',                          # Threads
+    'snapchat.com',                                        # Snapchat
+    'pinterest.com', 'pin.it',                             # Pinterest
+    'twitch.tv',                                           # Twitch
+    'discord.gg', 'discord.com', 'discordapp.com',         # Discord
+    't.me', 'telegram.me',                                 # Telegram shares
+    'wa.me', 'whatsapp.com',                               # WhatsApp
+    'vk.com',                                              # VK
+    'bsky.app',                                            # Bluesky
+    'weibo.com',                                           # Weibo
 )
 
 #: The subset of the law used where GITHUB links must keep flowing (the
@@ -371,6 +409,69 @@ def domain_is_blocked(url: str, blocked_domains) -> bool:
         if host == entry or host.endswith('.' + entry):
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# v0.35.0 — Platform recognition (moved from gui/platform_intake.py so the
+# core consumers — the law sweep quarantining banned platforms' _inbox
+# tables — and the GUI intake share ONE table. Matching is now
+# suffix-anchored like ``domain_is_blocked`` (the old gui code's substring
+# test also matched look-alikes such as notyoutube.com).
+# ---------------------------------------------------------------------------
+
+#: platform key -> the domains that belong to it (host or any subdomain).
+#: Ordered: the FIRST matching platform wins, so keep the specific
+#: shorteners before general hosts where they overlap (they don't today).
+PLATFORM_DOMAINS = {
+    'x_twitter': ('x.com', 'twitter.com', 't.co'),
+    'youtube': ('youtube.com', 'youtu.be', 'youtube-nocookie.com'),
+    'reddit': ('reddit.com', 'redd.it'),
+    'linkedin': ('linkedin.com', 'lnkd.in'),
+    'medium': ('medium.com',),
+    'huggingface': ('huggingface.co', 'hf.co'),
+    'arxiv': ('arxiv.org',),
+    'package_registry': ('npmjs.com', 'pypi.org'),
+}
+
+#: platform key -> the _inbox table file its links are collected in.
+#: 'other' is the catch-all (every unrecognized domain). GitHub is not a
+#: table: repo links belong to the GitHub pipeline, never to _inbox.
+PLATFORM_TABLE_FILES = {
+    'x_twitter': 'x_twitter_links.md',
+    'youtube': 'youtube_links.md',
+    'reddit': 'reddit_links.md',
+    'linkedin': 'linkedin_links.md',
+    'medium': 'medium_links.md',
+    'huggingface': 'huggingface_links.md',
+    'arxiv': 'arxiv_links.md',
+    'package_registry': 'package_registry_links.md',
+    'other': 'other_links.md',
+}
+
+
+def classify_platform(url: str) -> str:
+    """Return the platform key for a non-GitHub URL.
+
+    Recognises: X/Twitter, YouTube, Reddit, LinkedIn, Medium, HuggingFace,
+    arXiv, npm/PyPI — by HOST (exact or subdomain, never a substring).
+    GitHub URLs return 'github' (callers should never send GitHub URLs
+    here, but we handle it defensively); anything else — including
+    unparseable URLs — returns 'other'.
+
+    v0.35.0: lives in core (the law sweep needs the platform tables);
+    the gui re-exports it for every existing import site.
+    """
+    host = domain_of(url)
+    if not host:
+        return 'other'
+    host = host.split(':')[0]  # strip a port if present
+    if host == 'github.com' or host.endswith('.github.com'):
+        return 'github'
+    for platform, domains in PLATFORM_DOMAINS.items():
+        for d in domains:
+            if host == d or host.endswith('.' + d):
+                return platform
+    return 'other'
 
 
 # ---------------------------------------------------------------------------

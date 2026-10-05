@@ -203,7 +203,7 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
     # on this worker thread (same anti-GUI-freeze rule as the GitHub
     # classification above). The WebsitePipeline's own dedupe layers are
     # replicated exactly (core/website_pipeline._process_link_inner):
-    #   blocked/self domain   -> never fetched (_inbox row is the record)
+    #   blocked/self domain   -> never fetched, never collected (v0.35.0)
     #   dismissed             -> owner deleted the note; never re-add
     #   in vault (real note)  -> done
     #   in vault, failed _review placeholder with retries left -> PENDING

@@ -144,10 +144,12 @@ class LinkTracker:
             self._save()
 
     def mark_blocked(self, url: str, reason: str):
-        """v0.21.0 — Mark a link as blocked/self-domain (never fetched;
-        the _inbox platform table row is the record). A distinct terminal
-        status so the verification report can account for it explicitly
-        instead of hiding it inside 'skipped'."""
+        """v0.21.0 — Mark a link as blocked/self-domain (never fetched).
+        A distinct terminal status so the verification report can account
+        for it explicitly instead of hiding it inside 'skipped'.
+        v0.35.0 — the _inbox row is no longer the record for banned/self
+        links (they are never collected at all); the manifest entry ITSELF
+        is the record, and verify() counts it without demanding a row."""
         link = self._find_link(url)
         if link:
             link["status"] = "blocked"
@@ -164,12 +166,13 @@ class LinkTracker:
         VERIFIED" while 16 links went through the Websites pipeline and
         247 were blocked — every link accounted for, but the REPORT
         couldn't say so. New buckets: websites notes / _review / skipped,
-        blocked+self (_inbox rows), pending (pipeline off/not set), and
-        github-pending; ``accounted``/``unaccounted`` reconcile the sum
-        against ``total`` and the verdict requires BOTH no failures and a
-        clean reconciliation. ``extra_inbox_dirs`` adds places to look
-        for _inbox rows (the Websites vault's _inbox — where the tables
-        live since v0.20.0)."""
+        blocked (omitted by design — v0.35.0: no _inbox row needed),
+        pending (pipeline off/not set), and github-pending;
+        ``accounted``/``unaccounted`` reconcile the sum against ``total``
+        and the verdict requires BOTH no failures and a clean
+        reconciliation. ``extra_inbox_dirs`` adds places to look for
+        _inbox rows (the Websites vault's _inbox — where the tables live
+        since v0.20.0; still used by the 'recorded' bucket)."""
         report = {
             "total": len(self.manifest["links"]),
             "github_processed": 0,
@@ -282,18 +285,13 @@ class LinkTracker:
                         # writer is best-effort; never false-fail on I/O.
                         report["non_github_recorded"] += 1
                 elif link["status"] == "blocked":
-                    # v0.21.0 — blocked/self-domain links: the _inbox row is
-                    # the record (same lookup, same tolerance).
-                    found = _url_in_inbox(link["url"])
-                    if found is False:
-                        link["status"] = "failed"
-                        link["error"] = ("blocked/self domain but no "
-                                         "_inbox row found")
-                        report["non_github_failed"] += 1
-                        report["failed_links"].append(link)
-                        report["verification_passed"] = False
-                    else:
-                        report["blocked_recorded"] += 1
+                    # v0.21.0 — blocked/self-domain links used to need an
+                    # _inbox row as their record. v0.35.0 — the owner's
+                    # omission rule: banned links are NEVER collected (no
+                    # note, no _review, no _inbox row) — this manifest
+                    # entry IS the record, and it counts as accounted all
+                    # by itself.
+                    report["blocked_recorded"] += 1
                 elif link["status"] == "processed":
                     # v0.21.0 — the Websites pipeline wrote a note (a _review
                     # placeholder counts: it IS a note, with a retry
@@ -358,7 +356,7 @@ class LinkTracker:
                 log_signal.emit(f"   Websites in _review (retry scheduled): {report['websites_review']}", "info")
                 log_signal.emit(f"   Websites skipped (dedup): {report['websites_skipped']}", "info")
             if report['blocked_recorded']:
-                log_signal.emit(f"   Blocked/self domains (recorded in _inbox): {report['blocked_recorded']}", "info")
+                log_signal.emit(f"   Blocked/self domains (omitted by design — never collected): {report['blocked_recorded']}", "info")
             if report['non_github_pending']:
                 log_signal.emit(f"   Non-GitHub pending (websites pipeline off / no vault): {report['non_github_pending']}", "warning")
             if report['non_github_failed']:

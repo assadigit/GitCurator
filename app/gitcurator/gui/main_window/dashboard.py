@@ -384,7 +384,7 @@ class DashboardMixin:
                 lines.append(f"🗂️ Websites in _review: {report.get('websites_review', 0)}  (retry scheduled)")
                 lines.append(f"⏭️ Websites skipped:    {report.get('websites_skipped', 0)}  (dedup)")
             if report.get('blocked_recorded'):
-                lines.append(f"🚫 Blocked/self domains: {report.get('blocked_recorded')}  (recorded in _inbox)")
+                lines.append(f"🚫 Blocked/self domains: {report.get('blocked_recorded')}  (omitted by design — never collected)")
             if report.get('non_github_pending'):
                 lines.append(f"⏳ Non-GitHub pending:  {report.get('non_github_pending')}  (websites pipeline off / no vault)")
             if report.get('non_github_failed'):

@@ -80,14 +80,25 @@ class TestBlockedDomainsHelpers(unittest.TestCase):
 
     def test_law_covers_every_group_the_owner_named(self):
         """x/twitter, GitHub (whole group), HuggingFace, Instagram,
-        Facebook, LinkedIn — every domain group in the owner's law."""
+        Facebook, LinkedIn — every domain group in the owner's v0.28.0 law
+        — plus the v0.35.0 second reading: YouTube, Google
+        share/drive/docs, and the social-media majors."""
         for d in ('x.com', 'twitter.com', 't.co',
                   'github.com', 'gist.github.com', 'github.io',
                   'githubusercontent.com',
                   'huggingface.co', 'hf.co',
                   'instagram.com', 'instagr.am',
                   'facebook.com', 'fb.com', 'fb.me', 'fb.watch',
-                  'linkedin.com', 'lnkd.in'):
+                  'linkedin.com', 'lnkd.in',
+                  # v0.35.0 — the second reading
+                  'youtube.com', 'youtu.be', 'youtube-nocookie.com',
+                  'share.google', 'drive.google.com', 'docs.google.com',
+                  'forms.google.com',
+                  'tiktok.com', 'threads.net', 'threads.com',
+                  'snapchat.com', 'pinterest.com', 'pin.it', 'twitch.tv',
+                  'discord.gg', 'discord.com', 'discordapp.com',
+                  't.me', 'telegram.me', 'wa.me', 'whatsapp.com',
+                  'vk.com', 'bsky.app', 'weibo.com'):
             self.assertIn(d, L.LAW_BLOCKED_DOMAINS, d)
             self.assertTrue(L.domain_is_blocked(
                 f'https://{d}/x', list(L.LAW_BLOCKED_DOMAINS)), d)
@@ -149,9 +160,10 @@ class TestBlockedDomainsHelpers(unittest.TestCase):
     def test_default_constant(self):
         # v0.28.0 — the default IS the law now (the alias is kept for
         # the v0.20.0 import sites; the law cannot be configured away).
+        # v0.35.0 — the second reading grew the law 17 → 41.
         self.assertEqual(L.DEFAULT_BLOCKED_DOMAINS,
                          L.LAW_BLOCKED_DOMAINS)
-        self.assertEqual(len(L.LAW_BLOCKED_DOMAINS), 17)
+        self.assertEqual(len(L.LAW_BLOCKED_DOMAINS), 41)
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +260,11 @@ class TestPipelineBlockedGuard(_PipeCase):
         self.assertFalse(r.get('note_path'))
         self.assertIsNone(self.db.retry_row('https://x.com/i/status/999'))
         self.assertEqual(pipe.counters['skipped'], 1)
-        self.assertIn('blocked domain', self.all_logs())
+        # v0.35.0 — the wording changed with the omission rule: banned
+        # links are "omitted (never fetched, never noted, never
+        # collected)"; the log also names the vault now.
+        self.assertIn('banned domain', self.all_logs())
+        self.assertIn('omitted', self.all_logs())
 
     def test_process_link_unblocked_flows_normally(self):
         pipe = self._make({'website_vault_path': os.path.join(self.tmp, 'w'),
@@ -778,16 +794,18 @@ class TestGuiRoundTrip(unittest.TestCase):
         self.assertEqual(w.web_blocked_input.text(),
                          ', '.join(L.LAW_BLOCKED_DOMAINS))
         # edit → save → disk (the saved list is the EXTRAS layer; the
-        # law is re-unioned on read by blocked_domains_from_config)
-        w.web_blocked_input.setText('x.com, threads.net')
+        # law is re-unioned on read by blocked_domains_from_config;
+        # v0.35.0 — threads.net joined the law, so the extra used here
+        # is a domain OUTSIDE it)
+        w.web_blocked_input.setText('x.com, example.org')
         w.save_config()
         with open(cfg_path, encoding='utf-8') as f:
             on_disk = json.load(f)
         self.assertEqual(on_disk['web_blocked_domains'],
-                         ['x.com', 'threads.net'])
+                         ['x.com', 'example.org'])
         self.assertEqual(
             L.blocked_domains_from_config(on_disk),
-            list(L.LAW_BLOCKED_DOMAINS) + ['threads.net'])
+            list(L.LAW_BLOCKED_DOMAINS) + ['example.org'])
         # empty field = just the law (no extras) — NOT allow-all anymore
         w.web_blocked_input.setText('')
         w.save_config()

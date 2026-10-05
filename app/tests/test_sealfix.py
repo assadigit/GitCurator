@@ -709,20 +709,35 @@ class TestVerifyAccounting(unittest.TestCase):
         self.assertTrue(rep["verification_passed"])
         self.assertTrue(rep["accounting_ok"])
 
-    def test_blocked_without_inbox_row_fails(self):
+    def test_blocked_needs_no_inbox_row_anymore(self):
+        """v0.35.0 — the owner's omission rule: banned links are NEVER
+        collected (no note, no _review, no _inbox row), so a blocked
+        manifest entry counts as accounted BY ITSELF — the old contract
+        (a missing _inbox row = data loss = failed verify) is retired.
+        The tables may exist with other links' rows; ours is legitimately
+        absent everywhere."""
         t = self._tracker()
         t.manifest["links"] = [
             {"url": "https://x.com/1", "normalized": "https://x.com/1",
              "type": "non-github", "status": "blocked", "note_path": None,
              "error": "blocked domain", "processed_at": None}]
-        # The tables EXIST (with another link's row) — ours is genuinely
-        # missing, which is real data loss, not an I/O ambiguity.
-        self._inbox_row("https://t.co/somethingelse")
+        self._inbox_row("https://fresh.example/only-other-links-row")
         rep = t.verify(
             extra_inbox_dirs=[os.path.join(self.websites, "_inbox")])
-        self.assertEqual(rep["blocked_recorded"], 0)
-        self.assertEqual(rep["non_github_failed"], 1)
-        self.assertFalse(rep["verification_passed"])
+        self.assertEqual(rep["blocked_recorded"], 1)
+        self.assertEqual(rep["non_github_failed"], 0)
+        self.assertTrue(rep["verification_passed"])
+        self.assertTrue(rep["accounting_ok"])
+        # …and with NO tables at all, exactly the same verdict (the
+        # manifest entry itself is the record now).
+        t2 = self._tracker()
+        t2.manifest["links"] = [
+            {"url": "https://youtu.be/v", "normalized": "https://youtu.be/v",
+             "type": "non-github", "status": "blocked", "note_path": None,
+             "error": "blocked domain", "processed_at": None}]
+        rep2 = t2.verify()
+        self.assertEqual(rep2["blocked_recorded"], 1)
+        self.assertTrue(rep2["verification_passed"])
 
     def test_websites_note_missing_fails(self):
         t = self._tracker()
@@ -737,9 +752,10 @@ class TestVerifyAccounting(unittest.TestCase):
         self.assertEqual(rep["non_github_failed"], 1)
         self.assertFalse(rep["verification_passed"])
 
-    def test_blocked_row_found_in_extra_dir_only(self):
+    def test_blocked_row_counts_even_with_legacy_row_present(self):
         # The v0.20.0 vault separation: tables live in the WEBSITES
-        # vault; verify must look there (extra_inbox_dirs).
+        # vault. v0.35.0 — a blocked link counts whether or not a legacy
+        # row happens to survive in a table (the manifest is the record).
         t = self._tracker()
         t.manifest["links"] = [
             {"url": "https://t.co/abc", "normalized": "https://t.co/abc",

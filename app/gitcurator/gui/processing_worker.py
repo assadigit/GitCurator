@@ -294,12 +294,27 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                 # and marks the manifest itself (SPEC §6 Phase 2 routing).
                 # The old behavior (inbox table + mark_recorded) stays when
                 # the websites pipeline is OFF.
+                # v0.35.0 — the owner's omission rule: links on THE LAW's
+                # banned domains are NEVER collected (no _inbox row) in
+                # either mode — they are marked blocked in the manifest
+                # (the count), exactly like the websites phase does.
+                _law_blocked = _links.blocked_domains_from_config(self.config)
                 if non_github and not _websites_pipeline_on:
+                    _recordable = []
                     for ng_url in non_github:
-                        self.link_tracker.mark_recorded(ng_url)
+                        if _links.domain_is_blocked(ng_url, _law_blocked):
+                            self.link_tracker.mark_blocked(
+                                ng_url, "blocked domain")
+                        else:
+                            _recordable.append(ng_url)
+                            self.link_tracker.mark_recorded(ng_url)
 
-                    # Write non-GitHub links to the inbox table
-                    self._create_inbox_notes(non_github, source="Bot" if getattr(self, '_bot_source', False) else "Import")
+                    # Write the recordable non-GitHub links to the inbox
+                    # table (banned ones are never collected).
+                    if _recordable:
+                        self._create_inbox_notes(
+                            _recordable,
+                            source="Bot" if getattr(self, '_bot_source', False) else "Import")
                 elif non_github:
                     self.log_message.emit(
                         f"🌐 {len(non_github)} non-GitHub link(s) queued for "
@@ -1355,6 +1370,16 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                         raise
 
                 cache.add_processed(repo_id, url, owner, repo_name, full_path, category_key)
+                # v0.35.0 — the owner asked the log to SHOW where each link
+                # goes ("[Vault Name] Item X processed and stored"): the
+                # GitHub vault's folder name + the note's path inside it.
+                _vault_name = os.path.basename(vault_path) if vault_path \
+                    else 'GitHub vault'
+                _rel_path = os.path.relpath(full_path, vault_path)\
+                    .replace(os.sep, '/') if vault_path else full_path
+                self.log_message.emit(
+                    f"✅ [{_vault_name}] {owner_login}/{repo_name} "
+                    f"processed and stored → {_rel_path}", "success")
                 # v0.10.0 — Phase 1 (note state): record the note the app
                 # just WROTE (identity = source URL) so the baseline stays
                 # fresh and Phase 3's comparison treats it as known-good.
@@ -1374,7 +1399,6 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                 # batch can dedup against this note.
                 if self._vault_index:
                     self._vault_index.add_url(url, full_path)
-                self.log_message.emit(f"✅ Processed: {owner_login}/{repo_name} -> {full_path}", "success")
                 self.processed += 1
 
                 # v23 — Phase 2: mark as processed (note written + cache updated)

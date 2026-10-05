@@ -143,7 +143,16 @@ CONFIG_EXAMPLE = {
                             "githubusercontent.com", "huggingface.co",
                             "hf.co", "instagram.com", "instagr.am",
                             "facebook.com", "fb.com", "fb.me", "fb.watch",
-                            "linkedin.com", "lnkd.in"],
+                            "linkedin.com", "lnkd.in",
+                            "youtube.com", "youtu.be", "youtube-nocookie.com",
+                            "share.google", "drive.google.com",
+                            "docs.google.com", "forms.google.com",
+                            "tiktok.com", "threads.net", "threads.com",
+                            "snapchat.com", "pinterest.com", "pin.it",
+                            "twitch.tv", "discord.gg", "discord.com",
+                            "discordapp.com", "t.me", "telegram.me",
+                            "wa.me", "whatsapp.com", "vk.com", "bsky.app",
+                            "weibo.com"],
     # v0.21.0 — hosts that belong to THIS deployment (the Telegram bot's
     # own worker): its auth links (…/auth/?token=…) are never fetched and
     # never noted; the _inbox row (secret query values scrubbed) is the

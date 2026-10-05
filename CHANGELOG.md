@@ -1,3 +1,92 @@
+## [0.35.0] — The law's second reading: only real websites (and GitHub) are ever collected — 2026-10-05
+
+Owner ask (session): five curation reports, one rule. "omit all
+youtube and every social media links. ONLY ONLY ONLY websites that
+aren't social media domains, and github" — a youtu.be link had become
+a "Knowledge, Research & Reference" note; a share.google link had
+become a note; the _inbox "review queue" had collected a YouTube
+table and an "other links" table full of x/t.co rows and rows for
+links "already addressed and stored in correct notes and formats
+inside the vault" — and "I want the log to show, where each link
+goes, for example [Vault Name] Item X processed and stored."
+Desktop-only release — the Worker stays at 0.28.0
+(`EXPECTED_WORKER_VERSION` unchanged). Suite grows **900 → 928**
+(tests/test_socialomit.py joins: 27 cases; five old-contract pins
+updated with intent intact), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 98/98.
+
+**1. The law grew a second reading.** Banned outright, on top of the
+v0.28 law: the whole YouTube group (`youtube.com`, `youtu.be`,
+`youtube-nocookie.com` — m./music./www. hosts match by suffix), the
+Google share/drive/docs family (`share.google`, `drive.google.com`,
+`docs.google.com` — docs/sheets/slides, `forms.google.com`), and the
+social-media majors (TikTok, Threads, Snapchat, Pinterest + pin.it,
+Twitch, Discord, t.me/telegram.me, wa.me/whatsapp.com, VK, bsky.app,
+Weibo) — 17 → 41 entries, still a floor the config can only ADD to.
+Deliberately still allowed: Reddit and Medium (content platforms —
+the golden set's reddit wiki is an approved Knowledge/Research
+link), arXiv and the package registries, and GitHub (explicitly
+wanted: "and github").
+
+**2. Banned means OMITTED, not "skipped but recorded".** The old
+design kept a banned link as an _inbox row ("the record"). The
+owner's new words are absolute: "must not collect youtube links for
+note or review, same for X, and hugging face links" — so banned
+links now leave NO trace in the vault: never fetched, never noted,
+never _reviewed, never retried, never a table row (the batch
+manifest's blocked bucket is the count). The run-start sweep also
+cleans history: the legacy "Knowledge, Research" YouTube note and
+the share.google note are quarantined to `.trash/banned-domains`,
+the failed-YouTube _review placeholders and queued retries are
+purged, and the banned platforms' whole tables (`youtube_links.md`,
+`x_twitter_links.md`, `linkedin_links.md`, `huggingface_links.md`)
+are quarantined — a platform's table moves only when EVERY domain
+of the platform is banned (Reddit's and Medium's stay).
+
+**3. The _inbox tables only hold what is still worth reviewing.**
+Two filters at the intake: banned links are never written, and
+links already stored as notes in the vault ("already addressed and
+stored in correct notes") are not re-added — the same Websites
+VaultIndex ground truth the pipeline's dedupe uses. And a prune
+pass after every intake and every websites batch rewrites the
+tables dropping legacy banned rows (the x/t.co rows the owner saw)
+and rows whose link has since become a note — everything else kept
+VERBATIM (the owner's ✅ reviewed / ❌ ignored Status marks
+included), the "Last updated" stamp refreshed like the writer's.
+
+**4. The log says where each link went.** Both pipelines' success
+lines now read `[Vault Name] Item X processed and stored → path`
+— the Websites side: `✅ [WebSites Vault] Coolors processed and
+stored → Design/Assets_Resources/Coolors.md` (the vault's folder
+name + the note's path inside it; a partial fetch appends
+"(partial)"); the GitHub side the same shape for every repo. The
+banned-domain line names the vault too, and every "the _inbox row
+is the record" wording — the pipeline's skip line, the purge line,
+the verification report, the dashboard, the summary log — now says
+what is true: omitted, never collected.
+
+**5. classify_platform moved to core — and stopped matching
+look-alikes.** The platform/domain/table-file maps live in
+core/links.py now (one source of truth shared with the law sweep),
+and matching is suffix-anchored like the law itself: the old gui
+substring test classified `notyoutube.com` as YouTube; hosts match
+exactly or as subdomains, never as substrings. Reddit's and
+LinkedIn's shorteners (redd.it, lnkd.in) route properly now. The
+verify contract changed with the design: a blocked manifest entry
+counts as accounted BY ITSELF (no _inbox row demanded), and with
+the Websites pipeline OFF the intake marks banned links `blocked`
+instead of `recorded`.
+
+Gate: 928/928 Python (64s; 900 + 27 socialomit + 1 lawfix, five
+pins updated with intent intact), worker 40/40, offline golden
+30/30 + 0 invalid, 82/82 compiles, GUI smoke 98/98, plus an
+end-to-end probe of the owner's exact reports (the youtu.be
+Knowledge note swept, the share.google note swept, the youtube
+review table quarantined, the other_links x/t.co/stored rows
+pruned with fresh + ✅ reviewed rows kept verbatim, the queued
+YouTube retry purged, the banned gate refusing the fetch) — all
+through the production constructors.
+
 ## [0.34.0] — The follow-up review: a bar that agrees with its number, a balanced band, words that say what they mean — 2026-10-03
 
 Owner ask (session): the five-point follow-up review of the v0.33

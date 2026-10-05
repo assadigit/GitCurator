@@ -409,7 +409,7 @@ class WorkerReportsMixin:
                     lines.append(f"| 🗂️ Websites in _review (retry scheduled) | {link_tracker_report.get('websites_review', 0)} |")
                     lines.append(f"| ⏭️ Websites skipped (dedup) | {link_tracker_report.get('websites_skipped', 0)} |")
                 if link_tracker_report.get('blocked_recorded'):
-                    lines.append(f"| 🚫 Blocked/self domains (recorded in _inbox) | {link_tracker_report.get('blocked_recorded', 0)} |")
+                    lines.append(f"| 🚫 Blocked/self domains (omitted by design — never collected) | {link_tracker_report.get('blocked_recorded', 0)} |")
                 if link_tracker_report.get('non_github_pending'):
                     lines.append(f"| ⏳ Non-GitHub pending (websites pipeline off / no vault) | {link_tracker_report.get('non_github_pending', 0)} |")
                 if link_tracker_report.get('non_github_failed'):
@@ -473,9 +473,19 @@ class WorkerReportsMixin:
                                  "below).")
                     lines.append("")
                 else:
+                    # v0.35.0 — banned links are never collected: the
+                    # platform table counts only the recordable ones, and
+                    # the omitted count is its own line.
+                    _law = _links.blocked_domains_from_config(self.config)
+                    _recordable, _omitted = [], 0
+                    for u in non_github:
+                        if _links.domain_is_blocked(u, _law):
+                            _omitted += 1
+                        else:
+                            _recordable.append(u)
                     # Group by platform for the report
                     platform_counts = {}
-                    for u in non_github:
+                    for u in _recordable:
                         p = classify_platform(u)
                         if p == 'github':
                             p = 'other'
@@ -488,6 +498,11 @@ class WorkerReportsMixin:
                         display_name = PLATFORM_INFO.get(p, ('🔗 Other', 'other_links.md'))[0]
                         lines.append(f"| {display_name} | {c} |")
                     lines.append("")
+                    if _omitted:
+                        lines.append(f"🚫 {_omitted} banned-domain link(s) "
+                                     "omitted — never collected (no note, "
+                                     "no _review, no _inbox row).")
+                        lines.append("")
 
             # v0.11.0 — Phase 2: the websites pipeline's own section.
             _ws = getattr(self, '_website_summary', None)
