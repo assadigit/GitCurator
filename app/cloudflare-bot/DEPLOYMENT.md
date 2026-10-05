@@ -38,6 +38,36 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.35.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-05** (worker version ID
+> `d9fa8a30-8dae-42ee-ae25-5e150f404bed`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.35.0 is a DESKTOP-ONLY release (the domain law's second reading:
+> YouTube, Google share/drive/docs and the social-media majors are
+> banned outright — banned links are never fetched, never noted and
+> never collected in the _inbox review-queue tables; the tables are
+> pruned of legacy banned/stored rows; the banned platforms' tables
+> are quarantined; both pipelines' success logs now show the
+> destination "[Vault Name] Item X processed and stored → path"); the
+> Worker's code is unchanged since v0.28.0, so the deploy is the
+> release ritual's health-and-parity re-verification, not a code
+> change.
+>
+> - Pre-deploy D1 backup: `d1-backup-20261005-pre-v035-deploy.sql`
+>   (744 INSERTs — 386 ever_seen_ledger · 343 activity_log ·
+>   9 sync_state · 2 dashboard_sessions · 2 dead_letters ·
+>   2 sqlite_sequence).
+> - `npx wrangler deploy` → version `d9fa8a30…`, both queue consumers
+>   + producers attached (curator-ingest, curator-ingest-dlq).
+> - `/health` → `{"status":"ok","version":"0.28.0"}` ✅
+> - Secrets: 4/4 (ALLOWED_USER_IDS, BOT_TOKEN, GITHUB_PAT,
+>   HMAC_SECRET) ✅
+> - D1 parity vs the backup: every table count identical
+>   (386/343/9/2/2, all others 0) ✅
+
+---
+
 ## 📦 v0.34.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-03** (worker version ID
