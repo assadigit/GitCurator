@@ -1,3 +1,78 @@
+## [0.39.0] — The batch-finish fanfare: a chime and a scorecard — 2026-10-06
+
+Owner ask (session): "I want the next version to play an audio for
+success and finishing of the batch along with success modal."
+Desktop-only release — the Worker stays at 0.29.0. Suite grows
+**976 → 1000** (24 cases in the new tests/test_batchfinish.py), the
+compile gate grows **82 → 83** (gitcurator/gui/sound.py joins the
+audited list), offline golden 30/30 + 0 invalid, worker 48/48, GUI
+smoke 98/98.
+
+**The chime.** A batch that runs to its natural completion now plays
+a soft ascending major arpeggio (E5 → G5 → C6, ~1 s, 44.1 kHz 16-bit
+mono PCM — QSoundEffect-native) from the new shipped asset
+`assets/sounds/success.wav`. The asset is SYNTHESIZED, not sampled —
+sine partials + exponential envelopes, no third-party material, no
+licensing of any kind — and the generator's parameters are documented
+next to it in `assets/sounds/README.txt`. The player
+(`gitcurator/gui/sound.py`, the new 83rd audited module) is
+deliberately over-engineered toward SILENCE: QtMultimedia is imported
+lazily, a missing module / missing WAV / broken backend degrades to a
+no-op with at most ONE "🔕 Success chime disabled" warning line, the
+effect is cached (one QSoundEffect, replayed, never rebuilt), and the
+config's volume is clamped into Qt's [0, 1]. Two config keys (no
+Settings UI yet): `sound_enabled` (default **true**) and
+`sound_volume` (default 0.8). On machines without audio the batch is
+unaffected — the play request is accepted and simply stays silent.
+
+**The scorecard.** The old single-line "Processing Complete" box (a
+message and nothing else) is replaced, for naturally-finished
+batches, by a Batch Complete modal: 🎉 + a stats card in the
+established v0.37 hierarchy vocabulary (bold `cc_row_name` values
+against small pale `cc_item` labels, inside a `sync_card`):
+
+- **Repos curated** — "18 of 20" (hidden for websites-only batches)
+- **Websites** — "7 saved · 2 to review · 1 skipped" (only when the
+  websites pipeline ran; failures appended when present)
+- **Status** — "✓ All links processed cleanly" in the success tone,
+  or an amber **Needs retry** row in the warning tone when links
+  failed (the count, honestly)
+- **Elapsed** — "1m 4s"
+- **Final report** — the FILENAME only; the full path rides the
+  tooltip (the v0.37 one-line rule)
+- A footnote with the undo affordance — "💡 18 new note(s) added to
+  the vault — undo this batch anytime from Dashboard → Undo Last
+  Batch."
+
+Zero new color values: the two tone variants reusing the message-box
+tokens (`msg_success` / `msg_warning`) were added to the shared QSS
+template, so both themes paint the scorecard. The dialog is built by
+`_build_batch_success_dialog` (a pure BUILD, never exec) and shown by
+`_show_batch_success_modal` — the split exists so tests can inspect
+the real dialog without a nested event loop.
+
+**When NOT to celebrate.** The fanfare fires only for a batch that
+reached the worker's end-of-batch report stage AND was not stopped:
+the worker now records a structured `batch_summary` (stopped flag,
+repos, websites counters, failed links, new-note tally, report path)
+right before its final signal, and `processing_finished` routes on
+it. A user-stopped batch, the "No URLs found" early return, the
+"both pipelines off" return, old-shape workers without a summary, and
+every crashed batch keep the existing plain box (error box for
+failures) — no fanfare for an empty batch or a deliberate stop, and
+none for a crash. The chime plays BEFORE the modal opens (the
+modal's event loop keeps the app alive while the sound plays out),
+and the shutdown guard means a closing/invisible window logs instead
+of opening a modal no one could dismiss.
+
+**Gate.** 83/83 compiles · 1000/1000 tests (31 modules) · offline
+golden 30/30 + 0 invalid · worker 48/48 (node --test) · GUI smoke
+98/98 · CLI --import-file --dry-run identical to the v0.38 baseline
+· offscreen probe (probe_batchfinish_v039.py — the real MainWindow:
+chime asset format, play accepted, the sound_enabled gate, all three
+routing paths, live modal content for the full / failure /
+websites-only shapes, both themes screenshotted and VLM-verified).
+
 ## [0.38.0] — The false "620 links need retry": the vault is the truth — 2026-10-05
 
 Owner ask (session): "Fix this issue — despite those 620 projects

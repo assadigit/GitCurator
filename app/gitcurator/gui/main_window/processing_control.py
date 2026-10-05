@@ -518,13 +518,179 @@ class ProcessingControlMixin:
             # Clear the pending flag regardless — it only applies to this batch.
             self._pending_last_processed_update = 0
 
-            self._show_custom_message_box("Processing Complete", f"{message}{elapsed_str}", success=True)
+            # v0.39.0 — the batch-finish fanfare (the owner's ask): a
+            # success chime + a scorecard modal, ONLY when the batch ran
+            # to natural completion. batch_summary is set by the worker
+            # exactly at its end-of-batch stage and carries 'stopped', so
+            # user-stopped batches and the no-work early returns ("No
+            # URLs found", "both pipelines off") keep the plain box —
+            # no fanfare for an empty batch or a deliberate stop.
+            _summary = getattr(self.worker, 'batch_summary', None) \
+                if self.worker else None
+            if _summary and not _summary.get('stopped'):
+                self._celebrate_batch(_summary, elapsed_str)
+            else:
+                self._show_custom_message_box(
+                    "Processing Complete", f"{message}{elapsed_str}",
+                    success=True)
         else:
             self.log_message(f"❌ {message}", "error")
             self.progress_bar.setFormat("❌ Failed")
             self._set_pipeline_state('error')
             self._schedule_progress_hide()
             self._show_custom_message_box("Processing Error", message, success=False)
+
+    # ------------------------------------------------------------------
+    # v0.39.0 — the batch-finish fanfare: success chime + scorecard modal
+    # ------------------------------------------------------------------
+
+    def _celebrate_batch(self, summary, elapsed_str=""):
+        """v0.39.0 — a completed batch gets both halves of the fanfare:
+        the chime FIRST (it plays while the modal's event loop runs, so
+        the audio starts before the user even reaches for the mouse),
+        then the Batch Complete scorecard modal."""
+        self._play_batch_sound()
+        self._show_batch_success_modal(summary, elapsed_str)
+
+    def _play_batch_sound(self):
+        """v0.39.0 — play assets/sounds/success.wav. Config keys (no
+        Settings UI — config.json only, defaults on): sound_enabled,
+        sound_volume (0.0..1.0). The BatchSound wrapper is failure-proof:
+        a missing module/WAV or an audio-less machine is a silent no-op
+        with at most ONE warning line in the log."""
+        from gitcurator.gui.sound import BatchSound
+        if not self.config.get('sound_enabled', True):
+            return False
+        if getattr(self, '_batch_sound', None) is None:
+            self._batch_sound = BatchSound()
+        try:
+            _vol = float(self.config.get('sound_volume', 0.8))
+        except (TypeError, ValueError):
+            _vol = 0.8
+        return self._batch_sound.play_success(volume=_vol,
+                                              log=self.log_message)
+
+    def _show_batch_success_modal(self, summary, elapsed_str=""):
+        """v0.39.0 — the Batch Complete scorecard: what the batch did,
+        at a glance (repos curated, websites, retries, elapsed, report),
+        replacing the old single-line "Processing Complete" box for
+        naturally-finished batches. Building lives in
+        _build_batch_success_dialog (the split keeps the dialog
+        inspectable by tests without a nested event loop)."""
+        if getattr(self, '_closing', False) or not self.isVisible():
+            # Same shutdown guard as _show_custom_message_box: a modal
+            # no one can dismiss must never open (v0.06 zombie fix).
+            try:
+                self.log_message(
+                    "✅ Batch finished — window not visible, modal skipped.",
+                    "info")
+            except Exception:
+                pass
+            return
+        dialog = self._build_batch_success_dialog(summary, elapsed_str)
+        if dialog is None:
+            return
+        self._animate_dialog(dialog)
+        dialog.exec()
+
+    def _build_batch_success_dialog(self, summary, elapsed_str=""):
+        """v0.39.0 — BUILD (never exec) the Batch Complete scorecard.
+
+        Roles only (msg_glyph / msg_heading / sync_card / cc_item /
+        cc_row_name / info_note) — the app QSS paints it in both themes;
+        the two cc_row_name tone variants live in gui.theme (no new
+        color values — they reuse the message-box tone tokens)."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Batch Complete")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(480)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(14)
+
+        # Header: 🎉 + "Batch Complete!" (msg roles, success tone)
+        header = QHBoxLayout()
+        glyph = QLabel("🎉")
+        glyph.setObjectName("msg_glyph")
+        header.addWidget(glyph)
+        title = QLabel(" Batch Complete!")
+        title.setObjectName("msg_heading")
+        title.setProperty("tone", "success")
+        header.addWidget(title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        # Stats card — one muted name (cc_item) + bold value (cc_row_name)
+        # per row, exactly the v0.37 Test-Connection hierarchy vocabulary.
+        card = QWidget()
+        card.setObjectName("sync_card")
+        form = QFormLayout(card)
+        form.setContentsMargins(14, 10, 14, 10)
+        form.setSpacing(7)
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+
+        def _row(name, value, tone=None):
+            n = QLabel(name)
+            n.setObjectName("cc_item")
+            v = QLabel(str(value))
+            v.setObjectName("cc_row_name")
+            if tone:
+                v.setProperty("tone", tone)
+            form.addRow(n, v)
+            return v
+
+        _gh_total = int(summary.get('github_total', 0) or 0)
+        if _gh_total:
+            _row("Repos curated",
+                 f"{summary.get('github_processed', 0)} of {_gh_total}")
+        _ws = summary.get('websites')
+        if _ws:
+            _ws_bits = [f"{_ws.get('processed', 0)} saved",
+                        f"{_ws.get('review', 0)} to review",
+                        f"{_ws.get('skipped', 0)} skipped"]
+            if _ws.get('failed', 0):
+                _ws_bits.append(f"{_ws['failed']} failed")
+            _row("Websites", " · ".join(_ws_bits))
+        _failed = int(summary.get('failed_links', 0) or 0)
+        if _failed:
+            _row("Needs retry", f"{_failed} link(s) — next run",
+                 tone="warning")
+        else:
+            _row("Status", "✓ All links processed cleanly", tone="success")
+        _elapsed = str(elapsed_str or "").replace(" in ", "").strip()
+        if _elapsed:
+            _row("Elapsed", _elapsed)
+        _report = str(summary.get('report_path', "") or "")
+        if _report:
+            _rep = _row("Final report", os.path.basename(_report))
+            _rep.setToolTip(_report)  # full path on hover — paths stay
+            # out of the visible line (the v0.37 one-line rule)
+
+        layout.addWidget(card)
+
+        # Footnote: the undo affordance whenever the batch wrote notes
+        _notes = int(summary.get('new_notes', 0) or 0)
+        if _notes:
+            note = QLabel(
+                f"💡 {_notes} new note(s) added to the vault — undo this "
+                "batch anytime from Dashboard → Undo Last Batch.")
+            note.setWordWrap(True)
+            note.setObjectName("info_note")
+            layout.addWidget(note)
+
+        # OK button (primary, right-aligned — the house button row)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("OK")
+        self._style_btn(ok_btn, 'primary')
+        ok_btn.clicked.connect(dialog.accept)
+        ok_btn.setDefault(True)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        return dialog
 
     def _on_disk_full(self, path):
         """Handle disk full — show dialog, wait for user to free space, then resume."""

@@ -326,6 +326,12 @@ def _app_rules(t: Dict[str, str]) -> str:
             the row's BOLD voice; every check item under it is ONE small,
             pale line (the full detail rides the item tooltip). */
             QLabel#cc_row_name {{ font-size: 13px; font-weight: 700; color: {t['text']}; background: transparent; }}
+            /* v0.39.0 — the Batch Complete scorecard reuses the bold
+            value role with the message-box tone tokens (zero new colors):
+            the "needs retry" count reads as warning, the all-clear as
+            success, in both modes. */
+            QLabel#cc_row_name[tone="success"] {{ color: {t['msg_success']}; }}
+            QLabel#cc_row_name[tone="warning"] {{ color: {t['msg_warning']}; }}
             QLabel#cc_row_status {{ font-size: 12px; font-weight: 600; background: transparent; }}
             QLabel#cc_item {{ font-size: 11px; color: {t['text_muted']}; background: transparent; }}
             QRadioButton {{ spacing: 8px; padding: 2px; color: {t['text_soft']}; }}

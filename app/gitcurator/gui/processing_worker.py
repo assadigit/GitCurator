@@ -179,6 +179,12 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # Paired with _intake_duplicates for the "N unique from M total"
         # display in the final report.
         self._raw_url_count = 0
+        # v0.39.0 — the structured batch summary for the success modal +
+        # chime. Set ONLY at the end-of-batch report stage (the batch ran
+        # to its natural completion path); stays None for the early
+        # returns (no URLs / both pipelines off) so MainWindow keeps the
+        # plain message box for them — no fanfare for an empty batch.
+        self.batch_summary = None
 
     def run(self):
         # v0.06 — Fix (stuck Telegram lock, part 2): exception-proof wrapper.
@@ -1503,6 +1509,7 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # the pre-batch snapshot). Save to `_undo_last_batch.txt` in the
         # vault root so the user can undo via the Dashboard button.
         # Best-effort: any error is logged but doesn't break the batch.
+        _new_notes = 0  # v0.39.0 — captured for the batch summary (modal)
         try:
             new_files = []
             if vault_path and os.path.isdir(vault_path) and batch_files:
@@ -1514,6 +1521,7 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                             fpath = os.path.join(root, f)
                             if fpath not in batch_files:
                                 new_files.append(fpath)
+            _new_notes = len(new_files)  # v0.39.0 — for the batch summary
             if vault_path and os.path.isdir(vault_path):
                 undo_path = os.path.join(vault_path, '_undo_last_batch.txt')
                 # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
@@ -1571,15 +1579,28 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # (even if some links failed) so the user has a complete audit
         # trail of what was processed, what was skipped, and what needs
         # retry. Includes the LinkTracker verification report when present.
+        _report_path = ""  # v0.39.0 — captured for the batch summary (modal)
         try:
             report_path = self._generate_final_report(report)
             if report_path:
+                _report_path = report_path
                 self.log_message.emit(f"📊 Final report saved: {report_path}", "success")
         except Exception as final_report_err:
             try:
                 self.log_message.emit(f"⚠️ Failed to generate final report: {final_report_err}", "warning")
             except Exception:
                 pass
+
+        # v0.39.0 — the structured end-of-batch summary: MainWindow's
+        # success fanfare (chime + scorecard modal) renders from THIS
+        # dict. Presence of the dict IS the signal that the batch reached
+        # the natural end-of-batch stage — the early returns above leave
+        # batch_summary at None, and 'stopped' records a user-stopped
+        # batch (the loop broke out but still lands here; no fanfare for
+        # a deliberate stop).
+        self.batch_summary = self._build_batch_summary(
+            new_notes=_new_notes, report_path=_report_path,
+            summary_path=summary_path)
 
         msg = f"Processed {self.processed} out of {self.total} repos."
         # v0.11.0 — Phase 2: append the websites tally when the phase ran.
@@ -1611,6 +1632,70 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
 
     def stop(self):
         self.is_running = False
+
+    def _build_batch_summary(self, new_notes=0, report_path="",
+                             summary_path=""):
+        """v0.39.0 — the end-of-batch scorecard for the success modal.
+
+        Pure attribute reads (processed/total/_website_summary/
+        link_tracker manifest/is_running) → a plain dict; deliberately
+        separate from _run_impl so tests can drive it through the
+        headless worker harness without a real batch. Keys:
+
+          stopped            True → the user hit Stop (loop broke early)
+          github_processed   repos curated into the GitHub vault
+          github_total       the bar's final denominator
+          new_notes          NEW .md files this batch wrote (undo tally)
+          websites           counters dict, or None when the phase
+                             never ran (pipeline off / no site links)
+          failed_links       manifest rows marked failed (this batch)
+          report_path        _processing_report_*.md ("" when skipped)
+          summary_path       the summary log path
+        """
+        _failed = 0
+        # Defensive reads throughout: the headless test harness builds
+        # workers via __new__ and pre-sets only the attributes its test
+        # needs (the Task-42 PyQt lesson — uninitialized QObjects raise
+        # on attribute machinery). A missing piece reads as its default.
+        try:
+            _lt = getattr(self, 'link_tracker', None)
+        except Exception:
+            _lt = None
+        if _lt:
+            try:
+                _failed = sum(
+                    1 for l in (_lt.manifest or {}).get("links", [])
+                    if l.get("status") == "failed")
+            except Exception:
+                pass  # best-effort — the modal just shows 0
+        try:
+            _ws = getattr(self, '_website_summary', None)
+        except Exception:
+            _ws = None
+        _wc = (_ws.get('counters') or {}) if _ws else {}
+        try:
+            _running = bool(getattr(self, 'is_running', True))
+        except Exception:
+            _running = True
+        try:
+            _processed = int(getattr(self, 'processed', 0) or 0)
+            _total = int(getattr(self, 'total', 0) or 0)
+        except Exception:
+            _processed, _total = 0, 0
+        return {
+            'stopped': not _running,
+            'github_processed': _processed,
+            'github_total': _total,
+            'new_notes': int(new_notes or 0),
+            'websites': ({'processed': _wc.get('processed', 0),
+                          'review': _wc.get('review', 0),
+                          'skipped': _wc.get('skipped', 0),
+                          'failed': _wc.get('failed', 0)}
+                         if _ws else None),
+            'failed_links': int(_failed),
+            'report_path': str(report_path or ""),
+            'summary_path': str(summary_path or ""),
+        }
 
 
 class TestWorker(QThread):
