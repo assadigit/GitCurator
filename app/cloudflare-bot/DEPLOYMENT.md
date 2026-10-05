@@ -38,6 +38,44 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.37.0 deploy record — the 0.29.0 worker, batch pastes (PREPARED ⏳ — awaiting the Cloudflare API token)
+
+> **NOT yet deployed to production** (as of 2026-10-05). The sandbox
+> that built v0.37.0 has no Cloudflare API token (`CLOUDFLARE_API_TOKEN`
+> unset, no wrangler OAuth cache — the 4th sandbox reset cleared it).
+> The bundle is READY: `wrangler deploy --dry-run` passes (bindings
+> valid: DB curator-bot · CACHE KV · curator-ingest + DLQ queues), the
+> worker suite is 48/48, and `src/version.js` reports 0.29.0.
+>
+> **What ships in 0.29.0** (a REAL worker change this time):
+> - `extractUrls` captures a line that is exactly ONE bare address
+>   (`coolors.co`, `www.site.org/path`, `127.0.0.1:8901/site`) and
+>   prepends `https://` — a pasted batch of 50 websites without
+>   schemes used to extract to NOTHING.
+> - The multi-link reply leads with **"N new links received"**
+>   (the owner's exact ask: "say 50 new links received, despite being
+>   only 1 message"); a partially-new batch says "Received N links —
+>   M new".
+> - The no-link hint says you can paste as many links as you like in
+>   one message.
+>
+> **To deploy** (any machine with the Cloudflare API token, 2 minutes):
+> ```bash
+> cd app/cloudflare-bot
+> export CLOUDFLARE_API_TOKEN=cfut_…   # Workers+Queues+D1 token
+> npm install --ignore-scripts
+> npx wrangler d1 execute curator-bot --remote --file=schema.sql  # idempotent
+> npx wrangler deploy
+> curl https://github-to-obsidian-bot.aliassadi-plus.workers.dev/health
+> #   → {"status":"ok","version":"0.29.0",...}
+> ```
+> Until then, the DESKTOP app (v0.37.0) expects Worker 0.29.0 — its
+> Test Connection → Bot Worker line shows an older-bot warning
+> (harmless: the bot stays backward compatible; batch pastes with
+> bare addresses just need the new worker).
+
+---
+
 ## 📦 v0.36.0 deploy record — re-deploy of the unchanged 0.28.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-05** (worker version ID
