@@ -24,6 +24,7 @@ audible event.
 
 import os
 import sys
+import importlib
 import types
 import unittest
 
@@ -53,6 +54,46 @@ import gitcurator.gui.theme as _theme
 # 1) BatchSound — the chime wrapper
 # ---------------------------------------------------------------------------
 
+class _FakeEffect:
+    """Records what QSoundEffect would do — hermetic on machines with
+    no audio stack at all (the CI runners: QtMultimedia cannot even be
+    imported there, libpulse is absent)."""
+
+    def __init__(self):
+        self.source = None
+        self.volume = None
+        self.plays = 0
+
+    def setSource(self, s):
+        self.source = s
+
+    def setVolume(self, v):
+        self.volume = v
+
+    def play(self):
+        self.plays += 1
+
+
+class _FakeQtMultimedia:
+    """Stands in for the PyQt6.QtMultimedia module inside a BatchSound
+    (seeded via ``bs._qt_multimedia = _FakeQtMultimedia()``) so the
+    file/reuse/volume branches are testable WITHOUT any audio backend."""
+
+    def __init__(self):
+        self.effects = []
+
+    def QSoundEffect(self):  # noqa: N802 — Qt's spelling
+        e = _FakeEffect()
+        self.effects.append(e)
+        return e
+
+
+def _seeded_sound():
+    bs = BatchSound()
+    bs._qt_multimedia = _FakeQtMultimedia()
+    return bs
+
+
 class TestBatchSound(unittest.TestCase):
 
     def _log_recorder(self):
@@ -65,6 +106,7 @@ class TestBatchSound(unittest.TestCase):
     def test_missing_dir_returns_false_and_logs_once(self):
         log, rec = self._log_recorder()
         bs = BatchSound(sound_dir="/nonexistent-sounds")
+        bs._qt_multimedia = _FakeQtMultimedia()  # hermetic module
         self.assertFalse(bs.play_success(volume=0.8, log=log))
         self.assertIn("chime missing", bs.unavailable_reason)
         self.assertEqual(len(rec), 1)          # exactly one notice
@@ -72,30 +114,44 @@ class TestBatchSound(unittest.TestCase):
         self.assertFalse(bs.play_success(volume=0.8, log=log))
         self.assertEqual(len(rec), 1)
 
-    def test_real_asset_plays(self):
-        # The shipped assets/sounds/success.wav — Qt accepts the play on
-        # any machine (audio-less machines stay silent; that is not a
-        # failure).
+    def test_environment_contract(self):
+        """The honest per-machine contract, asserted on BOTH machine
+        classes: with a loadable QtMultimedia the shipped WAV plays
+        (True, no warnings); without one (CI runners — no libpulse) it
+        is a silent no-op with the one-time unavailable notice."""
         log, rec = self._log_recorder()
         bs = BatchSound()
-        self.assertTrue(bs.play_success(volume=0.5, log=log))
-        self.assertEqual(bs.unavailable_reason, "")
-        self.assertEqual(rec, [])              # no warnings on a good box
+        try:
+            importlib.import_module("PyQt6.QtMultimedia")
+            module_ok = True
+        except Exception:
+            module_ok = False
+        ok = bs.play_success(volume=0.5, log=log)
+        self.assertEqual(ok, module_ok)
+        if module_ok:
+            self.assertEqual(bs.unavailable_reason, "")
+            self.assertEqual(rec, [])
+        else:
+            self.assertIn("Qt audio module unavailable",
+                          bs.unavailable_reason)
+            self.assertEqual(len(rec), 1)
 
     def test_effect_reused_across_plays(self):
-        bs = BatchSound()
+        bs = _seeded_sound()
         self.assertTrue(bs.play_success())
         first = bs._effect
         self.assertTrue(bs.play_success())
         self.assertIs(bs._effect, first)       # cached, never rebuilt
+        self.assertEqual(first.plays, 2)       # replayed, not replaced
+        self.assertIsNotNone(first.source)     # the WAV was handed over
 
     def test_volume_clamped_into_qt_range(self):
-        bs = BatchSound()
+        bs = _seeded_sound()
         bs.play_success(volume=5.0)            # user garbage → 1.0
-        self.assertAlmostEqual(bs._effect.volume(), 1.0)
-        bs2 = BatchSound()
+        self.assertAlmostEqual(bs._effect.volume, 1.0)
+        bs2 = _seeded_sound()
         bs2.play_success(volume="loud")        # non-numeric → default
-        self.assertAlmostEqual(bs2._effect.volume(), 0.8)
+        self.assertAlmostEqual(bs2._effect.volume, 0.8)
 
     def test_qtmultimedia_unavailable(self):
         # A minimal environment without the Qt audio libs: the lazy
@@ -286,13 +342,15 @@ class TestFanfareRouting(unittest.TestCase):
 
     def test_sound_enabled_plays_real_asset(self):
         win = _routing_window(None, config={})
+        win._batch_sound = _seeded_sound()   # hermetic (CI has no audio)
         self.assertTrue(win._play_batch_sound())        # default: ON
-        self.assertIsNotNone(win._batch_sound)
+        self.assertEqual(win._batch_sound._effect.plays, 1)
 
     def test_sound_volume_fallback_on_garbage(self):
         win = _routing_window(None, config={'sound_volume': 'loud'})
+        win._batch_sound = _seeded_sound()
         self.assertTrue(win._play_batch_sound())
-        self.assertAlmostEqual(win._batch_sound._effect.volume(), 0.8)
+        self.assertAlmostEqual(win._batch_sound._effect.volume, 0.8)
 
 
 # ---------------------------------------------------------------------------
