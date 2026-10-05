@@ -264,7 +264,14 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
             self.finished_signal.emit(True, "No URLs found.")
             return
 
-        self.total = len(urls)
+        # v0.37.0 — the bar's denominator covers BOTH pipelines from the
+        # start: GitHub urls + this batch's website links (a websites-only
+        # batch used to run with total=0, so the progress bar sat empty
+        # with "Syncing" while notes were being written). The websites
+        # phase re-bases the total when it starts (drops law-banned links,
+        # adds due retries) — see _run_website_phase.
+        self.total = len(urls) + (len(_website_links)
+                                  if _websites_pipeline_on else 0)
         self.processed = 0
 
         # v23 — Phase 1: INTAKE — record ALL links BEFORE any processing so

@@ -235,3 +235,81 @@ test('DLQ: a failed enrich message is audited in the activity log, never silentl
   assert.ok(entry, 'the enrichment failure is recorded for the audit trail');
   assert.equal(entry.url, 'https://github.com/o/r');
 });
+
+// ── v0.29.0 — batch pastes (the owner's "50 links in ONE message") ──
+
+// Capture the text of every Telegram sendMessage this test sends.
+// Returns { sent, restore }.
+function captureTelegramTexts() {
+  const sent = [];
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('api.telegram.org')
+        && String(url).includes('/sendMessage')) {
+      sent.push(JSON.parse(opts.body).text);
+    }
+    return { ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) };
+  };
+  return {
+    sent,
+    restore: () => { globalThis.fetch = prev; }
+  };
+}
+
+test('batch: 50 new websites in ONE message -> one reply says "50 new links received"', async () => {
+  const cap = captureTelegramTexts();
+  try {
+    const env = makeEnv();
+    const urls = [];
+    for (let i = 0; i < 50; i++) urls.push(`https://site${i}.example.com/page`);
+    await handleQueue({ messages: [message({
+      type: 'urls', urls,
+      chat_id: 1, user_id: 12345, message_id: 30, received_at: '2026-10-01T00:00:00Z'
+    })], queue: 'curator-ingest' }, env);
+    assert.equal(env.DB.ledger.size, 50, 'every link of the one message is ledgered');
+    const summary = cap.sent.find(t => t.includes('new link'));
+    assert.ok(summary, `a batch summary was sent: ${JSON.stringify(cap.sent)}`);
+    assert.ok(summary.includes('50 new links received'),
+      `the lead names the batch: ${summary.slice(0, 80)}`);
+    assert.ok(summary.includes('New websites (pending): 50'), 'the breakdown names the type');
+  } finally {
+    cap.restore();
+  }
+});
+
+test('batch: partially-new batch states the split ("Received N links — M new")', async () => {
+  const cap = captureTelegramTexts();
+  try {
+    const env = makeEnv();
+    // seed one link as already-pending, then send a 3-link message
+    await handleQueue({ messages: [message({
+      type: 'urls', urls: ['https://seen.example.com/'],
+      chat_id: 1, user_id: 12345, message_id: 31, received_at: '2026-10-01T00:00:00Z'
+    })], queue: 'curator-ingest' }, env);
+    await handleQueue({ messages: [message({
+      type: 'urls', urls: ['https://seen.example.com/',
+                           'https://fresh-a.example.com/', 'https://fresh-b.example.com/'],
+      chat_id: 1, user_id: 12345, message_id: 32, received_at: '2026-10-01T00:00:00Z'
+    })], queue: 'curator-ingest' }, env);
+    const summary = cap.sent.find(t => t.includes('Received 3 links'));
+    assert.ok(summary, `split summary sent: ${JSON.stringify(cap.sent)}`);
+    assert.ok(summary.includes('Received 3 links — 2 new'),
+      `the split is named: ${summary.slice(0, 80)}`);
+  } finally {
+    cap.restore();
+  }
+});
+
+test('batch: bare-domain lines (the webhook now extracts them) flow through intake', async () => {
+  // Simulates the webhook's extractUrls output for a pasted batch of
+  // bare, scheme-less addresses — one line each.
+  const env = makeEnv();
+  await handleQueue({ messages: [message({
+    type: 'urls',
+    urls: ['https://coolors.co', 'https://example.com/tool?feature=x'],
+    chat_id: 1, user_id: 12345, message_id: 33, received_at: '2026-10-01T00:00:00Z'
+  })], queue: 'curator-ingest' }, env);
+  assert.ok(env.DB.ledger.get('https://coolors.co'));
+  assert.ok(env.DB.ledger.get('https://example.com/tool?feature=x'),
+    'meaningful query params survive (website identity)');
+});

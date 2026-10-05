@@ -945,11 +945,18 @@ class WebsitePipeline:
 
     # -- batch entry --------------------------------------------------------
 
-    def run(self, urls: List[str], should_continue=None) -> List[Dict]:
+    def run(self, urls: List[str], should_continue=None,
+            on_progress=None) -> List[Dict]:
         """Process a batch of non-GitHub links (deduped upstream by the
         caller; dedupe is re-checked per link here anyway).
         ``should_continue`` (optional) is polled between links so a GUI
-        Stop button can end the phase cleanly."""
+        Stop button can end the phase cleanly.
+        ``on_progress(url)`` (v0.37.0, optional) fires once per link BEFORE
+        it is processed — the batch's progress bar finally moves during a
+        websites phase too (it used to be GitHub-loop-only, so a
+        websites-only batch showed a frozen bar while notes were added).
+        Within-batch duplicates count too: the caller's position advances
+        for every link it handed us, mirroring the GitHub loop."""
         results = []
         seen = set()
         for url in urls:
@@ -957,6 +964,11 @@ class WebsitePipeline:
                 self.log("⏹️ Websites pipeline stopped by user — remaining "
                          "links stay queued for the next run", "warning")
                 break
+            if on_progress is not None:
+                try:
+                    on_progress(url)
+                except Exception:
+                    pass
             canonical = normalize_website_url(url)
             if canonical in seen:
                 # Within-batch duplicate: REPORT it (never silently drop —
@@ -970,10 +982,11 @@ class WebsitePipeline:
             results.append(self.process_link(url))
         return results
 
-    def run_due_retries(self, should_continue=None) -> List[Dict]:
+    def run_due_retries(self, should_continue=None, on_progress=None) -> List[Dict]:
         """Retry fetch-failed links whose backoff elapsed (SPEC §4.3:
         "retried automatically up to 3 times over several days"). Called by
-        the batch BEFORE the fresh links."""
+        the batch BEFORE the fresh links. ``on_progress`` (v0.37.0) has
+        the same per-link contract as :meth:`run`."""
         due = self.state.due_retries()
         if not due:
             return []
@@ -984,6 +997,11 @@ class WebsitePipeline:
             if should_continue is not None and not should_continue():
                 self.log("⏹️ Websites retry pass stopped by user", "warning")
                 break
+            if on_progress is not None:
+                try:
+                    on_progress(u)
+                except Exception:
+                    pass
             results.append(self.process_link(u))
         self.counters['retried'] = len(due)
         return results

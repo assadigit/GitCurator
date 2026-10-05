@@ -450,9 +450,18 @@ class TestConnectionTestDialog(_GuiCase):
         # a checking row spins
         dlg.set_row_checking(1)
         self.assertTrue(dlg._rows[1]['spinning'])
-        # a result lands as a detail line
-        dlg.add_row_detail(1, "vault found · writable")
-        self.assertIn("vault found", dlg._rows[1]['detail'].text())
+        # v0.37.0 — a result lands as ONE compact item line (never a
+        # wrapped blob): word-wrap off, full detail on the tooltip
+        dlg.add_row_detail(1, "vault found · writable",
+                           full="✅ GitHub vault — found · writable (C:/x)")
+        self.assertEqual(len(dlg._rows[1]['items']), 1)
+        self.assertIn("vault found", dlg._rows[1]['items'][0].text())
+        self.assertFalse(dlg._rows[1]['items'][0].wordWrap())
+        self.assertIn("(C:/x)", dlg._rows[1]['items'][0].toolTip())
+        # a second result = a second one-line item, not a joined blob
+        dlg.add_row_detail(1, "pipeline off")
+        self.assertEqual(len(dlg._rows[1]['items']), 2)
+        self.assertIn("pipeline off", dlg._rows[1]['items'][1].text())
         # everything EXCEPT telegram → still disabled
         for i in (1, 2, 3):
             dlg.finalize_row(i, 'ok')

@@ -833,5 +833,69 @@ class TestCli(unittest.TestCase):
         self.assertIn("warning(s)", out)
 
 
+class TestShortLine(unittest.TestCase):
+    """v0.37.0 — the compact one-line form for the Test Connection
+    dialog's item rows: path-like parentheticals dropped, hard budget,
+    always exactly one line."""
+
+    def test_path_parens_dropped_facts_kept(self):
+        r = cc._result("GitHub vault", "ok",
+                       "found · writable — ready to receive notes · "
+                       "Obsidian vault (G:\\Docs\\GitHub Projects\\Obsidian Vault)")
+        s = cc.short_line(r)
+        self.assertIn("GitHub vault", s)
+        self.assertIn("found · writable", s)
+        self.assertNotIn("G:\\", s)
+        self.assertIn("Obsidian vault", s)
+        # fact parens survive: rate limits are facts, not locations
+        r2 = cc._result("GitHub token", "ok",
+                        "valid — account assadigit (5000 req/h)")
+        self.assertIn("(5000 req/h)", cc.short_line(r2))
+
+    def test_forward_slash_drive_paths_dropped(self):
+        r = cc._result("Websites vault", "ok",
+                       "found · writable — ready to receive notes · "
+                       "Obsidian vault (G:/Docs/Documents/Obsidian Website Directory/)")
+        s = cc.short_line(r)
+        self.assertNotIn("G:/", s)
+        self.assertIn("found · writable", s)
+
+    def test_long_details_mid_ellipsized_to_one_line(self):
+        r = cc._result("Hint", "info", "x" * 200)
+        s = cc.short_line(r)
+        # the budget is on the WHOLE visible line (icon + name + detail)
+        self.assertLessEqual(len(s), cc._SHORT_LINE_BUDGET + 4)
+        self.assertIn("…", s)
+        self.assertNotIn("\n", s)
+
+    def test_every_real_check_fits_one_line(self):
+        # The owner's real screenshot lines (v0.37.0 pass) — every one of
+        # them must collapse to a single budgeted line; long-named checks
+        # get a tighter detail budget so the TOTAL line never clips.
+        real = [
+            ("llama.cpp", "up @ http://127.0.0.1:8080 · model "
+                          "'Ternary-Bonsai-2-7B-Instruct-vision'"),
+            ("Account session",
+             "no session file — the account is not logged in yet "
+             "(GUI: Test Telegram & GitHub · CLI: --login)"),
+            ("GitHub token",
+             "REJECTED (401 Bad credentials) — make a fresh token at "
+             "github.com/settings/tokens (classic, 'repo' scope)"),
+            ("Proxy", "127.0.0.1:10808 reachable (socks5, 4 ms)"),
+            ("Live connection",
+             "connected — account login OK · bot queue readable "
+             "(12 link(s) waiting · newest message id 991234)"),
+            ("Bot", "@githubfetcherbot configured — the queue is read "
+                    "through your account session"),
+        ]
+        for name, detail in real:
+            s = cc.short_line(cc._result(name, "warn", detail))
+            self.assertNotIn("\n", s, name)
+            self.assertLessEqual(len(s), cc._SHORT_LINE_BUDGET + 4, name)
+
+    def test_empty_detail_just_name(self):
+        self.assertEqual(cc.short_line(cc._result("X", "ok", "")), "✅ X")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

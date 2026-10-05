@@ -712,6 +712,61 @@ class TestPipeline(_PipeCase):
         self.assertIn('dismissed', r['error'])
         self.assertFalse(os.path.exists(self.vault))
 
+    # -- v0.37.0: the per-link on_progress hook (the frozen-bar fix) ------
+
+    def test_run_emits_on_progress_per_link(self):
+        pipe = self.make_pipeline(_FakeLLM())
+        seen = []
+        results = pipe.run(
+            ['https://example.com/one', 'https://example.com/one?utm_source=x',
+             'https://example.com/two'],
+            on_progress=seen.append)
+        # one callback per link handed over (the within-batch duplicate —
+        # same canonical once utm drops — counts too: the caller's position
+        # advances for it, like the GitHub loop)
+        self.assertEqual(
+            seen, ['https://example.com/one',
+                   'https://example.com/one?utm_source=x',
+                   'https://example.com/two'])
+        self.assertEqual(len(results), 3)
+        self.assertEqual(sum(1 for r in results
+                             if r['outcome'] == 'processed'), 2)
+        self.assertEqual(sum(1 for r in results
+                             if r['error'] == 'duplicate within batch'), 1)
+
+    def test_run_on_progress_exceptions_swallowed(self):
+        pipe = self.make_pipeline(_FakeLLM())
+
+        def boom(url):
+            raise RuntimeError("callback crashed")
+
+        results = pipe.run(['https://example.com/ok'],
+                           on_progress=boom)
+        self.assertEqual(results[0]['outcome'], 'processed')
+
+    def test_run_due_retries_emits_on_progress(self):
+        from datetime import datetime, timedelta
+        self.db.enqueue_retry('https://example.com/broken', 'HTTP 404')
+        # rewind its clock so the retry is due NOW (same pattern as
+        # test_due_retries_respect_cap_and_time)
+        with self.db._lock:
+            self.db.conn.execute(
+                "UPDATE website_retry_queue SET next_attempt_at=? "
+                "WHERE url='https://example.com/broken'",
+                ((datetime.now() - timedelta(days=1)).isoformat(
+                    timespec='seconds'),))
+            self.db.conn.commit()
+        pipe = self.make_pipeline(
+            _FakeLLM(), fetch=_FakeFetch(fail_paths={'/broken'}))
+        seen = []
+        pipe.run_due_retries(on_progress=seen.append)
+        self.assertEqual(seen, ['https://example.com/broken'])
+
+    def test_run_without_on_progress_unchanged(self):
+        pipe = self.make_pipeline(_FakeLLM())
+        results = pipe.run(['https://example.com/plain'])
+        self.assertEqual(results[0]['outcome'], 'processed')
+
     def test_fetch_failure_writes_review_and_queues_retry(self):
         pipe = self.make_pipeline(
             _FakeLLM(), fetch=_FakeFetch(fail_paths={'/broken'}))

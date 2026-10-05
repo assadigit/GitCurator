@@ -408,7 +408,14 @@ async function sendReply(env, chatId, results, originalMessageId) {
   }
 
   // Multiple URLs — summary reply
-  const parts = [`📋 <b>Received ${total} links:</b>\n`];
+  // v0.29.0 — batch pastes (the owner's "50 websites, one line each, in
+  // ONE message"): the lead line says how many NEW links were received,
+  // not just the message total — "50 new links received" when everything
+  // is new; otherwise the split ("Received 60 links — 41 new").
+  const lead = (results.new.length === total && total > 0)
+    ? `📋 <b>${total} new link${total === 1 ? '' : 's'} received</b>\n`
+    : `📋 <b>Received ${total} links — ${results.new.length} new</b>\n`;
+  const parts = [lead];
 
   const newGithub = results.new.filter(i => !i.isWebsite);
   const newWebsites = results.new.filter(i => i.isWebsite);

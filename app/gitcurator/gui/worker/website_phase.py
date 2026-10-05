@@ -162,6 +162,13 @@ class WorkerWebsitePhaseMixin:
                         "⚠️ Websites pipeline is ON but no Websites vault is "
                         "set (Settings → 📁 Vault) — the non-GitHub links of "
                         "this batch are kept in the manifest only.", "warning")
+                    # v0.37.0 — these links will never advance the bar;
+                    # give the denominator back so the bar's math stays
+                    # truthful (the final emit lands on 100% either way).
+                    try:
+                        self.total = max(0, self.total - len(links))
+                    except Exception:
+                        pass
                 return None
 
             # State DB: the shadow cache during a dry-run (same rule as
@@ -238,6 +245,32 @@ class WorkerWebsitePhaseMixin:
                     note_state_db=note_state_db)
 
                 due = state.due_retries()
+                # v0.37.0 — the phase owns its slice of the bar: re-base
+                # the denominator on what will ACTUALLY run (the law-banned
+                # links above never advance; the due retries do) and then
+                # advance the position + emit progress per link, exactly
+                # like the GitHub loop does. A websites batch finally moves
+                # the bar (the owner's frozen-"Syncing" report).
+                # NB: getattr-with-default is NOT enough on a QObject that
+                # skipped __init__ (the headless test harness shape) —
+                # PyQt's fallback __getattr__ raises RuntimeError, so the
+                # read is guarded explicitly.
+                try:
+                    _github_done = int(self._current_position or 0)
+                except Exception:
+                    # the bare-worker shape (headless tests build one via
+                    # __new__): the counter does not exist yet — start it
+                    # at 0 so _wp_advance below can increment it.
+                    _github_done = 0
+                    self._current_position = 0
+                self.total = _github_done + len(links) + len(due)
+
+                def _wp_advance(u):
+                    self._current_position += 1
+                    self.status_updated.emit(u)
+                    self.progress_updated.emit(self._current_position,
+                                               self.total)
+
                 self.log_message.emit(
                     f"🌐 Websites pipeline: {len(links)} link(s)"
                     + (f" + {len(due)} due retry(ies)" if due else ""),
@@ -245,9 +278,11 @@ class WorkerWebsitePhaseMixin:
 
                 if due:
                     pipeline.run_due_retries(
-                        should_continue=lambda: self.is_running)
+                        should_continue=lambda: self.is_running,
+                        on_progress=_wp_advance)
                 results = pipeline.run(
-                    links, should_continue=lambda: self.is_running)
+                    links, should_continue=lambda: self.is_running,
+                    on_progress=_wp_advance)
 
                 # Manifest marking (the intake left website links pending):
                 # processed/review -> processed (a _review note IS a note),

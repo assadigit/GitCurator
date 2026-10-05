@@ -245,14 +245,38 @@ export function mapGithubIoUrl(url) {
   return `https://github.com/${owner}/${repo}`;
 }
 
+// v0.29.0 — a line that is ONE bare address with no scheme (desktop
+// links.py _BARE_ADDRESS_RE parity): a domain (or IPv4), optional port,
+// optional path/query/fragment. The TLD must be ≥2 letters so prose
+// lines ('not a url at all') never match. Only WHOLE lines count — a
+// bare domain inside prose is not a link (the desktop's import-file
+// rule, mirrored for pasted batches).
+const BARE_ADDRESS_RE =
+  /^(?:[a-zA-Z0-9][a-zA-Z0-9\-.]*\.[a-zA-Z]{2,}|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:[/?#].*)?$/;
+
 /**
  * Extract all URLs from a text message.
+ * v0.29.0 — batch paste support (the owner's "50 websites, one line
+ * each, as a single message"): besides every http(s):// URL anywhere in
+ * the text, a line that is exactly ONE bare address (example.com,
+ * www.site.org/path, 127.0.0.1:8901/site) is captured too and given the
+ * https:// scheme, so normalizeUrlTyped/parseGitHubUrl treat it exactly
+ * like a schemed link. In-message dedup stays the consumer's job.
  */
 export function extractUrls(text) {
   const pattern = /https?:\/\/[^\s<>"')\]]+/g;
-  const matches = text.match(pattern) || [];
-  // Clean trailing punctuation
-  return matches.map(u => u.replace(/[.,);:]+$/, ''));
+  const matches = (String(text || '').match(pattern) || [])
+    .map(u => u.replace(/[.,);:]+$/, ''));
+  const lines = String(text || '').split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.includes('://')) continue; // schemed lines already matched
+    const candidate = line.replace(/[.,);]+$/, '').trim();
+    if (BARE_ADDRESS_RE.test(candidate)) {
+      matches.push('https://' + candidate);
+    }
+  }
+  return matches;
 }
 
 /**

@@ -138,7 +138,12 @@ class TestConnectionModalMixin:
         def _on_result(idx, r):
             dlg = getattr(self, '_cc_dialog', None)
             if dlg is not None and dlg.isVisible():
-                dlg.add_row_detail(idx, _connection_check.render_line(r))
+                # v0.37.0 — the hierarchy pass: the dialog row gets the
+                # compact ONE-line summary; the full text rides the item
+                # tooltip. The log still streams the full render_line.
+                dlg.add_row_detail(
+                    idx, _connection_check.short_line(r),
+                    full=_connection_check.render_line(r))
         worker.result_signal.connect(_on_result)
 
         def _on_battery_done(_name, result):
@@ -230,6 +235,14 @@ class TestConnectionModalMixin:
             self.log_message("   " + _connection_check.render_line(line),
                              _connection_check.GUI_LEVELS.get(line["level"],
                                                               "info"))
+            # v0.37.0 — the live leg's verdict now ALSO lands in the dialog
+            # as a one-line item under the Telegram heading (it used to be
+            # log-only, so the modal's Telegram section stayed incomplete).
+            _dlg = getattr(self, '_cc_dialog', None)
+            if _dlg is not None and _dlg.isVisible():
+                _dlg.add_row_detail(
+                    4, _connection_check.short_line(line),
+                    full=_connection_check.render_line(line))
             if isinstance(self._cc_sections, list) and self._cc_sections:
                 self._cc_sections[-1][1].append(line)
             self._cc_finish()

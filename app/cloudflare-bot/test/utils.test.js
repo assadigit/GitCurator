@@ -105,6 +105,55 @@ test('extractUrls pulls every URL out of a message and trims punctuation', () =>
     ['https://github.com/a/b', 'https://example.com/x']);
 });
 
+// ── v0.29.0 — batch pastes: bare addresses, one per line ────────────
+
+test('extractUrls: a batch paste of bare domains (one per line) is fully captured', () => {
+  const text = [
+    'coolors.co',
+    'www.paletton.com/',
+    'example.com/tool?feature=x',
+    'github.com/owner/repo',
+    '127.0.0.1:8901/site',
+    'sub.domain.org/path/to/page'
+  ].join('\n');
+  assert.deepEqual(extractUrls(text), [
+    'https://coolors.co',
+    'https://www.paletton.com/',
+    'https://example.com/tool?feature=x',
+    'https://github.com/owner/repo',
+    'https://127.0.0.1:8901/site',
+    'https://sub.domain.org/path/to/page'
+  ]);
+});
+
+test('extractUrls: mixed batch — schemed and bare lines together', () => {
+  const text = 'https://example.com/one\nexample.com/two\nplain prose line here';
+  assert.deepEqual(extractUrls(text),
+    ['https://example.com/one', 'https://example.com/two']);
+});
+
+test('extractUrls: prose never yields false bare links (whole-line rule)', () => {
+  assert.deepEqual(extractUrls('check out example.com please'), []);
+  assert.deepEqual(extractUrls('not a url at all'), []);
+  assert.deepEqual(extractUrls('e.g. this and that'), []);
+});
+
+test('extractUrls: bare lines with trailing punctuation are trimmed; schemed lines not duplicated', () => {
+  assert.deepEqual(extractUrls('example.com.'), ['https://example.com']);
+  assert.deepEqual(extractUrls('example.com,'), ['https://example.com']);
+  // a schemed line is captured once by the global pattern, never again
+  assert.deepEqual(extractUrls('https://example.com/x'), ['https://example.com/x']);
+});
+
+test('extractUrls: 50-line website batch (the owner\'s exact scenario)', () => {
+  const lines = [];
+  for (let i = 0; i < 50; i++) lines.push(`site${i}.example.com/page`);
+  const out = extractUrls(lines.join('\n'));
+  assert.equal(out.length, 50);
+  assert.equal(out[0], 'https://site0.example.com/page');
+  assert.equal(out[49], 'https://site49.example.com/page');
+});
+
 test('self-domain default is the bot\'s own worker host', () => {
   assert.equal(DEFAULT_SELF_DOMAINS[0], 'github-to-obsidian-bot.aliassadi-plus.workers.dev');
 });

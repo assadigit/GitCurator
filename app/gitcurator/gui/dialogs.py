@@ -219,12 +219,24 @@ class ConnectionTestDialog(QDialog):
     filled pastel-mint 'go' style (the design system's green) and starts
     the main view's SYNC flow when clicked.
 
-    The dialog never talks to the network — MainWindow.test_all routes
-    the battery worker's section/result signals into set_row_* calls.
+    v0.37.0 — the hierarchy pass (the owner's spec): every check is ONE
+    line, smaller + paler, indented under its BOLD section heading —
+    the wrapped multi-line detail blob is gone. Each item shows the
+    compact summary (connection_check.short_line); its tooltip carries
+    the FULL render_line text. The dialog never talks to the network —
+    MainWindow.test_all routes the battery worker's section/result
+    signals into set_row_* calls.
     """
 
     _SPIN_FRAMES = ('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
     _MARK = {'ok': '✅', 'warn': '⚠️', 'error': '❌'}
+
+    # v0.37.0 — the item column's pixel width: 560 dialog - 2*20 root
+    # margins - 2*12 card margins - 18 item indent. add_row_detail
+    # elides every item to this width with the label's OWN font metrics
+    # (ElideMiddle) so no line can ever clip at the edge, whatever the
+    # font's real advance widths are.
+    _ITEM_COL_PX = 560 - 2 * 20 - 2 * 12 - 18
 
     def __init__(self, main_window: 'MainWindow'):
         super().__init__(main_window)
@@ -260,10 +272,6 @@ class ConnectionTestDialog(QDialog):
             status.setObjectName("cc_row_status")
             name = QLabel(f"{icon} {title}")
             name.setObjectName("cc_row_name")
-            detail = QLabel("")
-            detail.setObjectName("cc_row_detail")
-            detail.setWordWrap(True)
-            detail.setVisible(False)
             row = QWidget()
             row_lay = QVBoxLayout(row)
             row_lay.setContentsMargins(0, 4, 0, 4)
@@ -273,11 +281,17 @@ class ConnectionTestDialog(QDialog):
             head.addStretch(1)
             head.addWidget(status, 0)
             row_lay.addLayout(head)
-            row_lay.addWidget(detail)
+            # v0.37.0 — one compact QLabel per check line (never a
+            # wrapped blob): smaller + paler via QSS (#cc_item), indented
+            # under the bold heading, full detail on the tooltip.
+            items_lay = QVBoxLayout()
+            items_lay.setContentsMargins(18, 0, 0, 1)
+            items_lay.setSpacing(0)
+            row_lay.addLayout(items_lay)
             rows_lay.addWidget(row)
             self._rows[idx] = {
-                'title': title, 'status': status,
-                'detail': detail, 'spinning': False, 'done': False,
+                'title': title, 'status': status, 'items_lay': items_lay,
+                'items': [], 'spinning': False, 'done': False,
             }
         root.addWidget(rows_card, 1)
 
@@ -316,15 +330,33 @@ class ConnectionTestDialog(QDialog):
         if row is None or row['done']:
             return
         row['spinning'] = True
-        row['detail'].setVisible(False)
+        for item in row['items']:
+            item.setVisible(False)
 
-    def add_row_detail(self, idx: int, text: str):
+    def add_row_detail(self, idx: int, text: str, full: str = ""):
+        """v0.37.0 — one compact item line under the section heading.
+        ``text`` is the short one-line summary (connection_check
+        .short_line); ``full`` (optional) is the complete render_line
+        text, shown as the item's tooltip. The visible text is elided to
+        the item column's width with the label's own font metrics —
+        pixel-perfect, never clipped, always ONE line."""
         row = self._rows.get(int(idx))
         if row is None:
             return
-        current = row['detail'].text()
-        row['detail'].setText((current + "\n" if current else "") + text)
-        row['detail'].setVisible(True)
+        raw = str(text or "")
+        item = QLabel()
+        item.setObjectName("cc_item")
+        item.setWordWrap(False)   # ONE line, always
+        try:
+            item.ensurePolished()   # the QSS 11px font applies to metrics
+            shown = item.fontMetrics().elidedText(
+                raw, Qt.TextElideMode.ElideMiddle, self._ITEM_COL_PX)
+        except Exception:
+            shown = raw
+        item.setText(shown)
+        item.setToolTip(str(full) if full else raw)
+        row['items_lay'].addWidget(item)
+        row['items'].append(item)
 
     def finalize_row(self, idx: int, verdict: str):
         row = self._rows.get(int(idx))

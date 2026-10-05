@@ -322,6 +322,12 @@ def _app_rules(t: Dict[str, str]) -> str:
             QProgressBar::chunk {{ background: {t['progress_chunk']}; border-radius: 6px; }}
             QLabel {{ color: {t['text']}; }}
             QLabel#proxy_status_text {{ color: {t['text_muted']}; font-size: 12px; }}
+            /* v0.37.0 — Test Connection hierarchy: the section heading is
+            the row's BOLD voice; every check item under it is ONE small,
+            pale line (the full detail rides the item tooltip). */
+            QLabel#cc_row_name {{ font-size: 13px; font-weight: 700; color: {t['text']}; background: transparent; }}
+            QLabel#cc_row_status {{ font-size: 12px; font-weight: 600; background: transparent; }}
+            QLabel#cc_item {{ font-size: 11px; color: {t['text_muted']}; background: transparent; }}
             QRadioButton {{ spacing: 8px; padding: 2px; color: {t['text_soft']}; }}
             QRadioButton:focus {{ outline: 2px solid {t['focus']}; outline-offset: 2px; }}
             QRadioButton::indicator {{ width: 16px; height: 16px; border: 2px solid {t['border_input']}; border-radius: 8px; background: {t['sheet']}; }}

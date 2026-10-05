@@ -85,6 +85,76 @@ def render_line(result: Dict[str, str]) -> str:
     return f"{icon} {result.get('name', '?')} — {result.get('detail', '')}"
 
 
+# v0.37.0 — the compact one-line form for the Test Connection dialog's
+# item rows (the owner's hierarchy pass: headings bold, items one line,
+# smaller + paler). Path-like parenthesized groups (local paths, drive
+# paths, URLs) are dropped from the visible text — the full detail rides
+# the row tooltip — and anything still over budget is mid-ellipsized so
+# EVERY item is exactly one line, never a wrapped blob. The budget is on
+# the WHOLE visible line (icon + name + " — " + detail) and sized for
+# the dialog's 478 px item column at the 11 px Inter item font (measured
+# ≈6.1-6.5 px/char) — the dialog adds a pixel-perfect ElideMiddle on
+# top as the final guarantee.
+_SHORT_LINE_BUDGET = 72
+_SHORT_LINE_MIN_DETAIL = 36
+_PAREN_GROUP_RE = None  # compiled lazily (kept module-level for tests)
+
+
+def _paren_is_pathy(inner: str) -> bool:
+    """A parenthesized group is 'pathy' when its content looks like a
+    location, not a fact: a scheme (https://…), a drive letter (G:\\…,
+    G:/…), or an absolute path (/home/…, \\\\server\\…). Groups like
+    '(5000 req/h)' or '(classic, 'repo' scope)' stay."""
+    s = str(inner or "").strip()
+    if not s:
+        return False
+    return ("://" in s or ":\\\\" in s or ":/" in s
+            or s.startswith("/") or s.startswith("\\")
+            or (len(s) > 3 and s[1:2] == ":" and s[2:3] in "/\\"))
+
+
+def _short_detail(detail: str, budget: int = _SHORT_LINE_BUDGET) -> str:
+    """Collapse a check detail into one short visible fragment of at most
+    ``budget`` characters (the caller spends the rest of the line budget
+    on the icon + check name)."""
+    global _PAREN_GROUP_RE
+    import re as _re
+    if _PAREN_GROUP_RE is None:
+        _PAREN_GROUP_RE = _re.compile(r"\s*\(([^()]*)\)")
+    text = str(detail or "").strip()
+
+    def _drop_pathy(m):
+        return "" if _paren_is_pathy(m.group(1)) else m.group(0)
+
+    if text:
+        stripped = _PAREN_GROUP_RE.sub(_drop_pathy, text).strip()
+        if stripped:
+            text = stripped
+    text = " ".join(text.split())
+    if len(text) <= budget:
+        return text
+    keep_head = max(12, int(budget * 0.68))
+    keep_tail = max(8, budget - keep_head - 1)
+    return text[:keep_head].rstrip() + "…" + text[-keep_tail:].lstrip()
+
+
+def short_line(result: Dict[str, str]) -> str:
+    """The compact single-line form of a result: '✅ Name — short detail'.
+
+    One line ALWAYS (no wrapping): path-like parentheticals removed, a
+    hard mid-ellipsis budget on the WHOLE visible line so long-named
+    checks never clip at the dialog edge. The full detail stays available
+    through :func:`render_line` (the dialog shows it as the row tooltip)."""
+    icon = ICONS.get(result.get("level", LEVEL_INFO), "•")
+    name = str(result.get("name", "?") or "?")
+    budget = max(_SHORT_LINE_MIN_DETAIL,
+                 _SHORT_LINE_BUDGET - len(name) - 3)
+    detail = _short_detail(result.get("detail", ""), budget)
+    if not detail:
+        return f"{icon} {name}"
+    return f"{icon} {name} — {detail}"
+
+
 # ---------------------------------------------------------------------------
 # Small network helper (proxy-aware, loopback-direct)
 # ---------------------------------------------------------------------------

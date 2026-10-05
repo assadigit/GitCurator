@@ -1,3 +1,66 @@
+## [0.37.0] — One line per check, a bar that moves, fifty links in one paste — 2026-10-05
+
+Owner ask (session): "For test connection log: make these items
+smaller, so each one only takes 1 line … better hierarchy — headings
+like vaults bold, the others indented on it, smaller and paler text";
+"the loading is not progressing — it just shows syncing without any
+progress on the loading bar (but notes get added, the loading bar
+doesn't show)"; "the robot in telegram must accept batch links as
+well, for example 50 websites (one line each) copy-paste as a single
+message — it must identify them, say '50 new links received' despite
+being only 1 message." Desktop **0.37.0** + Worker **0.29.0** (a real
+worker change ships this time). Suite grows **945 → 955** (5
+short-line cases in test_connection, 4 on_progress cases in
+test_phase2, 1 frozen-bar wiring case in test_phase4), worker
+**40 → 48**, offline golden 30/30 + 0 invalid, 82/82 compiles, GUI
+smoke 98/98.
+
+**1. The Test Connection hierarchy.** Every check is now ONE compact
+line, indented under its **bold** section heading (Vaults / LLM /
+GitHub / Telegram), rendered smaller and paler than the heading —
+the wrapped multi-line detail blob is gone. Each line is the short
+summary (new `connection_check.short_line`): path-like parentheticals
+(the vault paths, drive letters, URLs) are dropped from the visible
+text, long details are mid-ellipsized, and the dialog adds a
+pixel-perfect ElideMiddle with the label's own font metrics so a line
+can never clip at the edge. The FULL text of every check rides the
+item's tooltip. The LIVE Telegram leg's verdict now lands in the
+dialog too (it used to be log-only, so the modal's Telegram section
+stayed incomplete). Verified visually in both themes.
+
+**2. The frozen bar.** A WEBSITES-only batch ran with `total = 0` —
+the progress bar's denominator counted only GitHub URLs, and the
+websites phase never emitted progress at all: notes were written
+while the bar sat empty under "Syncing" (the owner's screenshot
+exactly). Now the batch's total covers BOTH pipelines from the start,
+the phase re-bases the denominator on what actually runs (law-banned
+links never counted, due retries counted), and `WebsitePipeline.run`
+/ `run_due_retries` gained an `on_progress(url)` hook that advances
+the position and emits progress + status per link — exactly like the
+GitHub loop always did. The bar now runs `1/10 → 10/10` through a
+websites batch.
+
+**3. Fifty links, one paste.** The bot always could extract several
+schemed URLs from one message — but a pasted batch of bare addresses
+(`coolors.co`, one per line, no `https://`) extracted to NOTHING, and
+the multi-link reply led with a flat "Received 50 links". The Worker
+(0.29.0): `extractUrls` now also captures a line that is exactly ONE
+bare address (domain or IPv4, optional port/path — the same whole-
+line rule as the desktop's import files, so prose never yields false
+links) and gives it the https:// scheme; the batch summary's lead
+line now names the batch — **"50 new links received"** when every
+link is new, "Received 60 links — 41 new" when some were already
+known; and the no-link hint says you can paste as many links as you
+like in one message. The desktop's EXPECTED_WORKER_VERSION moves to
+0.29.0 in lockstep (Test Connection's Bot Worker line).
+
+**Gate.** 82/82 compiles · 955/955 tests (26 modules) · offline
+golden 30/30 + 0 invalid · worker 48/48 (node --test) · GUI smoke
+98/98 · CLI --auto --yes --dry-run clean · offscreen dialog probe
+(the owner's screenshot scenario re-driven through the real battery:
+every item one line, ≤ the 478 px item column in both themes,
+paths stripped but tooltip-complete).
+
 ## [0.36.0] — The mirror resync: GitHub follows the vault, by your own hand — 2026-10-05
 
 Owner ask (session): "we use github to backup our links … due to bugs

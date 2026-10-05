@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 81 audited
-# Python modules and runs the full 945-case suite (34 core + 11 e2e +
+# Python modules and runs the full 955-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 44 webproxy +
@@ -13,6 +13,9 @@
 # vaults EXACTLY: deletions reach the mirror, a fresh vault against a
 # populated mirror reconciles without resurrecting deleted files, and
 # main is never force-pushed; tests/test_resyncfix.py joins (945).
+# v0.37.0 — the hierarchy pass (short_line + one-line dialog items),
+# the frozen-websites-bar fix (on_progress), the worker's batch pastes
+# (bare-address extraction + 'N new links received'); worker 0.29.0 (955).
 # v0.35.0: the domain law's second reading — YouTube (the whole group),
 # the Google share/drive/docs family and the social-media majors are
 # banned outright; banned links are omitted ENTIRELY (never fetched,
@@ -223,4 +226,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 82 compiles + 945 tests + worker 40 + offline golden run (v0.36.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 82 compiles + 955 tests + worker 48 + offline golden run (v0.37.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

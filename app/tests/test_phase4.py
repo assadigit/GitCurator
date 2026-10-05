@@ -678,6 +678,93 @@ class TestWorkerRouters(unittest.TestCase):
         self.assertTrue(rel_note and rel_note.startswith('Design'),
                         f'note not filed under Design/: {rel_note}')
 
+    def test_website_phase_emits_progress_per_link(self):
+        """v0.37.0 — the frozen-bar fix: a WEBSITES-ONLY batch (the owner's
+        report: "notes get added, the loading bar doesn't show") advances
+        the position and emits progress per link, and the phase re-bases
+        the total on what actually runs."""
+        progress = []
+        status = []
+
+        class _Prog:
+            def emit(self, cur, tot):
+                progress.append((cur, tot))
+
+        class _Stat:
+            def emit(self, text):
+                status.append(text)
+
+        def recorder(api_url, api_key, model, messages,
+                     json_mode=False, timeout_s=300, num_ctx=None,
+                     on_warn=None, verify_tls=False):
+            text = messages[0]['content'] if messages else ''
+            if 'filing a website into a personal library' in text:
+                return json.dumps({'category': 'Design',
+                                   'confidence': 'high', 'reason': 'x'})
+            if 'was filed under' in text:
+                return json.dumps({'subcategory': 'none',
+                                   'confidence': 'high'})
+            return json.dumps({
+                'name': 'Test Site', 'one_line': 'A site.',
+                'core_offerings': ['a'], 'standout_feature': '',
+                'best_used_for': 'x', 'pricing': 'unknown',
+                'login_required': 'unknown', 'similar_tools': [],
+                'tags': ['t'], 'confidence': 'high'})
+
+        gui_app.ProcessingWorker._call_cloud_llm = staticmethod(recorder)
+        vault = os.path.join(self.tmp, 'websites')
+        os.makedirs(vault, exist_ok=True)
+        cfg = {'llm_provider': 'cloud',
+               'cloud_api_url': 'http://127.0.0.1:9/v1',
+               'cloud_api_key': '',
+               'cloud_model': 'base-model',
+               'pipelines': {'websites': True},
+               'website_vault_path': vault,
+               'web_fetch_timeout_s': 5, 'web_domain_delay_s': 0,
+               'web_fetch_max_bytes': 100000,
+               # one of the three links is on a law-banned domain — the
+               # phase must DROP it from the bar's denominator
+               'web_blocked_domains': ['banned.example']}
+        w = self._worker(cfg)
+        w.progress_updated = _Prog()
+        w.status_updated = _Stat()
+        w._non_github_urls = ['https://example.com/alpha',
+                              'https://banned.example/nope',
+                              'https://example.com/beta']
+        # the batch starts as the _run_impl shape: total covers all three
+        # links; position 0 (no GitHub loop — websites-only batch)
+        w.total = 3
+        w._current_position = 0
+
+        def fake_fetch(url, *args, **kwargs):
+            return FetchResult(
+                url=url, final_url=url, status='full', reason='',
+                http_status=200, content_type='text/html', charset='utf-8',
+                body=b'<html><body><p>A design tool page.</p></body></html>',
+                text='<html><body><p>A design tool page.</p></body></html>',
+                elapsed_s=0.0)
+
+        import gitcurator.core.web_fetch as _wf
+        orig_fetch = _wf.fetch_url
+        _wf.fetch_url = fake_fetch
+        try:
+            summary = w._run_website_phase(None, None,
+                                           ollama_client=None,
+                                           ollama_model='ignored')
+        finally:
+            _wf.fetch_url = orig_fetch
+
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary['counters']['processed'], 2)
+        # THE fix: the bar moved — one (position, total) pair per processed
+        # link, positions strictly increasing, and the denominator re-based
+        # to the 2 links that actually run (the banned one never counted)
+        self.assertEqual(progress, [(1, 2), (2, 2)],
+                         f"progress emissions wrong: {progress}")
+        self.assertEqual(
+            status, ['https://example.com/alpha', 'https://example.com/beta'])
+        self.assertEqual(w._current_position, 2)
+
 
 def _redirect_db(tmp):  # retained for reference; the APP_DIR patch above
     """(unused — kept as documentation of the alternative approach)"""
