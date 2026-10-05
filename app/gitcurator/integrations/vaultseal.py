@@ -108,6 +108,8 @@ class SealResult:
     repo_url: Optional[str] = None         # https://github.com/owner/repo
     private: bool = True
     duration_ms: int = 0
+    files_added: int = 0                   # v0.36.0 — resync mirror delta
+    files_deleted: int = 0                 # v0.36.0 — resync mirror delta
 
     @property
     def ok(self) -> bool:
@@ -123,6 +125,17 @@ class SealResult:
             if self.sealed:
                 base += " (commit kept locally)"
             return base
+        if (self.commit_message or "").startswith("resync:"):
+            bits = ["resync: mirror follows the vault — "
+                    f"{self.files_deleted} file(s) deleted, "
+                    f"{self.files_added} added/updated"]
+            if self.repo_name:
+                bits.append(f"→ {self.repo_name}")
+            if self.commit_sha:
+                bits.append(f"({self.commit_sha})")
+            if not self.pushed:
+                bits.append("[local only — no push]")
+            return " ".join(bits)
         bits = [f"sealed {self.files_changed} file(s)"]
         if self.repo_name:
             bits.append(f"→ {self.repo_name}")
@@ -145,6 +158,8 @@ class SealResult:
             "repo_url": self.repo_url,
             "private": self.private,
             "duration_ms": self.duration_ms,
+            "files_added": self.files_added,
+            "files_deleted": self.files_deleted,
             "ok": self.ok,
         }
 
@@ -312,11 +327,9 @@ class VaultSeal:
         # 2) machine-state hygiene (idempotent)
         self.ensure_gitignore()
 
-        # 3) local identity — only when unset, never touches global config
-        rc, out = self._git("config", "user.email")
-        if rc != 0 or not out:
-            self._git("config", "user.name", IDENTITY_NAME)
-            self._git("config", "user.email", IDENTITY_EMAIL)
+        # 3) local identity (v0.36.0 — extracted to _ensure_identity so
+        #    resync() can reuse it on the injected-remote path)
+        self._ensure_identity()
 
         # 4) remote (only when pushing is possible)
         if not self.auto_push:
@@ -557,6 +570,244 @@ class VaultSeal:
         result.duration_ms = int((time.monotonic() - started) * 1000)
         return result
 
+    # -- v0.36.0 resync: the mirror follows the vault -----------------------
+
+    # The well-known empty git tree (content-addressed — stable across
+    # git versions); the delta baseline when the mirror has no commits.
+    _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    def _ensure_identity(self) -> None:
+        """Local git identity — only when unset, never touches the global
+        config (extracted from ensure_repo at v0.36.0 so resync() can
+        reuse it on the injected-remote path)."""
+        rc, out = self._git("config", "user.email")
+        if rc != 0 or not out:
+            self._git("config", "user.name", IDENTITY_NAME)
+            self._git("config", "user.email", IDENTITY_EMAIL)
+
+    def _is_ancestor(self, maybe_ancestor: str, descendant: str) -> bool:
+        rc, _ = self._git("merge-base", "--is-ancestor",
+                          maybe_ancestor, descendant)
+        return rc == 0
+
+    def _delta_counts(self, from_ref: str, to_ref: str) -> Tuple[int, int, int]:
+        """(added, deleted, total) file counts between two tree-ishes.
+        Rename detection is OFF (--no-renames): a deleted file plus an
+        added file must count as one deletion AND one addition (git's
+        default R-detection would collapse them into a single "rename"
+        and understate both sides of the report). Never raises — an
+        unreadable diff reports (0, 0, 0)."""
+        try:
+            rc, out = self._git("diff", "--no-renames", "--name-status",
+                                from_ref, to_ref)
+            if rc != 0:
+                return 0, 0, 0
+            added = deleted = total = 0
+            for ln in (out or "").splitlines():
+                code = (ln.split("\t", 1)[0] or "").strip()
+                if not code:
+                    continue
+                total += 1
+                if code.startswith("D"):
+                    deleted += 1
+                else:
+                    added += 1
+            return added, deleted, total
+        except Exception:
+            return 0, 0, 0
+
+    def _resync_message(self, added: int, deleted: int) -> str:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        return (f"resync: mirror follows the vault — {deleted} file(s) "
+                f"deleted, {added} added/updated ({ts})")
+
+    def _resync_plain(self, push_url: str, remote_head: str,
+                      local_head: str, meta: Dict[str, Any]) -> SealResult:
+        """The ordinary path (empty mirror, or the mirror already inside
+        local history): commit the staged state when dirty and push
+        through the seal's own reconciliation. Deletions ride the commit.
+        """
+        rc, porcelain = self._git("status", "--porcelain")
+        dirty = [ln for ln in (porcelain or "").splitlines() if ln.strip()] \
+            if rc == 0 else []
+        if not dirty and local_head and remote_head == local_head:
+            return SealResult(skipped_reason="mirror already matches the vault",
+                              **meta)
+        msg = ""
+        added = deleted = 0
+        if dirty:
+            baseline = remote_head or self._EMPTY_TREE
+            _, tree_out = self._git("write-tree")
+            added, deleted, _total = self._delta_counts(
+                baseline, tree_out.strip() or baseline)
+            msg = self._resync_message(added, deleted)
+            rc, out = self._git("commit", "-m", msg, "--quiet")
+            if rc != 0:
+                return SealResult(error=f"git commit failed: {out[:200]}",
+                                  **meta)
+        _, sha = self._git("rev-parse", "--short=7", "HEAD")
+        ok, err = self._push(push_url)
+        if not ok:
+            return SealResult(error=f"push failed (local commit kept): "
+                                     f"{err[:300]}",
+                              sealed=bool(dirty), commit_sha=sha or None,
+                              commit_message=msg, files_changed=len(dirty),
+                              files_added=added, files_deleted=deleted,
+                              **meta)
+        _, sha = self._git("rev-parse", "--short=7", "HEAD")
+        self._log(
+            f"VaultSeal resync: the mirror now follows the vault — "
+            f"{deleted} file(s) deleted, {added} added/updated "
+            f"({sha})", "success")
+        return SealResult(sealed=bool(dirty), pushed=True,
+                          commit_sha=sha or None,
+                          commit_message=msg or "resync: mirror follows the vault",
+                          files_changed=len(dirty), files_added=added,
+                          files_deleted=deleted, **meta)
+
+    def resync(self, push_url: Optional[str] = None) -> SealResult:
+        """v0.36.0 — make the GitHub mirror follow the vault EXACTLY.
+
+        The owner's recovery tool for "I deleted the wrongly-created
+        notes in Obsidian, but the GitHub backup still shows them":
+        one owner-initiated action (Settings → Backup → Resync Mirror)
+        that commits the vault's CURRENT state — deletions included —
+        and lands it on the mirror as a NEW commit on top of whatever
+        the mirror has. The mirror's file tree ends up identical to the
+        vault; its HISTORY is never rewritten (main is never
+        force-pushed — the same law the seal follows):
+
+        * mirror ahead / unrelated history (the deleted-everything /
+          fresh-init shape) → a RECONCILIATION commit whose tree is the
+          vault exactly and whose parents are the local tip (when one
+          exists) + the mirror tip. No merge machinery → no conflicts,
+          no union-merge resurrection of deleted files.
+        * mirror inside local history → the ordinary commit + push.
+        * mirror empty → the ordinary initial push.
+
+        Unlike seal() this is an EXPLICIT owner action, so the
+        ``vaultseal.enabled`` switch (the post-run hook) does not gate
+        it — but a token IS required (the whole point is the mirror).
+        ``push_url`` overrides the GitHub URL (the hermetic tests pass a
+        local bare repo). NEVER raises — returns a SealResult."""
+        started = time.monotonic()
+        try:
+            result = self._resync(push_url)
+        except Exception as e:  # same never-raises law as seal()
+            result = SealResult(error=f"{type(e).__name__}: {e}")
+        result.duration_ms = int((time.monotonic() - started) * 1000)
+        return result
+
+    def _resync(self, push_url: Optional[str]) -> SealResult:
+        if self.vault is None or not self.vault.is_dir():
+            return SealResult(error=f"vault directory not found: {self.vault}")
+        if not self.token:
+            return SealResult(error=(
+                "the resync pushes to GitHub — no token configured "
+                "(set it in Settings → Credentials → GitHub Token)"))
+
+        if push_url is None:
+            ok, err = self.ensure_repo()
+            if not ok:
+                return SealResult(error=err)
+            if not self._repo_full:
+                return SealResult(error="could not resolve the mirror repository")
+            push_url = (f"https://x-access-token:{self.token}@github.com/"
+                        f"{self._repo_full}.git")
+        else:
+            # Test seam / self-hosted mirror: skip the GitHub API, but a
+            # commit still needs an identity.
+            self._ensure_identity()
+
+        meta = {"repo_name": self._repo_full,
+                "repo_url": self._remote_url,
+                "private": True}
+
+        # 1) Stage the CURRENT vault — deletions included.
+        self._git("add", "-A", "--", ".")
+
+        # 2) Bring the mirror's main in (an empty/unborn main just means
+        #    "nothing to reconcile" — the plain path decides the rest).
+        remote_head = ""
+        frc, _fout = self._git("fetch", push_url, "refs/heads/main",
+                               timeout=PUSH_TIMEOUT)
+        self._sanitize_fetch_head()
+        if frc == 0:
+            rc, out = self._git("rev-parse", "--verify", "-q", "FETCH_HEAD")
+            remote_head = out.strip() if rc == 0 else ""
+        rc, out = self._git("rev-parse", "--verify", "-q", "HEAD")
+        local_head = out.strip() if rc == 0 else ""
+
+        # 3) The ordinary path when the mirror is empty or already inside
+        #    the local history (the push is then a plain fast-forward).
+        if not remote_head or (local_head
+                               and self._is_ancestor(remote_head, local_head)):
+            return self._resync_plain(push_url, remote_head, local_head, meta)
+
+        # 4) The reconciliation path — the mirror is ahead or unrelated:
+        #    one commit whose TREE is the vault exactly and whose parents
+        #    keep both histories. write-tree reads the index we just
+        #    staged; commit-tree + update-ref replace the merge machinery
+        #    entirely (no conflicts, no resurrection of deleted files).
+        rc, tree_out = self._git("write-tree")
+        tree = tree_out.strip()
+        if rc != 0 or not tree:
+            return SealResult(error=f"git write-tree failed: {tree_out[:200]}",
+                              **meta)
+
+        sha = msg = ""
+        added = deleted = total = 0
+        pout = ""
+        for _attempt in (1, 2):
+            added, deleted, total = self._delta_counts(remote_head, tree)
+            msg = self._resync_message(added, deleted)
+            parents = (["-p", local_head] if local_head else []) \
+                + ["-p", remote_head]
+            rc, sha_out = self._git("commit-tree", tree, *parents, "-m", msg)
+            sha = sha_out.strip()
+            if rc != 0 or not sha:
+                return SealResult(error=f"git commit-tree failed: "
+                                         f"{sha_out[:200]}", **meta)
+            rc, out = self._git("update-ref", "HEAD", sha)
+            if rc != 0:
+                return SealResult(error=f"git update-ref failed: {out[:200]}",
+                                  **meta)
+            rc, pout = self._git("push", push_url, "HEAD:refs/heads/main",
+                                 timeout=PUSH_TIMEOUT)
+            if rc == 0:
+                self._log(
+                    f"VaultSeal resync: the mirror now follows the vault — "
+                    f"{deleted} file(s) deleted, {added} added/updated "
+                    f"({sha[:7]})", "success")
+                return SealResult(sealed=True, pushed=True,
+                                  commit_sha=sha[:7], commit_message=msg,
+                                  files_changed=total, files_added=added,
+                                  files_deleted=deleted, **meta)
+            if "fetch first" in pout or "non-fast-forward" in pout.lower():
+                # The mirror moved between our fetch and the push — one
+                # retry on the fresh tip (never a force-push).
+                frc2, _ = self._git("fetch", push_url, "refs/heads/main",
+                                    timeout=PUSH_TIMEOUT)
+                self._sanitize_fetch_head()
+                if frc2 == 0:
+                    rc2, out2 = self._git("rev-parse", "--verify", "-q",
+                                          "FETCH_HEAD")
+                    fresh = out2.strip() if rc2 == 0 else ""
+                    if fresh and fresh != remote_head:
+                        remote_head = fresh
+                        continue
+            break
+
+        # Never force-push — the seal's rescue-branch safety net instead
+        # (the reconciliation commit stays local, named in the error).
+        _ok_rescue, err = self._rescue(push_url, pout[:300])
+        return SealResult(
+            error=f"push rejected (reconciliation commit kept locally): "
+                  f"{err[:300]}",
+            sealed=True, pushed=False, commit_sha=sha[:7] if sha else None,
+            commit_message=msg, files_changed=total,
+            files_added=added, files_deleted=deleted, **meta)
+
     # -- introspection --------------------------------------------------------
 
     def status(self) -> Dict[str, Any]:
@@ -628,7 +879,6 @@ def websites_seal_from_config(config: Dict[str, Any],
                               run_summary: Optional[Dict[str, Any]] = None,
                               log: Optional[LogFn] = None) -> SealResult:
     """Seal the WEBSITES vault into its own private repo (Phase 1, v0.10.0).
-
     A second, independent VaultSeal instance (SPEC §4.1: each machine vault
     gets its own backup repo). Reads: ``website_vault_path``,
     ``website_repo_name``, ``github_token`` and the ``pipelines.websites``
@@ -656,6 +906,58 @@ def websites_seal_from_config(config: Dict[str, Any],
     return sealer.seal(run_summary)
 
 
+def resync_from_config(config: Dict[str, Any],
+                       log: Optional[LogFn] = None) -> Dict[str, SealResult]:
+    """v0.36.0 — the owner's "make GitHub follow the vault" action for
+    EVERY configured vault mirror: the GitHub vault + the Websites
+    vault (each into its own repo, exactly like the post-run seals).
+
+    Returns ``{'github': SealResult, 'websites': SealResult}`` — the
+    websites entry carries a ``skipped_reason`` when the pipeline is
+    off or no websites vault is configured. The resync is an explicit
+    owner action, so the ``vaultseal.enabled`` / ``auto_push`` switches
+    do not gate it (a token is still required — checked per vault).
+    Never raises."""
+    cfg = config or {}
+    out: Dict[str, SealResult] = {}
+
+    vs_cfg = cfg.get("vaultseal") or {}
+    if not isinstance(vs_cfg, dict):
+        vs_cfg = {}
+    github_sealer = VaultSeal(
+        vault_path=cfg.get("vault_path") or "",
+        token=cfg.get("github_token") or "",
+        repo_name=vs_cfg.get("repo_name") or "",
+        auto_push=True,
+        enabled=True,
+        log=log,
+    )
+    if not (cfg.get("vault_path") or "").strip():
+        out["github"] = SealResult(
+            skipped_reason="no GitHub vault configured",
+            repo_name=github_sealer.repo_name or None)
+    else:
+        out["github"] = github_sealer.resync()
+
+    pipelines = cfg.get("pipelines") or {}
+    web_path = (cfg.get("website_vault_path") or "").strip()
+    if isinstance(pipelines, dict) and pipelines.get("websites", False) \
+            and web_path:
+        web_sealer = VaultSeal(
+            vault_path=web_path,
+            token=cfg.get("github_token") or "",
+            repo_name=(cfg.get("website_repo_name") or "").strip(),
+            auto_push=True,
+            enabled=True,
+            log=log,
+        )
+        out["websites"] = web_sealer.resync()
+    else:
+        out["websites"] = SealResult(
+            skipped_reason="websites pipeline off or no websites vault")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Standalone CLI (manual seals + the dashboard's "Seal vault now" button)
 # ---------------------------------------------------------------------------
@@ -672,6 +974,10 @@ def _main(argv: Optional[List[str]] = None) -> int:
                         help="GitHub token (default: env GITHUB_TOKEN)")
     parser.add_argument("--no-push", action="store_true",
                         help="commit locally only, never push")
+    parser.add_argument("--resync", action="store_true",
+                        help="v0.36.0 — make the mirror follow the vault "
+                             "EXACTLY (deletions included; history kept, "
+                             "never force-pushed)")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     parser.add_argument("--status", action="store_true",
                         help="print the vault git status and exit")
@@ -691,7 +997,10 @@ def _main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(sealer.status(), indent=2))
         return 0
 
-    result = sealer.seal()
+    if args.resync:
+        result = sealer.resync()
+    else:
+        result = sealer.seal()
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))
     else:

@@ -1,3 +1,58 @@
+## [0.36.0] — The mirror resync: GitHub follows the vault, by your own hand — 2026-10-05
+
+Owner ask (session): "we use github to backup our links … due to bugs
+occured, I deleted everything on the obsidian website vault, but github
+still shows those links that were wrongly presented. how to fix this
+issue? I can think of a button in settings, that resyncs vault with
+github, so github repo will follow and sync with obsidian vault by
+clicking it, it must show a warning modal as well." Desktop-only
+release — the Worker stays at 0.28.0. Suite grows **928 → 945**
+(tests/test_resyncfix.py joins: 17 cases), worker 40/40, offline
+golden 30/30 + 0 invalid, 82/82 compiles, GUI smoke 98/98.
+
+**1. The button.** Settings → Backup → VaultSeal now has **Resync
+Mirror** beside Seal Now. One click opens the warning modal the owner
+asked for — exactly what will happen, in plain words: files on GitHub
+that are no longer in a vault (the wrongly-created notes you deleted)
+will be **DELETED from the mirror repo**; everything currently in the
+vaults will be committed and pushed; **history is never rewritten**
+(the resync lands as one new commit on top, nothing is force-pushed);
+it cannot be undone from the app. Confirm → a background worker runs
+the resync for **both** vaults (the GitHub vault + the Websites vault
+when its pipeline is on), each into its own mirror repo, with live
+progress in the log panel and a per-vault result box at the end.
+
+**2. The reconciliation commit.** The core (VaultSeal.resync) makes
+the mirror's file tree identical to the vault WITHOUT touching
+history. When the mirror is ahead or unrelated (the deleted-everything
+shape: a fresh local repo vs a populated mirror — exactly where the
+old seal's union-merge would resurrect every deleted file), the resync
+builds one commit whose TREE is the vault exactly and whose parents
+are the local tip (when one exists) + the mirror tip:
+`write-tree → commit-tree → update-ref → push`. No merge machinery →
+no conflicts, no resurrection; the push is a fast-forward by
+construction. When the mirror is already inside local history, the
+ordinary commit + push carries the deletions; a mirror that moved
+mid-flight gets one re-reconcile retry, and a resync that still cannot
+land goes to the seal's rescue branch — **main is never force-pushed**
+(the same law the seal has followed since v0.21.0).
+
+**3. The delta is reported.** The result line says what the mirror
+gained and lost — "resync: mirror follows the vault — 2 file(s)
+deleted, 0 added/updated (abc1234)" — with rename detection off so a
+deleted-plus-added pair counts as both a deletion and an addition (git
+would otherwise call it one "rename" and understate the change). The
+CLI twin: `python vaultseal.py --vault … --resync`.
+
+Gate: 945/945 Python (61s), worker 40/40, offline golden 30/30 +
+0 invalid, 82/82 compiles, GUI smoke 98/98, plus hermetic probes
+against REAL local bare mirrors (the owner's exact report: wrongly-
+created notes deleted in Obsidian leave the mirror; the fresh-vault
+shape reconciles with no resurrection; the mirror's old tip stays an
+ancestor; idempotence; the empty mirror; guards) and an offscreen GUI
+probe (the button, the modal text, decline cancels, accept runs the
+worker and re-enables the button).
+
 ## [0.35.0] — The law's second reading: only real websites (and GitHub) are ever collected — 2026-10-05
 
 Owner ask (session): five curation reports, one rule. "omit all

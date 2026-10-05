@@ -179,6 +179,20 @@ class BackupSealMixin:
         self._style_btn(self.vaultseal_now_btn, 'secondary')
         self.vaultseal_now_btn.clicked.connect(self._vaultseal_now)
         seal_btn_row.addWidget(self.vaultseal_now_btn)
+
+        # v0.36.0 — the owner's recovery tool: "github repo will follow and
+        # sync with obsidian vault by clicking it" (deletions included —
+        # the wrongly-created notes deleted in Obsidian leave the mirror
+        # too). Warned modal, never force-pushes.
+        self.vaultseal_resync_btn = QPushButton("Resync Mirror")
+        self._style_btn(self.vaultseal_resync_btn, 'secondary')
+        self.vaultseal_resync_btn.setToolTip(
+            "Make the GitHub backup repos match the vaults EXACTLY — files "
+            "you deleted in Obsidian (e.g. wrongly-created notes) are "
+            "deleted from the mirror too. History is kept; nothing is "
+            "force-pushed. Asks for confirmation first.")
+        self.vaultseal_resync_btn.clicked.connect(self._vaultseal_resync)
+        seal_btn_row.addWidget(self.vaultseal_resync_btn)
         seal_btn_row.addStretch()
 
         self.vaultseal_status_label = QLabel("● —")
@@ -547,6 +561,110 @@ class BackupSealMixin:
             self.vaultseal_now_btn.setEnabled(False)
             self.vaultseal_now_btn.setText("Sealing…")
         self._start_vault_seal()
+
+    def _vaultseal_resync(self):
+        """v0.36.0 — make the GitHub mirrors follow the vaults EXACTLY.
+
+        The owner's recovery tool: "I deleted everything on the obsidian
+        website vault, but github still shows those links that were
+        wrongly presented" — one explicit, WARNED action that commits the
+        vaults' current state (deletions included) and lands it on the
+        mirrors as a new commit (history kept, main never force-pushed).
+        Covers BOTH vaults (the GitHub vault + the Websites vault when its
+        pipeline is on), each into its own mirror repo.
+        """
+        self._backup_save_config()
+        if not (self.config.get('vault_path') or '').strip() \
+                and not (self.config.get('website_vault_path') or '').strip():
+            self._show_custom_message_box(
+                "No Vault", "Set a vault path first (📁 Vault tab).",
+                success=False)
+            return
+        if not (self.config.get('github_token') or '').strip():
+            self._show_custom_message_box(
+                "No GitHub Token",
+                "The resync pushes to GitHub — set the token first "
+                "(Settings → 🔑 Credentials → GitHub Token).",
+                success=False)
+            return
+
+        _pipelines = (self.config.get('pipelines') or {})
+        _web_on = bool(isinstance(_pipelines, dict)
+                       and _pipelines.get('websites', False)
+                       and (self.config.get('website_vault_path') or '').strip())
+        targets = ("the GitHub vault's mirror"
+                   + (" and the Websites vault's mirror" if _web_on else ""))
+        warning = (
+            f"Resync {targets} with the vaults' CURRENT state?\n\n"
+            "• Files on GitHub that are no longer in a vault — e.g. "
+            "wrongly-created notes you deleted in Obsidian — will be "
+            "DELETED from the mirror repo.\n"
+            "• Everything currently in the vaults will be committed and "
+            "pushed.\n"
+            "• History is never rewritten: the resync lands as one new "
+            "commit on top (nothing is force-pushed; the old files stay "
+            "reachable in the git history).\n\n"
+            "This cannot be undone from the app. Continue?")
+        if not self._show_custom_question("Resync Mirrors with GitHub?",
+                                          warning):
+            self.log_message("⏭️ Mirror resync cancelled.", "info")
+            return
+
+        if hasattr(self, 'vaultseal_resync_btn'):
+            self.vaultseal_resync_btn.setEnabled(False)
+            self.vaultseal_resync_btn.setText("Resyncing…")
+
+        class ResyncWorker(QThread):
+            log_line = pyqtSignal(str, str)
+            done = pyqtSignal(bool, str)
+
+            def __init__(self, config):
+                super().__init__()
+                self.config = config
+
+            def run(self):
+                try:
+                    results = _vaultseal.resync_from_config(
+                        self.config,
+                        log=lambda m, l='info': self.log_line.emit(m, l))
+                    lines = []
+                    ok = True
+                    for label, key in (("GitHub vault", "github"),
+                                       ("Websites vault", "websites")):
+                        r = results.get(key)
+                        if r is None:
+                            continue
+                        if r.skipped_reason:
+                            lines.append(f"{label}: skipped — "
+                                         f"{r.skipped_reason}")
+                        elif r.ok:
+                            lines.append(f"{label}: {r.describe()}")
+                        else:
+                            ok = False
+                            lines.append(f"{label}: {r.describe()}")
+                    self.done.emit(ok, "\n".join(lines))
+                except Exception as e:  # resync never raises — belt & braces
+                    self.done.emit(False, str(e))
+
+        self.log_message(
+            "🔄 VaultSeal resync: making the GitHub mirrors follow the "
+            "vaults (deletions included)…", "info")
+        self._vaultseal_resync_worker = ResyncWorker(self.config)
+        self._vaultseal_resync_worker.log_line.connect(self.log_message)
+        self._vaultseal_resync_worker.done.connect(self._vaultseal_resync_result)
+        self._vaultseal_resync_worker.start()
+
+    def _vaultseal_resync_result(self, ok, message):
+        if hasattr(self, 'vaultseal_resync_btn'):
+            self.vaultseal_resync_btn.setEnabled(True)
+            self.vaultseal_resync_btn.setText("🔄 Resync Mirror")
+        icon = "✅" if ok else "⚠️"
+        level = "success" if ok else "warning"
+        self.log_message(f"{icon} VaultSeal resync: {message}", level)
+        self._vaultseal_refresh_status()
+        self._show_custom_message_box(
+            "Mirror Resync " + ("Complete" if ok else "Finished with warnings"),
+            message, success=ok)
 
     def _vaultseal_refresh_status(self):
         """Cheap status line — config only, no git subprocesses."""
