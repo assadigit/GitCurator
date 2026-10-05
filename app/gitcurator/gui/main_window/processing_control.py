@@ -439,8 +439,20 @@ class ProcessingControlMixin:
                         self.log_message("✅ All links verified — marking bot messages as read...", "info")
                         self._mark_bot_messages_read()
                     else:
-                        # Show which links are causing the failure
-                        pending_links = [l for l in worker_lt.manifest["links"] if l["status"] in ("failed", "processing", "pending")]
+                        # Show which links are causing the failure.
+                        # v0.38.0 — the listing uses the SAME ground truth
+                        # as get_all_clear (vault-present rows are done,
+                        # not unfinished), so the count in this log line
+                        # can never contradict the verdict above it.
+                        try:
+                            _has = worker_lt.vault_has
+                        except Exception:
+                            _has = None
+                        pending_links = [
+                            l for l in worker_lt.manifest["links"]
+                            if l["status"] in ("failed", "processing", "pending")
+                            and not (_has and _has(l["url"]))
+                        ]
                         self.log_message(
                             f"⚠️ {len(pending_links)} link(s) not verified — bot messages NOT marked as read",
                             "warning"

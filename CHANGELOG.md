@@ -1,3 +1,76 @@
+## [0.38.0] — The false "620 links need retry": the vault is the truth — 2026-10-05
+
+Owner ask (session): "Fix this issue — despite those 620 projects
+being correctly stored in vault, the app shows a false positive of
+needing retry" (screenshot: the amber banner reading "620 links from
+the previous batch need retry" with a "Retry 620" button, over a
+"PROCESSED 3 / 3 · Last sync: yesterday 17:22 · 3 saved" card).
+Desktop-only release — the Worker stays at 0.29.0. Suite grows
+**955 → 976** (21 cases in the new tests/test_reconfix.py), offline
+golden 30/30 + 0 invalid, 82/82 compiles, worker 48/48, GUI smoke
+98/98.
+
+**The bug.** LinkTracker's reconciliation trusted the MANIFEST alone:
+every row left `pending` / `processing` / `failed` by the previous
+batch was declared a retry, and so was every `processed` row whose
+recorded note path no longer resolved. But the manifest is a ledger,
+not the truth — the bot queue re-serves the ENTIRE history on every
+sync ("Found 621 GitHub URLs" from 1,446 messages), so a batch
+interrupted early (Stop, app close, crash, rate limit) leaves
+hundreds of intake rows `pending` that are, in fact, already stored
+in the vault from earlier batches. Next launch: the banner cried
+"620 links need retry" while all 620 projects sat safely in the
+vault — the owner's exact report.
+
+**The fix — the vault is the ground truth.** Reconciliation now
+heals against the same `VaultIndex` the dedupe layer treats as
+authoritative (notes keyed by their `source:` URL):
+
+- `get_reconciliation_urls` — a pending/processing/failed row whose
+  note IS in the vault is healed to `skipped ("already in vault
+  (reconciled)")` with its real note path, persisted to the manifest
+  on disk, and NEVER retried; a `processed` row with a stale path
+  (the owner moved the note inside the vault) is re-pointed at the
+  note's new home. Only links absent from both the manifest's good
+  graces and the vault are returned for retry — so "Retry N" now
+  means N genuinely-missing links. The startup log says so: "✓ 620
+  links from the previous batch already stored in the vault — no
+  retry needed."
+- `verify()` — the same healing for the dashboard report: vault-
+  present pending rows count as skipped (accounting still
+  reconciles), stale note paths re-point instead of failing; a note
+  truly gone from both the recorded path and the vault still fails
+  (the old guarantee).
+- `get_all_clear` — the bot-queue mark-read gate: failed /
+  processing / pending GitHub rows whose notes are in the vault no
+  longer block with a false "not verified" verdict; genuinely absent
+  ones still do, and the finished-batch log lists only the genuinely
+  unfinished (its count can no longer contradict the verdict above
+  it). The worker SHARES its live vault index with the batch's
+  tracker (new `set_vault_index`) — no second vault scan per batch.
+
+**The API burn behind it.** The worker's dedupe comment always said
+"check the vault index FIRST" — but the code called `get_repo()`
+BEFORE the vault check, so every already-stored link still cost a
+live GitHub API call. A 621-URL queue with ~618 notes already in the
+vault burned ~618 `get_repo` calls per sync: the rate limit died,
+the batch mass-failed or was stopped, and the leftover `pending` rows
+surfaced as the false banner — the loop fed itself. The vault-index
+skip now runs BEFORE any GitHub API call (the SQLite-cache dedupe
+still needs the API's repo id, so it stays put): a stored link costs
+no API, no AI, no retry — one log line and a skip.
+
+**Gate.** 82/82 compiles · 976/976 tests (27 modules) · offline
+golden 30/30 + 0 invalid · worker 48/48 (node --test) · GUI smoke
+98/98 · CLI --import-file --dry-run clean · offscreen probe
+(probe_recon_v038.py — the owner's exact scenario re-driven through
+the real MainWindow startup: 620 stored + 620 pending rows → no
+banner, the healed log line, the manifest healed on disk; 3
+genuinely-missing links → "3 links … need retry" + "Retry 3"; the
+count falls live as notes are stored; a worker batch over a
+vault-present URL makes ZERO get_repo calls while a genuinely-new
+URL still reaches the API).
+
 ## [0.37.0] — One line per check, a bar that moves, fifty links in one paste — 2026-10-05
 
 Owner ask (session): "For test connection log: make these items

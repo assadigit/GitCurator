@@ -56,6 +56,47 @@ class LinkTracker:
             "total_links": 0,
             "links": []
         }
+        # v0.38.0 — the reconciliation false-positive fix: the tracker can
+        # now consult the VAULT ITSELF (the same VaultIndex ground truth
+        # the dedupe layer uses) before declaring a link unfinished.
+        # ``_injected_index`` is the index a running worker shares (no
+        # second vault scan); ``_gt_index`` caches a lazily-built one for
+        # standalone tracker instances (startup read, banner refresh).
+        self._injected_index = None
+        self._gt_index = None
+        # How many links the LAST get_reconciliation_urls() pass healed
+        # against the vault (read by the startup logger to explain the
+        # banner's truth to the owner).
+        self.reconciled_vault_hits = 0
+
+    def set_vault_index(self, index):
+        """v0.38.0 — share an ALREADY-BUILT VaultIndex (the worker builds
+        one at batch start and keeps it incrementally updated; a second
+        full vault scan per finished batch would be pure waste)."""
+        self._injected_index = index
+
+    def _ground_truth(self):
+        """v0.38.0 — the vault ground truth for reconciliation decisions:
+        a VaultIndex keyed by normalized source URL, or None when the
+        vault cannot be scanned. Injected index first, then a lazily-
+        built one cached for the instance's lifetime. Never raises — a
+        failed scan just falls back to the pure-manifest behavior."""
+        if self._injected_index is not None:
+            return self._injected_index
+        if self._gt_index is not None:
+            return self._gt_index
+        if not (self.vault_path and os.path.isdir(self.vault_path)):
+            return None
+        try:
+            # Deferred import — vault_index pulls the GUI icon kit; the
+            # CLI paths that import this module must not pay for it.
+            from gitcurator.gui.vault_index import VaultIndex
+            idx = VaultIndex(self.vault_path)
+            idx.rebuild()
+            self._gt_index = idx
+            return idx
+        except Exception:
+            return None
 
     def set_source(self, source: str):
         """Set the source (bot/saved/rss/import)."""
@@ -246,11 +287,24 @@ class LinkTracker:
                             report["failed_links"].append(link)
                             report["verification_passed"] = False
                     else:
-                        link["status"] = "failed"
-                        link["error"] = "note file missing"
-                        report["github_failed"] += 1
-                        report["failed_links"].append(link)
-                        report["verification_passed"] = False
+                        # v0.38.0 — a stale note_path is not automatically a
+                        # failure: the note may have MOVED inside the vault
+                        # (the owner's own reorganization). The ground truth
+                        # is keyed by source URL, not by path — if the note
+                        # is still in the vault, re-point the row at its new
+                        # home and count it processed. Only a note that is
+                        # gone from BOTH the recorded path and the vault is
+                        # a real failure.
+                        _new_path = self._vault_path_for(link["url"])
+                        if _new_path:
+                            link["note_path"] = _new_path
+                            report["github_processed"] += 1
+                        else:
+                            link["status"] = "failed"
+                            link["error"] = "note file missing"
+                            report["github_failed"] += 1
+                            report["failed_links"].append(link)
+                            report["verification_passed"] = False
                 elif link["status"] == "skipped":
                     report["github_skipped"] += 1
                 elif link["status"] == "failed":
@@ -262,8 +316,21 @@ class LinkTracker:
                     # REAL unfinished work (get_all_clear blocks the bot-queue
                     # mark-read for exactly this reason) — the report must
                     # say so instead of being silently absent from the sum.
-                    report["github_pending"] += 1
-                    report["verification_passed"] = False
+                    # v0.38.0 — BUT the manifest is a ledger, not the truth:
+                    # if the note is already IN THE VAULT (an interrupted
+                    # batch's intake rows that a later batch stored, or the
+                    # owner's own move), the link is done — heal the row to
+                    # skipped and account it, instead of crying pending.
+                    if self._vault_has(link["url"]):
+                        link["status"] = "skipped"
+                        link["error"] = "already in vault (reconciled)"
+                        link["note_path"] = self._vault_path_for(link["url"]) \
+                            or link.get("note_path")
+                        link["processed_at"] = datetime.now().isoformat()
+                        report["github_skipped"] += 1
+                    else:
+                        report["github_pending"] += 1
+                        report["verification_passed"] = False
             elif link["type"] == "non-github":
                 if link["status"] == "recorded":
                     # v25 pre-flight: non-GitHub links are now spread across
@@ -379,25 +446,74 @@ class LinkTracker:
         """Phase 4: Get all links that need retry."""
         return [link for link in self.manifest["links"] if link["status"] in ("failed", "processing")]
 
+    def _vault_has(self, url: str) -> bool:
+        """v0.38.0 — is this URL's note already in the vault? (Ground-truth
+        helper; False whenever the vault cannot be scanned — a missing
+        index must degrade to the old manifest-only behavior.)"""
+        idx = self._ground_truth()
+        if idx is None:
+            return False
+        try:
+            return bool(idx.has_url(url))
+        except Exception:
+            return False
+
+    def vault_has(self, url: str) -> bool:
+        """v0.38.0 — public face of _vault_has: the finished-batch logger
+        lists only GENUINELY unfinished links (the same truth
+        get_all_clear uses, so the log line and the verdict can never
+        disagree)."""
+        return self._vault_has(url)
+
+    def _vault_path_for(self, url: str):
+        """v0.38.0 — the note path the vault currently holds for this URL,
+        or None. Used to re-point rows whose recorded note_path went
+        stale (the owner moved notes inside the vault)."""
+        idx = self._ground_truth()
+        if idx is None:
+            return None
+        try:
+            return idx.get_path(url)
+        except Exception:
+            return None
+
     def get_all_clear(self) -> bool:
         """Phase 5: Check if ALL links are verified (no failures).
         v29.4 fix: 'skipped' and 'recorded' are both OK. 'pending' is only
         a failure for GitHub links (they should have been processed or skipped).
         Non-GitHub 'pending' links are duplicates that were already recorded
-        in a previous batch — they're not real failures."""
+        in a previous batch — they're not real failures.
+        v0.38.0 — a pending GitHub link whose note IS in the vault is NOT
+        unfinished work: an interrupted batch left the row pending and a
+        later batch (or the owner) stored the note anyway. The vault is
+        the ground truth — such a link no longer blocks the bot-queue
+        mark-read with a false 'not verified' verdict."""
         for link in self.manifest["links"]:
             if link["status"] == "failed":
-                return False
+                # v0.38.0 — even a FAILED row is done if the note is in the
+                # vault (the failure predates a successful later attempt).
+                if not self._vault_has(link["url"]):
+                    return False
             if link["status"] == "processing":
-                return False
-            # GitHub "pending" = real failure (should have been processed or skipped)
+                if not self._vault_has(link["url"]):
+                    return False
+            # GitHub "pending" = real failure (should have been processed
+            # or skipped) — unless the vault already holds the note.
             if link["status"] == "pending" and link.get("type") == "github":
-                return False
+                if not self._vault_has(link["url"]):
+                    return False
             # Non-GitHub "pending" = duplicate, already recorded elsewhere — OK
         return True
 
     def _save(self):
         """Atomic save — write to temp file then rename."""
+        self._save_manifest_dict(self.manifest)
+
+    def _save_manifest_dict(self, manifest: dict):
+        """v0.38.0 — the atomic writer factored out of _save so
+        reconciliation can persist a HEALED previous manifest without
+        touching self.manifest (the next batch's intake must never
+        inherit healed rows through a shared in-memory object)."""
         # v0.09.5 — Phase 0 (dry-run): the manifest is recorded, not
         # written, while a --dry-run batch is active.
         if _dryrun.is_enabled():
@@ -409,7 +525,7 @@ class LinkTracker:
             tmp_fd, tmp_path = tempfile.mkstemp(dir=self.vault_path, suffix='.tmp')
             try:
                 with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
-                    json.dump(self.manifest, f, indent=2, default=str)
+                    json.dump(manifest, f, indent=2, default=str)
                 os.replace(tmp_path, self.manifest_path)
             except Exception:
                 try:
@@ -431,17 +547,66 @@ class LinkTracker:
         return None
 
     def get_reconciliation_urls(self) -> list:
-        """Phase 4: Get URLs from previous manifest that need retry."""
+        """Phase 4: Get URLs from previous manifest that need retry.
+
+        v0.38.0 — THE FALSE-POSITIVE FIX. The old logic trusted the
+        manifest alone: every pending/processing/failed row was declared
+        a retry, and every processed row whose recorded note_path no
+        longer resolved was declared a retry too. But the manifest is a
+        LEDGER, not the truth — the bot queue re-serves the entire
+        history on every sync, so a batch interrupted early (Stop, app
+        close, crash) leaves hundreds of rows "pending" that are, in
+        fact, ALREADY STORED in the vault from earlier batches. The
+        owner saw "620 links from the previous batch need retry" while
+        all 620 projects sat safely in the vault.
+
+        The vault itself is the ground truth (the same VaultIndex the
+        dedupe layer treats as authoritative). Reconciliation now heals
+        against it:
+          - pending/processing/failed rows whose note IS in the vault →
+            healed to skipped ("already in vault (reconciled)"), never
+            retried, and the healed manifest is written back so the
+            banner, the startup log and get_all_clear all agree;
+          - processed rows with a stale note_path (the owner moved the
+            note inside the vault) → re-pointed at the note's new path;
+          - only links absent from BOTH the manifest's good graces and
+            the vault are returned for retry.
+        ``self.reconciled_vault_hits`` carries the healed count for the
+        startup log line. A vault that cannot be scanned degrades to
+        the old manifest-only behavior."""
+        self.reconciled_vault_hits = 0
         prev = self.load_previous_manifest()
         if not prev:
             return []
         failed = []
+        healed = False
         for link in prev.get("links", []):
             if link["status"] in ("failed", "processing", "pending"):
-                failed.append(link["url"])
+                if self._vault_has(link["url"]):
+                    # Stored — the ledger just never got its terminal
+                    # update. Heal the row; it is nobody's retry.
+                    link["status"] = "skipped"
+                    link["error"] = "already in vault (reconciled)"
+                    link["note_path"] = self._vault_path_for(link["url"]) \
+                        or link.get("note_path")
+                    link["processed_at"] = datetime.now().isoformat()
+                    healed = True
+                    self.reconciled_vault_hits += 1
+                else:
+                    failed.append(link["url"])
             elif link["status"] == "processed":
-                # Check if note still exists
+                # Check if note still exists — at the recorded path, or
+                # anywhere in the vault (a move is not a loss).
                 note_path = link.get("note_path")
                 if not note_path or not os.path.isfile(note_path):
-                    failed.append(link["url"])
+                    new_path = self._vault_path_for(link["url"])
+                    if new_path:
+                        link["note_path"] = new_path
+                        healed = True
+                    else:
+                        failed.append(link["url"])
+        if healed:
+            # Persist the HEALED previous manifest. self.manifest stays
+            # untouched — it belongs to the next batch's intake.
+            self._save_manifest_dict(prev)
         return failed

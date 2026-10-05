@@ -163,6 +163,18 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
             if vault_path and os.path.isdir(vault_path):
                 tracker = LinkTracker(vault_path)
                 failed = tracker.get_reconciliation_urls()
+                # v0.38.0 — reconciliation heals against the vault: rows
+                # left pending/failed by an interrupted batch whose notes
+                # are ALREADY stored are closed out right here (and the
+                # manifest is updated on disk). Say so — the owner should
+                # never wonder why the banner's count shrank.
+                _healed = getattr(tracker, 'reconciled_vault_hits', 0)
+                if _healed:
+                    self.log_message(
+                        f"✓ {_healed} link{'s' if _healed != 1 else ''} from the previous batch "
+                        f"already stored in the vault — no retry needed.",
+                        "success"
+                    )
                 if failed:
                     self.log_message(
                         f"⚠️ {len(failed)} links from previous batch need retry!",

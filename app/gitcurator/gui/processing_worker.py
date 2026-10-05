@@ -670,6 +670,16 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
             self._vault_index = VaultIndex(vault_path)
             # Fix: rebuild() calls log_signal.emit(), so pass the signal directly
             self._vault_index.rebuild(log_signal=self.log_message)
+            # v0.38.0 — share the index with this batch's LinkTracker: its
+            # ground-truth checks (get_all_clear at batch end, verify) then
+            # reuse the live index instead of re-scanning the vault.
+            # (getattr — the headless test harness builds bare workers.)
+            _lt = getattr(self, 'link_tracker', None)
+            if _lt is not None:
+                try:
+                    _lt.set_vault_index(self._vault_index)
+                except Exception:
+                    pass
 
         # v0.20.0 — missing-repo backfill: repos that 404'd in earlier
         # versions (strikes below the threshold) get their _missing note
@@ -882,6 +892,36 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                     continue
                 owner, repo_name = parts[0], parts[1]
 
+                # v0.38.0 — VAULT DEDUP BEFORE ANY GITHUB API CALL. The
+                # dedup section below always SAID "check the vault index
+                # FIRST — deterministic, no AI" but ran get_repo() BEFORE
+                # it, so every already-stored link still cost a live API
+                # call. The bot queue re-serves the entire history on
+                # every sync, so a 621-URL queue with ~618 notes already
+                # in the vault burned ~618 get_repo calls per sync — the
+                # rate limit died, the batch mass-failed or was stopped,
+                # and the manifest's leftover "pending" rows surfaced as
+                # the false "620 links need retry" banner on the next
+                # launch. The vault is the ground truth: note present →
+                # skip, no API, no AI. (The SQLite-cache dedup below
+                # still needs repo_id from the API, so it stays put.)
+                if self._vault_index and self._vault_index.has_url(url):
+                    _note_path = self._vault_index.get_path(url)
+                    self.log_message.emit(
+                        f"⏭️ Already in vault: {owner}/{repo_name} → {os.path.basename(_note_path)}",
+                        "info"
+                    )
+                    # v23 — Phase 2: mark as skipped (dedup) — note already
+                    # exists in the vault from a previous batch.
+                    if self.link_tracker:
+                        try:
+                            self.link_tracker.mark_skipped(url, "already in vault")
+                        except Exception:
+                            pass
+                    # v26 — Fix 1: emit progress on skip so the bar repaints.
+                    self.progress_updated.emit(self._current_position, self.total)
+                    continue
+
                 try:
                     repo = g.get_repo(f"{owner}/{repo_name}")
                     repo_id = repo.id
@@ -1047,28 +1087,14 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                 # GitHub API call).
 
                 # === DEDUP CHECK (vault index is ground truth) ===
-                # 1. Check the vault index FIRST — if the note exists in the
-                #    vault, skip (deterministic, no AI).
+                # v0.38.0 — layer 1 (the vault index) moved UP, above the
+                # get_repo() call — see the v0.38.0 block before the API
+                # call. What remains here is layer 2, the SQLite cache:
+                # 1. (moved up) Vault index — if the note exists in the
+                #    vault, skip (deterministic, no AI, no API call).
                 # 2. If not in vault but in SQLite cache, the note was deleted
                 #    → re-process (self-healing).
                 # 3. If not in vault and not in cache → process as new.
-                if self._vault_index and self._vault_index.has_url(url):
-                    note_path = self._vault_index.get_path(url)
-                    self.log_message.emit(
-                        f"⏭️ Already in vault: {owner}/{repo_name} → {os.path.basename(note_path)}",
-                        "info"
-                    )
-                    # v23 — Phase 2: mark as skipped (dedup) — note already
-                    # exists in the vault from a previous batch.
-                    if self.link_tracker:
-                        try:
-                            self.link_tracker.mark_skipped(url, "already in vault")
-                        except Exception:
-                            pass
-                    # v26 — Fix 1: emit progress on skip so the bar repaints.
-                    self.progress_updated.emit(self._current_position, self.total)
-                    continue
-
                 if cache.is_duplicate(repo_id):
                     # Check if the note file still exists in the vault.
                     # If it was deleted, remove the stale cache entry and
