@@ -851,6 +851,31 @@ class WebsitePipeline:
         self.fetch_max_bytes = int(
             self.config.get('web_fetch_max_bytes', FETCH_MAX_BYTES)
             or FETCH_MAX_BYTES)
+        # v0.45.0 — THE THIRD DOOR: when both stdlib doors are walled
+        # with a refusal-family answer (the Cloudflare-challenge class),
+        # curl_cffi re-asks the URL with Chrome's own TLS/HTTP2
+        # handshake — the one presentation urllib cannot make. ON by
+        # default when the library is importable; config
+        # "web_impersonate_fallback": false opts out. The flag rides
+        # every fetch call (the injected test fetchers take **kwargs,
+        # so they never break).
+        self.impersonate_fallback = self.config.get(
+            'web_impersonate_fallback') is not False
+        if fetch_fn is None and self.impersonate_fallback:
+            # Production only (the golden run and injected tests stay
+            # hermetic). One honest line per batch: the door's state.
+            if _web_fetch.curl_cffi_available():
+                self.log(
+                    "🤝 v0.45.0 third door armed: a refusal-family wall on "
+                    "every door is re-asked with Chrome's own TLS "
+                    "handshake (curl_cffi) — the "
+                    "'bot defense (Cloudflare: challenge)' class", "info")
+            else:
+                self.log(
+                    "ℹ️ v0.45.0 third door not installed (pip install "
+                    "curl_cffi — the browser-TLS handshake for "
+                    "Cloudflare-class challenges); stdlib doors only",
+                    "info")
         self.rate_limiter = rate_limiter or _web_fetch.DomainRateLimiter(
             float(self.config.get('web_domain_delay_s', DOMAIN_DELAY_S)
                   or DOMAIN_DELAY_S))
@@ -1288,7 +1313,8 @@ class WebsitePipeline:
         fetch = self.fetch_fn(
             url, timeout_s=self.fetch_timeout_s,
             max_bytes=self.fetch_max_bytes,
-            rate_limiter=self.rate_limiter)
+            rate_limiter=self.rate_limiter,
+            impersonate_fallback=self.impersonate_fallback)
         result['fetch_status'] = fetch.status
 
         if not fetch.ok:

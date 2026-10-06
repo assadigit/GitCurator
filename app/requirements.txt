@@ -23,4 +23,11 @@ requests>=2.31.0
 # dependency — listed explicitly because web_fetch imports it directly)
 PySocks>=1.7.1
 
+
+# Browser-TLS handshake for the third door (v0.45.0): curl-impersonate
+# presents Chrome's own TLS/HTTP2 fingerprint — the one answer to the
+# "bot defense (Cloudflare: challenge)" wall that urllib cannot make.
+# OPTIONAL at runtime (web_fetch degrades to the install hint when it
+# is missing); listed so the default install has the door armed.
+curl_cffi>=0.7
 # SQLite is built-in (no package needed)

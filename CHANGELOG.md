@@ -1,3 +1,83 @@
+## [0.45.0] — The third door: the handshake itself — 2026-10-08
+
+Owner ask (session): "Also find a workaround for this specific block:
+Fetch failed: proxy: HTTP 403 | direct: HTTP 403 — bot defense
+(Cloudflare: challenge)." Desktop release v0.45.0, Worker unchanged
+at **0.30.0** (the fetcher is the desktop's). Suite grows **1102 →
+1128** (26 cases in the new tests/test_thirddoor.py — the unit law is
+pure fake-session, zero sockets), 83 compiles (unchanged), offline
+golden 30/30.
+
+**The situation.** v0.41.0 made the request browser-grade and v0.43.0
+made it ask both routes — but the quoted line is the THIRD class of
+wall: the refusal that survives BOTH doors. When Cloudflare answers
+"challenge" to a polite, header-perfect request on every route, the
+wall is not aimed at the UA and not at the IP: it is aimed at the
+TLS/HTTP2 **fingerprint** — Python's urllib handshake is scored as
+automated (JA3/JA4) before a single header is read. No header set,
+no route alternation, no retry talks that down. The v0.43.0 record
+named the escalation lever and held it for the owner's explicit ask;
+this is that ask, so the lever is pulled.
+
+**The workaround — Chrome's own handshake.** When every stdlib door is
+walled with a refusal-family answer (403/405/429/451 — the requester-
+aimed family), the URL is re-asked through **curl_cffi**
+(curl-impersonate): the real Chrome TLS/HTTP2 fingerprint AND header
+order, the one presentation urllib cannot make. One attempt per
+ALLOWED route — the primary first (proxy when configured, else
+direct), then the other — through the same politeness; a proxied ask
+rides `socks5h://` so DNS still resolves AT THE PROXY (the v0.19.0
+poisoned-resolver law, kept). A success via the third door is a REAL
+success: status full, the wall it went around named in the reason
+("via impersonated Chrome (curl_cffi) — the stdlib doors were walled:
+proxy: HTTP 403 — bot defense (Cloudflare: challenge) | …") — stored
+properly, never parked in _review. A challenge that survives the
+Chrome handshake (an interactive Turnstile no fetcher solves) gets
+the honest three-leg line plus the verdict that matters:
+"the challenge needs a live browser" — the owner's graveyard decision
+(v0.44.0) is then informed, not guessed.
+
+**The law, kept tight.** The third door fires ONLY on refusal-family
+walls: a 404/401/5xx is the site's truth about the resource (the
+answer stands, no door opens); a timeout is a network truth (no
+fingerprint verdict to answer); loopback never escalates (the v0.15.1
+rule, now covering all three doors). The route list is the CALLER's —
+`direct_fallback=False` confines the third door to the proxy route;
+an opt-out is never widened. `web_impersonate_fallback: false` in
+config.json opts out entirely. curl_cffi is OPTIONAL at runtime: the
+code degrades to the honest reason plus the install hint ("a third
+door exists: pip install curl_cffi") — but it now sits in
+requirements.txt, so the default install has the door armed (CI
+installs it too, exercising the real-library cases). Telegram's law
+is untouched: MTProto always rides the proxy when one is enabled —
+no impersonation on the Telegram side. The offline golden run and
+the injected test fetchers stay hermetic (the door lives inside
+fetch_url's production path only); each batch logs the door's state
+in one honest line.
+
+**Gates.** 26 new cases: the trigger law (the owner's exact line
+opens the door; every refusal status earns it; resource truths and
+connection failures never ask; loopback never escalates; the opt-out
+is honored — 6); the missing library (the install hint, no session
+ever created; the probe cached, never raises — 2); the verdicts (a
+real success with the wall named; the challenge-survives three-leg
+line plus the live-browser verdict; two routes two asks,
+proxy-first-socks5h-then-direct; a plain 403 without markers still
+clean — 4); the proxy URL law (socks5→socks5h, socks4, http, auth,
+bogus/None — 2); fetch_url's wiring end-to-end on a real
+non-loopback wall (single-door walled success; the direct opt-out
+confined to the proxy route; both doors walled → both routes — 3);
+source contracts (VERSION/CHANGELOG/ci/AGENTS/requirements/pipeline
+default/bothdoors pin — 7); and the REAL library (skipped where
+absent): the impersonated fetch against a live server returns a
+properly-shaped FetchResult, and the full path really dials it
+against a Cloudflare-marked wall — the honest three-leg line comes
+back naming Cloudflare (2, +1 probe-real case). Local: 26/26,
+reviewretry 15/15, decommission 26/26, bothdoors 21/21, webproxy
+42 pass + 6 environmental (PyQt6-less sandbox, identical to the
+clean tree), 99 modules compile, golden 30/30. CI is the
+authoritative full gate.
+
 ## [0.44.0] — The graveyard: dead links get a burial, not a haunting — 2026-10-08
 
 Owner ask (session): "The system must have a procedure for

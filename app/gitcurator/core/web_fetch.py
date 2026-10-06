@@ -130,6 +130,58 @@ MAX_REDIRECTS = 5
 # fallback.
 ROUTE_REFUSAL_STATUSES = (403, 405, 429, 451)
 
+# v0.45.0 — THE THIRD DOOR: the handshake itself. When BOTH routes are
+# walled with a refusal-family answer (the owner's exact line:
+# "Fetch failed: proxy: HTTP 403 | direct: HTTP 403 — bot defense
+# (Cloudflare: challenge)"), the wall is aimed at the REQUESTER — and
+# the one thing urllib can never present is a browser's own TLS/HTTP2
+# fingerprint (Cloudflare's bot management scores Python's JA3 as
+# automated before a single header is read). curl_cffi (optional, the
+# escalation lever the v0.43.0 record named) wraps curl-impersonate:
+# the Chrome handshake itself, one attempt per route, same politeness.
+# Missing library → the honest reason gains the install hint; nothing
+# breaks. Opt out with config "web_impersonate_fallback": false.
+IMPERSONATE_TARGET = "chrome"
+_IMP_INSTALL_HINT = (" — a third door exists: pip install curl_cffi "
+                     "(the browser-TLS handshake)")
+_CHALLENGE_WON_HINT = (" — the challenge needs a live browser; the "
+                       "fetcher cannot solve it")
+
+# The curl_cffi import probe — once per process, never raises. Tests
+# flip _CURL_CFFI_STATE directly (the house patch-target pattern).
+_CURL_CFFI_STATE = {'tried': False, 'ok': False}
+
+
+def curl_cffi_available() -> bool:
+    """v0.45.0 — True when curl_cffi (the optional browser-TLS library)
+    is importable in this process. Probed once; never raises — a missing
+    optional dependency is a degraded third door, never a dead fetcher."""
+    if not _CURL_CFFI_STATE['tried']:
+        try:
+            from curl_cffi import requests as _creq  # noqa: F401
+            _CURL_CFFI_STATE['ok'] = True
+        except Exception:
+            _CURL_CFFI_STATE['ok'] = False
+        _CURL_CFFI_STATE['tried'] = True
+    return _CURL_CFFI_STATE['ok']
+
+
+# One cached impersonation session (a curl handle + cookie jar — a
+# clearance cookie earned on one domain keeps working on the next visit
+# to that domain, exactly like a browser). The lock serializes the
+# rare third-door attempts; the fetcher never shares it across threads
+# unguarded.
+_IMP_SESSION = None
+_IMP_SESSION_LOCK = threading.Lock()
+
+
+def _new_impersonation_session():
+    """Create one curl_cffi session impersonating the target browser.
+    Module-level so tests can swap the factory (the fake-session
+    pattern — same law as the injected fetch_fn)."""
+    from curl_cffi import requests as creq
+    return creq.Session(impersonate=IMPERSONATE_TARGET)
+
 # Content types that are HTML-ish enough to parse.
 _HTML_TYPES = ('text/html', 'application/xhtml', 'text/plain')
 
@@ -564,13 +616,175 @@ def _looks_like_pdf(content_type: str, url: str, body: bytes) -> bool:
     return body[:5] == b'%PDF-'
 
 
+def _proxy_url_for_curl(proxy: Optional[Dict]) -> Optional[str]:
+    """The config proxy dict as a libcurl proxy URL. SOCKS becomes
+    ``socks5h://`` — the SAME DNS-at-the-proxy law PySocks' rdns=True
+    enforced since v0.19.0 (the local resolver is poisoned for the
+    blocked-web domains; asking it would defeat the proxy)."""
+    if not proxy:
+        return None
+    scheme = {'socks5': 'socks5h', 'socks4': 'socks4', 'http': 'http'}.get(
+        str(proxy.get('type') or '').strip().lower())
+    if not scheme:
+        return None
+    auth = ''
+    if str(proxy.get('username') or '').strip():
+        from urllib.parse import quote
+        auth = (quote(str(proxy.get('username')), safe='') + ':'
+                + quote(str(proxy.get('password') or ''), safe='') + '@')
+    return (f"{scheme}://{auth}{proxy.get('host')}:{proxy.get('port')}")
+
+
+def _impersonated_fetch_once(url: str, timeout_s: float, max_bytes: int,
+                             proxy: Optional[Dict],
+                             started: float) -> FetchResult:
+    """v0.45.0 — one fetch attempt through curl_cffi impersonating
+    Chrome: the browser's own TLS/HTTP2 fingerprint AND header order,
+    the one presentation urllib cannot make. Never raises; the same
+    FetchResult contract as _fetch_once (streamed, size-capped,
+    charset-aware, pdf-aware). The body arrives already decompressed
+    (libcurl decodes gzip/deflate/brotli itself), so the cap bounds the
+    DEcompressed bytes — the same budget law as the stdlib door."""
+    global _IMP_SESSION
+    proxy_url = _proxy_url_for_curl(proxy)
+    try:
+        with _IMP_SESSION_LOCK:
+            if _IMP_SESSION is None:
+                _IMP_SESSION = _new_impersonation_session()
+            session = _IMP_SESSION
+            resp = session.get(
+                url, timeout=float(timeout_s), proxies=None
+                if not proxy_url else
+                {'http': proxy_url, 'https': proxy_url},
+                allow_redirects=True, max_redirects=MAX_REDIRECTS,
+                stream=True)
+    except Exception as e:
+        # curl_cffi raises its own Errors (timeouts, connect failures,
+        # bad TLS) — one honest reason, never an exception out.
+        reason = 'timeout' if 'timeout' in str(e).lower() \
+            else f'connection: {e}'
+        return FetchResult(url, status='failed', reason=reason,
+                           elapsed_s=time.monotonic() - started)
+    try:
+        http_status = int(getattr(resp, 'status_code', 0) or 0) or None
+        headers = getattr(resp, 'headers', None) or {}
+        content_type = str(headers.get('Content-Type') or '').lower()
+        if http_status is not None and http_status >= 400:
+            reason = f'HTTP {http_status}'
+            if http_status in (403, 429):
+                hint = _bot_defense_hint(headers)
+                if hint:
+                    reason = f'HTTP {http_status} — {hint}'
+            return FetchResult(url, status='failed', reason=reason,
+                               http_status=http_status,
+                               elapsed_s=time.monotonic() - started)
+        charset = str(getattr(resp, 'charset_encoding', None) or '') \
+            .strip() or ''
+        if not charset:
+            for part in content_type.split(';'):
+                part = part.strip()
+                if part.startswith('charset='):
+                    charset = part.split('=', 1)[1].strip().strip('"\'')
+        final_url = str(getattr(resp, 'url', None) or url)
+        # Stream with the size cap — same 64 KB chunk law as _fetch_once.
+        chunks = []
+        total = 0
+        truncated = False
+        try:
+            for piece in resp.iter_content():
+                if not piece:
+                    continue
+                total += len(piece)
+                if total > max_bytes:
+                    chunks.append(piece[:max_bytes - (total - len(piece))])
+                    truncated = True
+                    break
+                chunks.append(piece)
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        body = b''.join(chunks)
+    except Exception as e:
+        return FetchResult(url, status='failed',
+                           reason=f'{type(e).__name__}: {e}',
+                           elapsed_s=time.monotonic() - started)
+
+    elapsed = time.monotonic() - started
+    if truncated:
+        return FetchResult(url, final_url, status='partial',
+                           reason=f'size cap ({max_bytes:,} bytes) reached',
+                           http_status=http_status,
+                           content_type=content_type, charset=charset,
+                           body=body, text=_decode_best_effort(body, charset),
+                           elapsed_s=elapsed)
+    if _looks_like_pdf(content_type, url, body):
+        return FetchResult(url, final_url, status='partial', reason='pdf',
+                           http_status=http_status, content_type=content_type,
+                           charset=charset, body=b'', text='',
+                           elapsed_s=elapsed)
+    return FetchResult(url, final_url, status='full', reason='',
+                       http_status=http_status, content_type=content_type,
+                       charset=charset, body=body,
+                       text=_decode_best_effort(body, charset),
+                       elapsed_s=elapsed)
+
+
+def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
+                       routes: list, enabled: bool,
+                       walled: FetchResult,
+                       started: float) -> FetchResult:
+    """v0.45.0 — the third door's own law.
+
+    ``routes`` is the door sequence the CALLER allows (fetch_url
+    computes it: ``[proxy, None]`` when both stdlib doors ran,
+    ``[proxy]`` when the direct opt-out held, ``[None]`` on a no-proxy
+    install) — the third door never widens a route the owner opted out
+    of. Fires ONLY when every stdlib door is walled with a
+    refusal-family answer (403/405/429/451 — the wall aimed at the
+    REQUESTER; the owner's exact "proxy: HTTP 403 | direct: HTTP 403 —
+    bot defense (Cloudflare: challenge)" class). Connection-class
+    failures do NOT fire it (a timeout is a network truth, not a
+    fingerprint verdict); resource truths never reach here; loopback
+    never gets ANY door's escalation. One impersonated attempt per
+    allowed route. Success via the third door is a REAL success with
+    the wall named; a challenge that survives the Chrome handshake
+    gets the three-leg honest line (plus the "needs a live browser"
+    verdict — the owner's graveyard decision is then informed).
+    Missing curl_cffi → the install hint, never an error."""
+    if not enabled or _is_loopback_url(url):
+        return walled
+    if walled.http_status is None \
+            or walled.http_status not in ROUTE_REFUSAL_STATUSES:
+        return walled  # connection-class or resource truth — not ours
+    if not curl_cffi_available():
+        walled.reason = (walled.reason or '') + _IMP_INSTALL_HINT
+        return walled
+    tried = []
+    for route in routes:
+        res = _impersonated_fetch_once(url, timeout_s, max_bytes, route,
+                                       started)
+        if res.ok:
+            res.reason = (f"via impersonated Chrome (curl_cffi) — the "
+                          f"stdlib doors were walled: {walled.reason}")
+            return res
+        tried.append(res.reason)
+    combined = ' / '.join(dict.fromkeys([t for t in tried if t]))
+    walled.reason = (f"{walled.reason} | chrome-impersonated: {combined}")
+    if 'challenge' in combined.lower():
+        walled.reason += _CHALLENGE_WON_HINT
+    return walled
+
+
 def fetch_url(url: str,
               timeout_s: float = DEFAULT_TIMEOUT_S,
               max_bytes: int = DEFAULT_MAX_BYTES,
               rate_limiter: Optional[DomainRateLimiter] = None,
               user_agent: str = USER_AGENT,
               proxy: Optional[Dict] = None,
-              direct_fallback: bool = True) -> FetchResult:
+              direct_fallback: bool = True,
+              impersonate_fallback: bool = True) -> FetchResult:
     """Fetch one URL politely. Never raises — every failure is a
     FetchResult(status='failed', reason=...).
 
@@ -599,7 +813,18 @@ def fetch_url(url: str,
     the resource — no fallback, the response is the truth. A success via
     the second route is a real success (reason names the wall it went
     around); a refusal on BOTH routes reports both reasons in the
-    ``proxy: … | direct: …`` house line."""
+    ``proxy: … | direct: …`` house line.
+
+    v0.45.0 — THE THIRD DOOR: when every stdlib door is walled with a
+    refusal-family answer (the "proxy: HTTP 403 | direct: HTTP 403 —
+    bot defense (Cloudflare: challenge)" class), the wall is aimed at
+    the requester's TLS fingerprint — something urllib can never
+    present. With curl_cffi importable, the URL is re-asked with
+    Chrome's own handshake (one attempt per route, ``socks5h`` DNS at
+    the proxy), and a success there is a REAL success with the wall
+    named. ``impersonate_fallback=False`` (config
+    ``web_impersonate_fallback``) opts out. Missing library → the
+    honest reason gains the install hint."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -627,7 +852,14 @@ def fetch_url(url: str,
         # 5xx broken) — the answer is the truth on any route.
         return first
     if not proxy or not direct_fallback or _is_loopback_url(url):
-        return first
+        # v0.45.0 — the single-door walled case still earns the third
+        # door (the owner's challenge line names both routes, but a
+        # no-proxy install walls on its only route just the same). The
+        # route list honors the direct opt-out: proxy-only when
+        # direct_fallback is off, direct-only when no proxy exists.
+        routes = [proxy] if (proxy and not direct_fallback) else [None]
+        return _maybe_impersonate(url, timeout_s, max_bytes, routes,
+                                  impersonate_fallback, first, started)
 
     # v0.43.0 — the both-doors rule. The primary (proxied) route either
     # never got an answer (connection class, v0.21.0) or was REFUSED
@@ -641,7 +873,10 @@ def fetch_url(url: str,
                          f"{first.reason})")
         return second
     second.reason = (f"proxy: {first.reason} | direct: {second.reason}")
-    return second
+    # v0.45.0 — both stdlib doors walled: ask the Chrome handshake on
+    # the same two routes (one polite attempt each).
+    return _maybe_impersonate(url, timeout_s, max_bytes, [proxy, None],
+                              impersonate_fallback, second, started)
 
 
 def _fetch_once(url: str, timeout_s: float, max_bytes: int,
