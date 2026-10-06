@@ -292,6 +292,11 @@ def scan_review_backlog(vault_path: str,
     classification confidence and friends) are NONE of our business:
     they wait for human eyes, as designed.
 
+    v0.44.0 — the graveyard filter: a URL already marked dead in
+    ``_review/DECOMMISSIONED.md`` is BURIED, not backlogged — the
+    startup notice and the retry driver stop seeing it (the placeholder
+    file itself is swept by the next consume).
+
     Returns ``[{'url': source, 'path': note_path}, ...]`` — sorted by
     filename for a deterministic order; one source may appear more than
     once (legacy ``_v1``/``_v2`` stacking from older apps) — the retry
@@ -305,9 +310,14 @@ def scan_review_backlog(vault_path: str,
         if log:
             log(f"⚠️ Could not list {review_dir}: {e}", "warning")
         return []
+    dead = set()
+    table_rows = scan_decommission_table(vault_path)
+    for u, st in table_rows.items():
+        if _status_is_dead(st):
+            dead.add(normalize_website_url(u))
     items: List[Dict] = []
     for name in names:
-        if not name.lower().endswith('.md'):
+        if not name.lower().endswith('.md') or name == DECOMMISSION_TABLE:
             continue
         path = os.path.join(review_dir, name)
         if not os.path.isfile(path):
@@ -322,8 +332,374 @@ def scan_review_backlog(vault_path: str,
         url = (fm.get('source') or '').strip()
         if not url.lower().startswith(('http://', 'https://')):
             continue
+        if normalize_website_url(url) in dead:
+            continue  # v0.44.0 — buried in the graveyard, not backlogged
         items.append({'url': url, 'path': path})
     return items
+
+
+# ===========================================================================
+# v0.44.0 — the graveyard: dead links get a burial, not a haunting
+# ===========================================================================
+
+#: The decommission ledger lives where the bodies are: one markdown table
+#: per vault at ``<vault>/_review/DECOMMISSIONED.md``. It is the SAME
+#: gesture the owner already uses on the ``_inbox`` platform tables —
+#: set the emoji in the Status column — raised here to a burial rite:
+#: some sites are GONE for good (a real 404, a lost page, an abandoned
+#: domain), and deleting the ``_review`` placeholder alone cannot say
+#: that (the retry-queue row survives it and resurrects the fetch, then
+#: the failure writes a fresh placeholder — the loop the owner closed
+#: by asking for this). The dead-marked row is the explicit, durable
+#: owner decision: never fetched, never retried, never re-registered.
+DECOMMISSION_TABLE = "DECOMMISSIONED.md"
+#: What reads as DEAD in a Status cell — the burial emojis plus the
+#: plain words (substring + case-insensitive, so "🪦 dead — gone" and
+#: "Decommissioned 2026" both count). ✅ / unreviewed / blank never do.
+DEAD_MARKERS = ("🪦", "❌", "☠️", "💀", "decommissioned", "retired", "dead")
+#: What reads as REVIVED — the graveyard's other door: a link buried by
+#: mistake (or a domain that came back) is fetched like new again.
+REVIVE_MARKERS = ("♻️", "revived", "restored", "un-decommissioned")
+
+
+def decommission_table_path(vault_path: str) -> str:
+    """The graveyard file for one vault (``<vault>/_review/DECOMMISSIONED.md``)."""
+    return os.path.join(vault_path or '', REVIEW_FOLDER,
+                        DECOMMISSION_TABLE)
+
+
+def _parse_decommission_rows(path: str) -> List[Dict]:
+    """Data rows of the graveyard table: ``[{'url', 'status', 'line',
+    'raw'}, ...]``. Same split-the-pipes parse the _inbox tables use
+    (URL = column 4, Status = column 7). Malformed rows are skipped,
+    never raised — a hand-edited table must never crash a batch."""
+    rows: List[Dict] = []
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return rows
+    for idx, line in enumerate(lines):
+        if not (line.startswith('| ') and 'http' in line):
+            continue
+        parts = line.split('|')
+        if len(parts) < 8:      # | # | Date | URL | Domain | Source | Status | Notes |
+            continue
+        url = parts[3].strip()
+        if not url.lower().startswith(('http://', 'https://')):
+            continue
+        rows.append({'url': url, 'status': parts[6].strip(),
+                     'line': idx, 'raw': line})
+    return rows
+
+
+def _status_is_dead(status: str) -> bool:
+    s = (status or '').strip().lower()
+    if not s:
+        return False
+    return any(m in s for m in DEAD_MARKERS)
+
+
+def _status_is_revived(status: str) -> bool:
+    s = (status or '').strip().lower()
+    if not s:
+        return False
+    return any(m in s for m in REVIVE_MARKERS)
+
+
+def scan_decommission_table(vault_path: str) -> Dict[str, str]:
+    """v0.44.0 — read the owner's burial decisions.
+
+    Returns ``{url: status}`` for EVERY data row (the caller decides
+    what counts — see ``_status_is_dead`` / ``_status_is_revived``);
+    first row wins on a hand-added duplicate URL. Pure file read; no
+    state DB, no network — the same law as :func:`scan_review_backlog`."""
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return {}
+    out: Dict[str, str] = {}
+    for row in _parse_decommission_rows(path):
+        out.setdefault(row['url'], row['status'])
+    return out
+
+
+_GRAVEYARD_HEADER = """# Decommissioned Links — the Graveyard
+
+> Auto-updated. DO NOT delete rows — only update the Status column.
+> Edit Status to: 🪦 dead / ❌ dead / ☠️ dead — the link is never
+> fetched, never retried, and its _review placeholder is swept.
+> Change a dead Status to ♻️ revived to bring a link back to life.
+> Last updated: {now}
+
+| # | Date | URL | Domain | Source | Status | Notes |
+|---|------|-----|--------|--------|--------|-------|
+"""
+
+
+def write_decommission_candidates(vault_path: str, urls: List[str],
+                                  source: str = 'retry backlog',
+                                  log: Optional[Callable] = None
+                                  ) -> int:
+    """v0.44.0 — pre-fill the graveyard with the failed links waiting in
+    ``_review`` so the owner only has to SET THE EMOJI (his gesture, the
+    ``_inbox`` tables' law). Rows are APPENDED after the last data row;
+    URLs already present (any Status) are never duplicated, owner-edited
+    rows are never touched. Creates the table with its header when the
+    file does not exist. Atomic + dry-run aware (the house writer).
+    Returns how many new rows were written."""
+    log = log or (lambda *a, **k: None)
+    path = decommission_table_path(vault_path)
+    if not vault_path:
+        return 0
+    review_dir = os.path.join(vault_path, REVIEW_FOLDER)
+    try:
+        os.makedirs(review_dir, exist_ok=True)
+    except Exception as e:
+        log(f"⚠️ Could not create {review_dir}: {e}", "warning")
+        return 0
+    rows = _parse_decommission_rows(path) if os.path.isfile(path) else []
+    existing = {r['url'] for r in rows}
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    new_rows = []
+    for url in urls:
+        if not url or url in existing:
+            continue
+        existing.add(url)
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc or 'unknown'
+        except Exception:
+            domain = 'unknown'
+        new_rows.append(
+            f"| - | {date_str} | {_links.scrub_url_token(url)} | {domain}"
+            f" | {source} | unreviewed | |")
+    if not new_rows:
+        return 0
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    if os.path.isfile(path):
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.read().splitlines()
+        except Exception as e:
+            log(f"⚠️ Could not read the graveyard table: {e}", "warning")
+            return 0
+        last_data = 0
+        for i, line in enumerate(lines):
+            if line.startswith('| ') and 'http' in line:
+                last_data = i
+        lines = lines[:last_data + 1] + new_rows + lines[last_data + 1:]
+        lines = [f"> Last updated: {now}"
+                 if line.startswith('> Last updated:') else line
+                 for line in lines]
+        content = '\n'.join(lines).rstrip('\n') + '\n'
+    else:
+        content = _GRAVEYARD_HEADER.format(now=now) \
+            + '\n'.join(new_rows) + '\n'
+    try:
+        atomic_write_text(path, content)
+    except Exception as e:
+        log(f"⚠️ Could not write the graveyard table: {e}", "warning")
+        return 0
+    log(f"🪦 {len(new_rows)} dead-link candidate(s) written to "
+        f"{DECOMMISSION_TABLE} — set Status to 🪦 dead to bury "
+        f"(♻️ revived brings one back)", "info")
+    return len(new_rows)
+
+
+def mark_urls_dead_in_table(vault_path: str, urls: List[str],
+                            log: Optional[Callable] = None) -> int:
+    """v0.44.0 — set the burial marker on chosen rows (the in-app
+    picker's hand — it writes the SAME Status cell the owner would edit
+    by hand in Obsidian, so the table stays the one ledger). Rows whose
+    URL is not in the table are appended as dead first (a burial is
+    valid even for a link that never got a placeholder). Returns how
+    many rows were marked."""
+    log = log or (lambda *a, **k: None)
+    path = decommission_table_path(vault_path)
+    if not vault_path:
+        return 0
+    wanted = list(dict.fromkeys(urls))  # dedupe, keep order
+    if not wanted:
+        return 0
+    # Append the missing ones as fresh rows, then flip every Status.
+    write_decommission_candidates(vault_path, wanted, source='picker',
+                                  log=None)
+    rows = _parse_decommission_rows(path)
+    if not rows:
+        return 0
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        log(f"⚠️ Could not read the graveyard table: {e}", "warning")
+        return 0
+    marked = 0
+    for row in rows:
+        if row['url'] not in wanted:
+            continue
+        parts = row['raw'].split('|')
+        if len(parts) < 8:
+            continue
+        parts[6] = f" 🪦 dead — decommissioned {date_str} "
+        lines[row['line']] = '|'.join(parts)
+        marked += 1
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    lines = [f"> Last updated: {now}"
+             if line.startswith('> Last updated:') else line
+             for line in lines]
+    try:
+        atomic_write_text(path, '\n'.join(lines).rstrip('\n') + '\n')
+    except Exception as e:
+        log(f"⚠️ Could not write the graveyard table: {e}", "warning")
+        return 0
+    if marked:
+        log(f"🪦 {marked} link(s) marked dead in {DECOMMISSION_TABLE}",
+            "info")
+    return marked
+
+
+def consume_decommission_table(state, vault_path: str,
+                               log: Optional[Callable] = None) -> Dict:
+    """v0.44.0 — enforce the owner's burial decisions.
+
+    For every dead-marked row (``_status_is_dead``): the URL is
+    ``dismiss()``ed (the never-fetch gate process_link already honors —
+    even a future paste of the same link is skipped), its retry-queue
+    row is dropped (the re-fetch loop the owner reported, closed), its
+    FAILED ``_review`` placeholder FILES are swept (the same re-read
+    app-owned-failed ownership check the v0.42.0 cleanup uses — a
+    hand-edited placeholder is the owner's, kept), the failed processed
+    row is forgotten, and the row's Status is rewritten to
+    ``🪦 confirmed — decommissioned <date>`` so the table itself shows
+    the burial.
+
+    For every ♻️-revived row: the dismissal is removed — the link is
+    fetched like new the next time it appears.
+
+    Idempotent — a confirmed row still carries the 🪦 marker, so a
+    second run re-dismisses harmlessly (INSERT OR REPLACE) while the
+    Status rewrite is byte-stable ('confirmed' rows are skipped).
+    Tolerated everywhere (the graveyard is bookkeeping, never a batch
+    killer). Returns ``{'dead', 'revived', 'placeholders_swept',
+    'rows_confirmed'}``."""
+    log = log or (lambda *a, **k: None)
+    report = {'dead': 0, 'revived': 0, 'placeholders_swept': 0,
+              'rows_confirmed': 0}
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return report
+    rows = _parse_decommission_rows(path)
+    if not rows:
+        return report
+    lines = None
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    dead_canonicals: List[str] = []
+
+    # ---- pass 1: the burials (DB first — the gate must hold even if a
+    # file sweep fails below) --------------------------------------------
+    for row in rows:
+        if not _status_is_dead(row['status']):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical:
+            continue
+        dead_canonicals.append(canonical)
+        report['dead'] += 1
+        try:
+            state.dismiss(
+                canonical,
+                'decommissioned by owner — graveyard table (v0.44.0)')
+            state.resolve_retry(canonical)
+            state.forget_failed_row(canonical)
+        except Exception as e:
+            log(f"⚠️ Graveyard DB write skipped for {row['url']}: {e}",
+                "warning")
+        # Confirm the row (byte-stable rewrite — the marker stays).
+        parts = row['raw'].split('|')
+        if len(parts) >= 8 and 'confirmed' not in row['status'].lower():
+            parts[6] = f" 🪦 confirmed — decommissioned {date_str} "
+            if lines is None:
+                try:
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as f:
+                        lines = f.read().splitlines()
+                except Exception as e:
+                    log(f"⚠️ Could not re-read the graveyard table: {e}",
+                        "warning")
+                    lines = []
+            if lines and row['line'] < len(lines):
+                lines[row['line']] = '|'.join(parts)
+                report['rows_confirmed'] += 1
+
+    # ---- pass 2: the revivals -------------------------------------------
+    for row in rows:
+        if not _status_is_revived(row['status']):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical:
+            continue
+        report['revived'] += 1
+        try:
+            if state.undismiss(canonical):
+                log(f"♻️ {row['url']}: revived — the dismissal is gone, "
+                    f"it will be fetched like new", "info")
+        except Exception as e:
+            log(f"⚠️ Graveyard revival skipped for {row['url']}: {e}",
+                "warning")
+
+    # ---- pass 3: sweep the dead links' placeholder FILES -----------------
+    # Walk _review like the backlog scan does — this catches both the
+    # tracked placeholder (processed row knew it) and a LOST-row one.
+    if dead_canonicals:
+        dead_set = set(dead_canonicals)
+        review_dir = os.path.join(vault_path, REVIEW_FOLDER)
+        try:
+            names = sorted(os.listdir(review_dir))
+        except Exception:
+            names = []
+        for name in names:
+            if not name.lower().endswith('.md') or name == DECOMMISSION_TABLE:
+                continue
+            p = os.path.join(review_dir, name)
+            if not os.path.isfile(p):
+                continue
+            fm = _parse_review_frontmatter(p)
+            if not fm or fm.get('managed_by', '').lower() \
+                    != MANAGED_BY_GITCURATOR \
+                    or fm.get('fetch_status', '').lower() != 'failed':
+                continue  # a human's note — never our call
+            src = normalize_website_url((fm.get('source') or '').strip())
+            if src not in dead_set:
+                continue
+            try:
+                _dryrun.remove(p)
+                # dry-run records the sweep without deleting — the count
+                # stays honest (a rehearsed burial sweeps nothing):
+                if not os.path.exists(p):
+                    report['placeholders_swept'] += 1
+            except Exception as e:
+                log(f"⚠️ Could not sweep placeholder {name}: {e}",
+                    "warning")
+
+    # ---- pass 4: write the confirmed rows back ---------------------------
+    if lines is not None:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        lines = [f"> Last updated: {now}"
+                 if line.startswith('> Last updated:') else line
+                 for line in lines]
+        try:
+            atomic_write_text(path,
+                              '\n'.join(lines).rstrip('\n') + '\n')
+        except Exception as e:
+            log(f"⚠️ Could not write the graveyard table: {e}",
+                "warning")
+
+    if report['dead']:
+        log(f"🪦 Graveyard: {report['dead']} link(s) decommissioned — "
+            f"dismissed, {report['placeholders_swept']} placeholder(s) "
+            f"swept, never fetched again", "info")
+    return report
 
 
 # ===========================================================================
@@ -417,6 +793,25 @@ class WebsitePipeline:
         # stored" — the owner asked the log to show where each link goes).
         self._vault_name = os.path.basename(self.vault_path) \
             if self.vault_path else 'Websites vault'
+        # v0.44.0 — the graveyard: consume the owner's burial decisions
+        # from <vault>/_review/DECOMMISSIONED.md BEFORE anything fetches
+        # (dead links leave the retry queue and the processed ledger, their
+        # placeholders are swept, they are dismissed — the never-fetch gate
+        # process_link already honors). Not gated on fetch_fn: the tests
+        # (and the offline golden run) exercise it with the injected
+        # fetcher; a vault without the table is a cheap no-op.
+        self._graveyard_urls: set = set()
+        if self.vault_path and os.path.isdir(self.vault_path):
+            try:
+                consume_decommission_table(
+                    self.state, self.vault_path, log=self.log)
+                for _u, _st in scan_decommission_table(
+                        self.vault_path).items():
+                    if _status_is_dead(_st):
+                        self._graveyard_urls.add(
+                            normalize_website_url(_u))
+            except Exception as e:  # bookkeeping never kills a batch
+                self.log(f"⚠️ Graveyard consume skipped: {e}", "warning")
         self.taxonomy_path = resolve_taxonomy_path(self.config)
         # v0.20.0 — blocked domains (the X fix): these links are already
         # addressed as rows in the _inbox platform tables; the pipeline
@@ -834,9 +1229,16 @@ class WebsitePipeline:
         # ---- 2. dedupe (SPEC §4.3 step 2) --------------------------------
         if self.state.is_dismissed(canonical):
             result['outcome'] = 'skipped'
-            result['error'] = 'dismissed (note was deleted)'
+            if canonical in self._graveyard_urls:
+                result['error'] = ('decommissioned by owner (graveyard) — '
+                                   'never fetched again')
+            else:
+                result['error'] = 'dismissed (note was deleted)'
             self.counters['skipped'] += 1
             self.last_results.append(result)
+            if canonical in self._graveyard_urls:
+                self.log(f"🪦 {url}: decommissioned by owner — skipped "
+                         "(the graveyard table's verdict)", "info")
             return result
 
         in_vault = self.vault_index_has(canonical)

@@ -1,3 +1,92 @@
+## [0.44.0] — The graveyard: dead links get a burial, not a haunting — 2026-10-08
+
+Owner ask (session): "The system must have a procedure for
+decommissioning links, for example some websites are genuinely 404
+or lost or abandoned. but if I remove their links from _review
+folder, they will be fetched again and get error again, we need a
+procedure for it, like the table we had which I set an emoji for it
+(tick emoji as reviewed) so it never fetches again." Desktop release
+v0.44.0, Worker unchanged at **0.30.0** (the fetcher is the
+desktop's). Suite grows **1076 → 1102** (26 cases in the new
+tests/test_decommission.py — pure stdlib, runnable even where the
+GUI suite cannot), 83 compiles (unchanged), offline golden 30/30.
+
+**The situation.** Some of the `_review` pile is not walled — it is
+DEAD: a real 404, a lost page, an abandoned domain. The v0.42.0
+retry driver honestly re-fails those forever (each pass refreshes
+the placeholder and re-queues a fresh set of 3), and the owner's
+only escape — deleting the placeholder from `_review` — was a trap:
+the URL's retry-queue row survives the file, so any re-arm (a
+backlog retry, a proxy epoch) fetched it AGAIN and the failure wrote
+a FRESH placeholder right back. Delete-and-refetch, forever.
+
+**The procedure (the owner's gesture, honored).** One markdown ledger
+per vault: `<vault>/_review/DECOMMISSIONED.md` — the same table
+shape and the same hand-move the `_inbox` platform tables already
+taught (✅ reviewed / ❌ ignored there). Set a row's Status to
+**🪦 dead** (or ❌ / ☠️ / 💀 / the words dead / retired /
+decommissioned — case-insensitive, ✅ and blank never count) and the
+link is buried: dismissed in the state DB (the never-fetch gate
+`process_link` has honored since Phase 3 — even a future paste of
+the same URL is skipped with the reason named), dropped from the
+retry queue (the delete-then-refetch loop, closed at the root),
+its failed `_review` placeholder swept (the re-read app-owned
+ownership check — a hand-edited placeholder is the owner's, kept),
+its failed processed row forgotten, and the row itself rewritten to
+"🪦 confirmed — decommissioned <date>" so the ledger shows its own
+burials. Change a dead Status to **♻️ revived** and the dismissal is
+removed — the link is fetched like new the next time it appears.
+One emoji either way; the table is the durable owner decision, and
+removing a row revives nothing (the DB row is the law, the table is
+the hand that wrote it).
+
+**The wiring.** Every pipeline start consumes the table first (the
+burials land before anything fetches — idempotent, tolerated, cheap
+when the file is absent); the `_review` backlog scan skips buried
+URLs (the startup notice and the retry driver stop seeing them —
+the nagging ends with the burial, not with deletion); the v0.42.0
+startup notice grows a third door — **🪦 Decommission dead…** next
+to Retry now / Later; and More ▸ **🪦 Decommission dead links**
+offers the anytime procedure: the waiting failures are written into
+the table as unreviewed candidates, a checkable picker buries the
+chosen ones by writing the SAME Status cells (the table stays the
+one ledger — hand-editing in Obsidian and the picker are two hands
+on the same paper), and the burials are enforced immediately with
+the counts reported. "Open the table" reveals the file for
+hand-editing; a burial with no placeholder is valid too (a link the
+owner never pasted can be pre-buried).
+
+**What did NOT change.** The walled-link story (403/405 bot-defense
+walls) keeps its v0.42.0/v0.43.0 treatment — those links still get
+their both-doors retries until they pass or the owner buries them
+BY NAME. Banned domains keep their own law (never collected, no
+graveyard row needed). Real notes are never touched (the failed-row
+forget guard is the same shape `purge_blocked_domains` uses). The
+worker is untouched (0.30.0 — it never fetches websites); the CLI
+twin (`--decommission`) stays a next-phase candidate. Dry-run
+rehearses the whole rite (the sweep and the table rewrite are gated
+— a rehearsed burial sweeps nothing).
+
+**Gates.** 26 new cases: marker law (the dead/revive families, ✅
+and unreviewed never — 2); table parsing (malformed rows, first-row
+wins, missing file/vault — 2); the scan's graveyard filter (dead
+leaves the backlog, unreviewed/revived stay, the table itself is
+never a backlog item — 4); the candidates writer (header + rows, no
+duplicates, no owner clobber, the picker's Status flip, unknown
+URLs appended — 4); the consume (the full burial, hand-edited
+placeholder kept while the DB dismissal still holds, ♻️ revive
+removes the dismissal AND the link re-fetches to a real note,
+idempotence byte-stable, dry-run sweeps nothing, missing table
+no-op — 6); THE LOOP, closed (the delete-then-refetch scenario
+reproduced then closed — queue row dropped, re-arm finds nothing,
+no fresh placeholder; never-fetched on paste; retry driver leaves
+dismissed placeholders untouched; pipeline init sweeps — 5); source
+contracts (VERSION/CHANGELOG/ci.yml/AGENTS.md — 3). Local: 26/26,
+reviewretry 15/15, bothdoors 20/21 (the one failure is the
+environmental PySocks-less sandbox — CI installs requirements and
+runs it green), touched modules compile. CI is the authoritative
+full gate.
+
 ## [0.43.0] — Both doors: a wall against one route asks the other — 2026-10-07
 
 Owner ask (session): "I still get 403, find a robust way so websites

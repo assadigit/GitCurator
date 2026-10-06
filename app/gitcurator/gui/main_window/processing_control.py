@@ -154,7 +154,13 @@ class ProcessingControlMixin:
         the retry once per launch. The notice is self-extinguishing — retry
         them, they pass under the v0.41 browser-grade fetcher, the folder
         empties, the notice never fires again. Never interrupts a running
-        batch; pure frontmatter reads (no state DB, no network)."""
+        batch; pure frontmatter reads (no state DB, no network).
+
+        v0.44.0 — the third door: some of the pile is GENUINELY dead (real
+        404s, lost pages, abandoned domains), so the notice also offers
+        "🪦 Decommission dead…" (the graveyard table procedure). URLs
+        already marked dead never reach this notice — the scan filters
+        them out."""
         try:
             if getattr(self, '_batch_running', False):
                 return
@@ -172,21 +178,27 @@ class ProcessingControlMixin:
                 f"📥 {len(items)} _review placeholder(s) waiting "
                 f"({len(urls)} link(s) — fetch failures: the 403/405 "
                 f"wall pile from before v0.41.0)", "info")
-            ok = self._show_custom_question(
+            choice = self._show_backlog_notice(
                 "Links waiting in _review",
                 f"{len(urls)} link(s) lie in _review — their fetches were "
                 f"refused (mostly 403/405 bot-defense walls) under the "
                 f"old User-Agent.\n\n"
                 f"v0.41.0 presents as a real browser. Retry them now?\n\n"
                 f"Each link is fetched, analyzed and stored properly; "
-                f"anything still walled keeps waiting in _review."
+                f"anything still walled keeps waiting in _review.\n\n"
+                f"Some genuinely dead (404 / lost / abandoned)? Choose "
+                f"🪦 Decommission dead — the graveyard table buries them "
+                f"so they are never fetched again."
             )
-            if ok:
+            if choice == 'retry':
                 self._start_review_retry()
+            elif choice == 'decommission':
+                self.decommission_dead_links_now()
             else:
                 self.log_message(
-                    "⏭️ _review backlog retry deferred — More ▸ '🔁 Retry "
-                    "_review backlog' runs it anytime.", "info")
+                    "⏭️ _review backlog deferred — More ▸ '🔁 Retry "
+                    "_review backlog' or '🪦 Decommission dead links' "
+                    "anytime.", "info")
         except Exception as e:
             try:
                 self.log_message(
@@ -194,10 +206,68 @@ class ProcessingControlMixin:
             except Exception:
                 pass  # best-effort — never crash the startup
 
+    def _show_backlog_notice(self, title: str, message: str) -> str:
+        """v0.44.0 — the backlog notice's three doors: 'retry' /
+        'decommission' / 'later'. Same theme idiom as
+        _show_custom_question (roles, _style_btn, the shutdown guard);
+        the shutdown default is 'later' (the safe answer)."""
+        if getattr(self, '_closing', False) or not self.isVisible():
+            try:
+                self.log_message(f"(auto-Later during shutdown) {title}",
+                                 "info")
+            except Exception:
+                pass
+            return 'later'
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog.setMinimumWidth(460)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        icon_label = QLabel("📥")
+        icon_label.setObjectName("msg_glyph")
+        header.addWidget(icon_label)
+        title_label = QLabel(title)
+        title_label.setObjectName("msg_heading")
+        title_label.setProperty("tone", "warning")
+        header.addWidget(title_label)
+        header.addStretch()
+        layout.addLayout(header)
+
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+        layout.addWidget(msg_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        later_btn = QPushButton("Later")
+        self._style_btn(later_btn, 'secondary')
+        later_btn.clicked.connect(lambda: dialog.done(0))  # 0 = later
+        btn_row.addWidget(later_btn)
+        dead_btn = QPushButton("🪦 Decommission dead…")
+        self._style_btn(dead_btn, 'secondary')
+        dead_btn.clicked.connect(lambda: dialog.done(2))  # 2 = decommission
+        btn_row.addWidget(dead_btn)
+        retry_btn = QPushButton("🔁 Retry now")
+        self._style_btn(retry_btn, 'primary')
+        retry_btn.clicked.connect(lambda: dialog.done(1))  # 1 = retry
+        btn_row.addWidget(retry_btn)
+        layout.addLayout(btn_row)
+
+        self._animate_dialog(dialog)
+        rc = dialog.exec()
+        return {1: 'retry', 2: 'decommission'}.get(rc, 'later')
+
     def retry_review_backlog_now(self):
         """More ▸ 🔁 Retry _review backlog — the manual trigger (v0.42.0).
         Same flow as the startup notice, with the gates surfaced as
-        dialogs instead of silence (the user ASKED for this one)."""
+        dialogs instead of silence (the user ASKED for this one).
+        v0.44.0: URLs marked 🪦 dead in the graveyard table are never
+        retried — More ▸ 🪦 Decommission dead links manages them."""
         cfg = self.config or {}
         if not (cfg.get('pipelines') or {}).get('websites', False):
             self._show_custom_message_box(
@@ -217,13 +287,212 @@ class ProcessingControlMixin:
             self._show_custom_message_box(
                 "_review backlog is empty",
                 "No app-owned fetch-failed placeholders are waiting.\n\n"
-                "Anything else in _review needs your eyes, not a retry.")
+                "Anything else in _review needs your eyes, not a retry.\n\n"
+                "(Links marked 🪦 dead in _review/DECOMMISSIONED.md are "
+                "buried — never retried. More ▸ 🪦 Decommission dead "
+                "links manages them.)",
+                success=True)
             return
         urls = sorted({i['url'] for i in items})
         if not self._confirm_batch(len(urls), "the _review backlog"):
             self.log_message("⏹️ _review backlog retry cancelled.", "warning")
             return
         self._start_review_retry()
+
+    # -- v0.44.0: the graveyard — decommissioning dead links ---------------
+
+    def decommission_dead_links_now(self):
+        """More ▸ 🪦 Decommission dead links — the owner's procedure for
+        links that are GENUINELY gone (a real 404, a lost page, an
+        abandoned domain): the graveyard table at
+        ``<vault>/_review/DECOMMISSIONED.md`` gets one row per failed
+        link and the owner sets the Status emoji (🪦 dead — the same
+        gesture as the _inbox tables' ✅ reviewed). This action also
+        offers an in-app picker that writes the SAME Status cells, then
+        enforces the burials immediately (dismissed + retry-queue rows
+        dropped + placeholders swept). ♻️ revived on a row brings a link
+        back to life."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        items = _website_pipeline.scan_review_backlog(vault)
+        table = _website_pipeline.decommission_table_path(vault)
+        if not items:
+            self._show_custom_message_box(
+                "No failed links waiting",
+                "No app-owned fetch-failed placeholders are waiting in "
+                "_review — nothing new to decommission.\n\n"
+                "The graveyard table stays available for hand-rows:\n"
+                f"{table}\n\n"
+                "(Set a row's Status to 🪦 dead anytime — even a link "
+                "that never got a placeholder. ♻️ revived brings one "
+                "back.)",
+                success=True)
+            return
+        urls = sorted({i['url'] for i in items})
+        try:
+            _website_pipeline.write_decommission_candidates(
+                vault, urls, source='retry backlog',
+                log=self.log_message)
+        except Exception as e:
+            self.log_message(f"⚠️ Graveyard candidates write skipped: {e}",
+                             "warning")
+        picked = self._pick_dead_links_dialog(urls, table)
+        if not picked:
+            self.log_message(
+                "⏭️ Decommission cancelled — nothing was buried. The "
+                "candidate rows wait in the table (set Status to 🪦 "
+                "dead by hand in Obsidian; the next batch enforces it).",
+                "info")
+            return
+        try:
+            _website_pipeline.mark_urls_dead_in_table(
+                vault, picked, log=self.log_message)
+        except Exception as e:
+            self.log_message(f"⚠️ Graveyard marking skipped: {e}",
+                             "warning")
+        # Enforce now (the same state DB a batch uses; the dry-run law
+        # does not apply — this is the OWNER's explicit hand, and the
+        # next batch would enforce it anyway).
+        report = None
+        try:
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                report = _website_pipeline.consume_decommission_table(
+                    state, vault, log=self.log_message)
+            finally:
+                state.close()
+        except Exception as e:
+            self.log_message(
+                f"⚠️ Graveyard enforcement deferred to the next batch: "
+                f"{e}", "warning")
+        buried = (report or {}).get('dead', 0)
+        swept = (report or {}).get('placeholders_swept', 0)
+        remaining = len(_website_pipeline.scan_review_backlog(vault))
+        self.log_message(
+            f"🪦 Graveyard: {buried} link(s) decommissioned"
+            + (f", {swept} placeholder(s) swept" if swept else "")
+            + (f" — {remaining} still waiting in _review"
+               if remaining else " — the _review backlog is clear"),
+            "success")
+        self._show_custom_message_box(
+            "Decommissioned",
+            f"{len(picked)} link(s) marked dead"
+            + (f" — {buried} enforced now, {swept} placeholder(s) swept."
+               if report is not None else
+               " — the next batch enforces the burials.")
+            + (f"\n\n{remaining} link(s) still wait in _review."
+               if remaining else
+               "\n\nThe _review backlog is clear — no more notices.")
+            + "\n\nThe ledger: " + table
+            + "\n(♻️ revived on a row brings a link back to life.)",
+            success=True)
+
+    def _pick_dead_links_dialog(self, urls, table_path):
+        """v0.44.0 — the in-app burial picker: a checkable list of the
+        failed links; the chosen ones get their graveyard-table Status
+        cells written (the table stays the ONE ledger). 'Open the table'
+        reveals the file in the OS file manager for hand-editing.
+        Returns the chosen URLs (empty = cancelled)."""
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return []
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Decommission dead links")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(620)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        icon_label = QLabel("🪦")
+        icon_label.setObjectName("msg_glyph")
+        header.addWidget(icon_label)
+        title_label = QLabel("Decommission dead links")
+        title_label.setObjectName("msg_heading")
+        title_label.setProperty("tone", "warning")
+        header.addWidget(title_label)
+        header.addStretch()
+        layout.addLayout(header)
+
+        msg_label = QLabel(
+            "Tick the links that are GENUINELY dead — a real 404, a "
+            "lost page, an abandoned domain. A buried link is never "
+            "fetched, never retried, never noticed again; its _review "
+            "placeholder is swept. (Unticked links keep waiting — ♻️ "
+            "revived in the table brings a buried link back.)")
+        msg_label.setWordWrap(True)
+        layout.addWidget(msg_label)
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        for u in urls:
+            item = QListWidgetItem(u)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            list_widget.addItem(item)
+        list_widget.setMinimumHeight(min(320, 24 * len(urls) + 24))
+        layout.addWidget(list_widget)
+
+        table_label = QLabel(f"The ledger: {table_path}")
+        table_label.setWordWrap(True)
+        layout.addWidget(table_label)
+
+        btn_row = QHBoxLayout()
+        open_btn = QPushButton("Open the table")
+        self._style_btn(open_btn, 'secondary')
+        open_btn.setToolTip(
+            "Reveal the graveyard table in your file manager — hand-edit "
+            "the Status column in Obsidian (🪦 dead / ♻️ revived).")
+
+        def _open_table():
+            try:
+                from PyQt6.QtGui import QDesktopServices
+                from PyQt6.QtCore import QUrl
+                QDesktopServices.openUrl(QUrl.fromLocalFile(table_path))
+            except Exception as e:
+                self.log_message(f"⚠️ Could not open the table: {e}",
+                                 "warning")
+
+        open_btn.clicked.connect(_open_table)
+        btn_row.addWidget(open_btn)
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        self._style_btn(cancel_btn, 'secondary')
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(cancel_btn)
+        bury_btn = QPushButton("🪦 Decommission selected")
+        self._style_btn(bury_btn, 'danger')
+        bury_btn.clicked.connect(dialog.accept)
+        btn_row.addWidget(bury_btn)
+        layout.addLayout(btn_row)
+
+        self._animate_dialog(dialog)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return []
+        picked = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                picked.append(item.text())
+        return picked
 
     def _start_review_retry(self):
         """Launch the _review backlog retry batch (worker mode

@@ -1576,6 +1576,13 @@ class UiMixin:
         # run once per launch; this is the anytime trigger.
         more_menu.addAction("🔁 Retry _review backlog",
                             self.retry_review_backlog_now)
+        # v0.44.0 — the graveyard: the decommissioning procedure for
+        # genuinely dead links (real 404s, lost pages, abandoned
+        # domains). The graveyard table (set the emoji: 🪦 dead) is the
+        # owner's durable "never fetch again"; the picker writes the
+        # same Status cells in-app.
+        more_menu.addAction("🪦 Decommission dead links",
+                            self.decommission_dead_links_now)
         self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
         self.backup_export_btn.triggered.connect(self._backup_export_zip)
         more_menu.addSeparator()

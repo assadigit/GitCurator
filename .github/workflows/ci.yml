@@ -1,14 +1,26 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 83 audited
-# Python modules and runs the full 1076-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1102-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
 # 49 intakefix + 38 sealfix + 30 v0230 + 24 refactor_surface + 22
 # websitesqueuefix + 11 swotfix + 10 webnote_v2 + 22 lawfix + 29
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
-# batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors).
+# batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
+# 26 decommission).
+# v0.44.0 — THE GRAVEYARD: genuinely dead links (real 404s, lost pages,
+# abandoned domains) get the decommissioning procedure the owner asked
+# for — a markdown ledger at <vault>/_review/DECOMMISSIONED.md where
+# setting the Status emoji (🪦 dead — the same gesture as the _inbox
+# tables' ✅ reviewed) buries the link for good: dismissed (the
+# never-fetch gate), retry-queue row dropped (the delete-then-refetch
+# loop, closed), placeholder swept, ♻️ revived brings one back. The
+# backlog scan skips buried URLs (no more notices), the startup notice
+# grows a third door (🪦 Decommission dead…), More ▸ 🪦 Decommission
+# dead links offers the in-app picker. 26 cases join in
+# tests/test_decommission.py (1102).
 # v0.43.0 — BOTH DOORS: a route-aimed refusal (403 WAF/IP wall, 405
 # method-block, 429 per-IP rate limit, 451 geo-block) through the proxy
 # now alternates to the DIRECT route exactly like v0.21.0's
@@ -249,8 +261,8 @@ jobs:
           gitcurator/core/mirror_keys.py
           gitcurator/core/netctx.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline

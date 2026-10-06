@@ -133,6 +133,40 @@ class WebsiteStateDB:
                 (url, reason[:200], datetime.now().isoformat(timespec='seconds')))
             self.conn.commit()
 
+    def undismiss(self, url: str) -> bool:
+        """v0.44.0 — the graveyard's other door: remove a dismissal so a
+        ♻️-revived link is fetched like new again (the table's revive
+        marker is the owner's hand, this is the enforcement). Returns
+        True when a dismissal was actually removed."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM dismissed_urls WHERE url=?", (url,))
+            self.conn.commit()
+            return bool(cur.rowcount)
+
+    def forget_failed_row(self, url: str) -> bool:
+        """v0.44.0 — delete a link's processed row ONLY when it is a
+        failed ``_review`` placeholder record (fetch_status 'failed' +
+        note_path inside _review) — the decommission consume calls this
+        once the placeholder FILE is gone, so the ledger carries no row
+        pointing at nothing. A real note's row is NEVER touched (the
+        same guard purge_blocked_domains uses). Returns True when a row
+        was removed."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT note_path, fetch_status FROM websites_processed"
+                " WHERE url=?", (url,)).fetchone()
+            if not row:
+                return False
+            path, status = row
+            if status != 'failed' \
+                    or '_review' not in str(path or '').replace('\\', '/'):
+                return False
+            self.conn.execute(
+                "DELETE FROM websites_processed WHERE url=?", (url,))
+            self.conn.commit()
+            return True
+
     # -- v0.19.0 proxy-epoch meta + retry re-arm --------------------------
 
     def get_meta(self, key: str) -> Optional[str]:
