@@ -38,6 +38,52 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.40.0 deploy record — the 0.30.0 worker, cutover retired (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-06** (worker version ID
+> `6d75921e-6e41-4c46-b739-9a409b67a6fe`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> The deploy ran from the v0.40.0 release tree (`6add0f6`, CI green —
+> 83 compiles · 1030 tests · golden 30/30 · worker 50/50) minutes
+> after the push, BEFORE the desktop tag went out, so a freshly
+> downloaded v0.40.0 app finds the live worker already at 0.30.0
+> (the desktop's EXPECTED_WORKER_VERSION moved in lockstep).
+>
+> **What ships in 0.30.0 — the cutover_complete flag is RETIRED.**
+> Seeded as '0' by the v0.01 schema and NEVER set to '1' by anything
+> (the intended desktop setter lives only in an example snippet;
+> the pre-deploy D1 backup proves it: the row still read
+> `cutover_complete='0'`, untouched since 2026-07-07), while the
+> desktop still fetches its links via Telethon — the "cutover" was
+> an abandoned V0.01 plan whose dashboard tile said "Cutover:
+> Pending" forever. Removed from `/health`, from `/api/pending`,
+> from the dashboard Settings card, from the state-key list, and
+> from the schema seed; two worker tests (50-case suite) guard the
+> retirement so the flag cannot quietly reappear in an API response.
+> The D1 row itself (if present on an existing deployment) is simply
+> ignored — the change is purely subtractive and idempotent.
+>
+> **Deploy ritual** (as executed, ~3 minutes): D1 export backup FIRST
+> → `/home/z/backups/d1-backup-20261006-pre-030-deploy.sql`
+> (2,293 INSERTs, 1,128,765 bytes; ledger 1,158 · activity_log 1,113 ·
+> dead_letters 9 · sync_state 9 · dashboard_sessions 2), then the
+> idempotent `schema.sql` re-apply (10 tables, no-op), then
+> `wrangler deploy` → version `6d75921e…`, both queue consumers +
+> producers attached (curator-ingest, curator-ingest-dlq). Pre-flight:
+> the 50/50 worker suite (node --test) on the release tree.
+>
+> **Verified live after the deploy**: `/health` →
+> `{"status":"ok","version":"0.30.0",...}` with `cutover_complete`
+> ABSENT from the payload (one edge-propagation beat, ~20 s) ✓ ·
+> Telegram `getWebhookInfo` → url = the worker's `/webhook`,
+> `pending_update_count` 0 ✓ · all 4 secrets persisted (BOT_TOKEN,
+> GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET) ✓ · D1 parity after the
+> deploy IDENTICAL to the pre-deploy backup (ledger 1,158 ·
+> activity 1,113 · dead 9 · state 9 · sessions 2 — the untouched
+> `cutover_complete` row still sits in sync_state, ignored) ✓.
+
+---
+
 ## 📦 v0.37.0 deploy record — the 0.29.0 worker, batch pastes (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-05** (worker version ID
