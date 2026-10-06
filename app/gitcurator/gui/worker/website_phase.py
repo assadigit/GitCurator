@@ -271,18 +271,41 @@ class WorkerWebsitePhaseMixin:
                     self.progress_updated.emit(self._current_position,
                                                self.total)
 
-                self.log_message.emit(
-                    f"🌐 Websites pipeline: {len(links)} link(s)"
-                    + (f" + {len(due)} due retry(ies)" if due else ""),
-                    "info")
-
-                if due:
-                    pipeline.run_due_retries(
+                # v0.42.0 — the _review backlog retry (mode 'review_retry'):
+                # the phase's normal passes are REPLACED by the backlog
+                # driver this run. The driver re-arms the retry queue (the
+                # wall pile's 3 attempts burned out under the old fetcher),
+                # re-registers lost state rows, runs every scanned URL
+                # through the FULL pipeline (v0.41 browser-grade fetch →
+                # classify → analyze → store) and cleans stale duplicate
+                # placeholders. Manifest marking, the directory rebuild and
+                # the _inbox prune below work on its results unchanged.
+                _backlog_items = getattr(self, '_review_backlog_items',
+                                         None) or []
+                if _backlog_items:
+                    _unique = len({i.get('url') for i in _backlog_items})
+                    self.total = _github_done + _unique
+                    self.log_message.emit(
+                        f"🔁 Retrying the _review backlog: {len(_backlog_items)} "
+                        f"app-owned placeholder(s) ({_unique} link(s)) — "
+                        f"v0.41.0 fetches as a browser now; the bot-defense "
+                        f"wall may be down for them", "info")
+                    results = pipeline.retry_review_backlog(
+                        _backlog_items,
                         should_continue=lambda: self.is_running,
                         on_progress=_wp_advance)
-                results = pipeline.run(
-                    links, should_continue=lambda: self.is_running,
-                    on_progress=_wp_advance)
+                else:
+                    self.log_message.emit(
+                        f"🌐 Websites pipeline: {len(links)} link(s)"
+                        + (f" + {len(due)} due retry(ies)" if due else ""),
+                        "info")
+                    if due:
+                        pipeline.run_due_retries(
+                            should_continue=lambda: self.is_running,
+                            on_progress=_wp_advance)
+                    results = pipeline.run(
+                        links, should_continue=lambda: self.is_running,
+                        on_progress=_wp_advance)
 
                 # Manifest marking (the intake left website links pending):
                 # processed/review -> processed (a _review note IS a note),

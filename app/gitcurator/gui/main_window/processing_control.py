@@ -145,6 +145,99 @@ class ProcessingControlMixin:
             raw_url_count=raw_url_count,
         )
 
+    # -- v0.42.0: the _review backlog notice + retry ------------------------
+
+    def _startup_review_backlog_check(self):
+        """v0.42.0 — the startup notice (the owner's ask): scan the Websites
+        vault's _review folder; app-owned fetch-failed placeholders are the
+        links the old honest-bot User-Agent got walled on (403/405). Offer
+        the retry once per launch. The notice is self-extinguishing — retry
+        them, they pass under the v0.41 browser-grade fetcher, the folder
+        empties, the notice never fires again. Never interrupts a running
+        batch; pure frontmatter reads (no state DB, no network)."""
+        try:
+            if getattr(self, '_batch_running', False):
+                return
+            cfg = self.config or {}
+            if not (cfg.get('pipelines') or {}).get('websites', False):
+                return  # websites pipeline off — the backlog is not ours
+            vault = (cfg.get('website_vault_path') or '').strip()
+            if not vault or not os.path.isdir(vault):
+                return
+            items = _website_pipeline.scan_review_backlog(vault)
+            if not items:
+                return
+            urls = sorted({i['url'] for i in items})
+            self.log_message(
+                f"📥 {len(items)} _review placeholder(s) waiting "
+                f"({len(urls)} link(s) — fetch failures: the 403/405 "
+                f"wall pile from before v0.41.0)", "info")
+            ok = self._show_custom_question(
+                "Links waiting in _review",
+                f"{len(urls)} link(s) lie in _review — their fetches were "
+                f"refused (mostly 403/405 bot-defense walls) under the "
+                f"old User-Agent.\n\n"
+                f"v0.41.0 presents as a real browser. Retry them now?\n\n"
+                f"Each link is fetched, analyzed and stored properly; "
+                f"anything still walled keeps waiting in _review."
+            )
+            if ok:
+                self._start_review_retry()
+            else:
+                self.log_message(
+                    "⏭️ _review backlog retry deferred — More ▸ '🔁 Retry "
+                    "_review backlog' runs it anytime.", "info")
+        except Exception as e:
+            try:
+                self.log_message(
+                    f"⚠️ _review backlog check skipped: {e}", "warning")
+            except Exception:
+                pass  # best-effort — never crash the startup
+
+    def retry_review_backlog_now(self):
+        """More ▸ 🔁 Retry _review backlog — the manual trigger (v0.42.0).
+        Same flow as the startup notice, with the gates surfaced as
+        dialogs instead of silence (the user ASKED for this one)."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        items = _website_pipeline.scan_review_backlog(vault)
+        if not items:
+            self._show_custom_message_box(
+                "_review backlog is empty",
+                "No app-owned fetch-failed placeholders are waiting.\n\n"
+                "Anything else in _review needs your eyes, not a retry.")
+            return
+        urls = sorted({i['url'] for i in items})
+        if not self._confirm_batch(len(urls), "the _review backlog"):
+            self.log_message("⏹️ _review backlog retry cancelled.", "warning")
+            return
+        self._start_review_retry()
+
+    def _start_review_retry(self):
+        """Launch the _review backlog retry batch (worker mode
+        'review_retry' — the worker scans, the websites phase drives the
+        retry pipeline). Used by the startup notice and the More menu."""
+        if getattr(self, '_batch_running', False):
+            self._show_custom_message_box(
+                "Batch already running",
+                "A batch is already running — finish or stop it first.",
+                success=False)
+            return
+        self.save_config()
+        self._start_worker('review_retry', None, None, None, None, None, None)
+
     def _start_worker(self, mode, range_from, range_to, offset_start, offset_count, import_file, urls,
                       bot_source=False, non_github_urls=None, intake_duplicates=0, raw_url_count=0):
         # Acquire Telegram lock for modes that access the session file.

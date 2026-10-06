@@ -1,3 +1,81 @@
+## [0.42.0] — The backlog gets its second chance: _review scanned, noticed, retried — 2026-10-07
+
+Owner ask (session): "The app must have an option to scan the _review
+folder on vaults and retry them — currently over 100 links lie there
+because of error 403 or 405. System checks _review, gives the user a
+notice, do you want to retry this again? If yes, the app fetches and
+stores them correctly." Desktop release v0.42.0, Worker unchanged at
+**0.30.0** (the fetcher is the desktop's). Suite grows **1040 → 1055**
+(15 cases in the new tests/test_reviewretry.py — scanner, driver,
+walls, lost rows, stacking, dismissal, dry-run; the module is pure
+stdlib, so it even runs where the GUI suite cannot), 83 compiles
+(unchanged), offline golden 30/30 + 0 invalid.
+
+**The situation.** v0.41.0 took the UA wall down for NEW fetches — but
+the pile it left behind was still sitting in `_review`: every link the
+old honest-bot User-Agent had been refused on (HTTP 403/405 from bot
+defenses), each with a minimal placeholder note, each with its 3
+automatic retries long burned out. The pipeline's dedupe treated them
+as "kept in _review, no more retries" — correctly, politely, forever.
+The wall was gone; the prisoners were still behind it.
+
+**The scan.** `scan_review_backlog(vault)` walks `_review/*.md` and
+reads exactly three frontmatter keys (source, fetch_status,
+managed_by) — pure string parsing, no YAML dependency, no state DB, no
+network. Only **app-owned fetch-failed** placeholders qualify: a
+hand-written review note and a low-confidence classification note are
+human territory and stay untouched. The scan is cheap enough to run at
+every startup.
+
+**The notice (the owner's exact ask).** ~2.5s after the main window
+settles, the app scans once. If the backlog is non-empty — and only
+then — a dialog: "N link(s) lie in _review — their fetches were
+refused (mostly 403/405 bot-defense walls) under the old User-Agent.
+v0.41.0 presents as a real browser. Retry them now?" **Retry now**
+launches the retry batch; **Later** defers to the menu (More ▸ "🔁
+Retry _review backlog" — the anytime trigger, with the same gates as
+dialogs instead of silence). The notice is self-extinguishing: retry
+them, they pass, the folder empties, the notice never fires again.
+Never offered mid-batch; never when the Websites pipeline is off.
+
+**The retry.** Worker mode `review_retry` → the websites phase →
+`retry_review_backlog(items)`, which does three things per unique URL:
+(1) the whole retry queue is **re-armed** first (attempts=0 — the wall
+pile is exactly the links whose 3 attempts burned out under the OLD
+fetcher; without the re-arm process_link would skip them forever; same
+precedent as the v0.19.0 proxy-epoch re-arm); (2) a placeholder whose
+state row was **lost** (cache.db rebuilt, a note by an older app) gets
+the row re-registered from the disk truth, so the link routes through
+the upgrade path in ONE run instead of being skipped as "already in
+the vault"; (3) `process_link` runs the full pipeline — v0.41's
+browser-grade fetch, extract, classify, analyze, atomic write — and on
+success the old placeholder is replaced (one note per source, SPEC
+§4.4). Legacy `_v1`/`_v2` stacking is consolidated: one source, one
+note, the leftovers swept. A link that fails AGAIN keeps its
+placeholder (refreshed) and re-enters the retry queue with a fresh set
+of 3 — nothing is silently dropped (SPEC §4.3 holds). The run rides
+the whole existing batch machinery: progress bar, per-link status,
+manifest marking, the Website Directory rebuild, the _inbox prune, the
+success modal.
+
+**What did NOT change.** Dismissed links stay dismissed (the
+placeholder file untouched — the owner said no once). Blocked/self
+domains keep their never-fetch law. Every file mutation is dry-run
+aware (a rehearsed retry mutates nothing). The scan reads only; the
+notice and the menu entry are the only new UI surfaces.
+
+**Gate.** 83/83 compiles · 1055/1055 tests (33+1 modules) · offline
+golden 30/30 + 0 invalid · the 15 new cases cover: the scan's
+qualifiers (app-owned failed only; hand-written and non-failed notes
+are human territory; missing vault/folder; stacking sorted), the wall
+itself (attempts=3 → process_link skips "no more retries" — then the
+driver re-arms and the link is stored properly with the placeholder
+removed and the queue resolved), the lost-row upgrade in one run, the
+re-failure refresh + fresh retry set, one-note-per-source stacking
+consolidation, the stale-placeholder cleanup next to a real note, the
+dismissal contract, the dry-run contract, the clean Stop, and the
+per-unique-URL progress contract.
+
 ## [0.41.0] — The UA wall: fetches present as the browser they're read in — 2026-10-06
 
 Owner ask (session): "Many website links get fetch error 403 … they're

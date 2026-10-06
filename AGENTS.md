@@ -28,13 +28,18 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
   tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy \
   tests.test_intakefix tests.test_sealfix tests.test_v0230 \
   tests.test_refactor_surface tests.test_websitesqueuefix \
-  tests.test_swotfix
+  tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix \
+  tests.test_importbatch tests.test_socialomit tests.test_resyncfix \
+  tests.test_reconfix tests.test_batchfinish tests.test_soundsettings \
+  tests.test_reviewretry
 ```
 
 That exact module list lives in `.github/workflows/ci.yml` (also: the
 compile step of the audited modules and the offline golden run —
 `python gitcurator/tools/run_golden_websites.py --offline`). The suite is
-**837 tests, zero network**. New modules go into the CI compile list; new
+**1055 tests, zero network** (v0.42.0; tests.test_reviewretry is pure
+stdlib — it runs even where the Qt-importing modules cannot). New modules
+go into the CI compile list; new
 test modules into the unittest line. Version bumps: `VERSION` file +
 `CHANGELOG.md` entry in the existing prose style.
 

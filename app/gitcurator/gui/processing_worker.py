@@ -252,6 +252,42 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
             urls = self.urls if self.urls else []
         elif self.mode == 'import':
             urls = self._fetch_from_import()
+        elif self.mode == 'review_retry':
+            # v0.42.0 — the _review backlog retry (the owner's ask: 100+
+            # links walled off by 403/405 fetch refusals under the
+            # pre-v0.41 honest-bot User-Agent). A pure, cheap scan of the
+            # Websites vault's _review folder; the scanned items ride to
+            # the websites phase as _review_backlog_items (with their
+            # placeholder paths — the driver needs them for hygiene).
+            urls = []
+            if not _websites_pipeline_on:
+                self.log_message.emit(
+                    "⛔ Websites pipeline is OFF (Settings → 📁 Vault) — "
+                    "the _review backlog cannot be retried.", "warning")
+                self.finished_signal.emit(
+                    True, "Websites pipeline is off — nothing retried.")
+                return
+            _wv = (self.config.get('website_vault_path') or '').strip()
+            if not _wv or not os.path.isdir(_wv):
+                self.log_message.emit(
+                    "⚠️ No Websites vault is set (Settings → 📁 Vault) — "
+                    "the _review backlog was not scanned.", "warning")
+                self.finished_signal.emit(
+                    True, "No Websites vault — nothing retried.")
+                return
+            _scanned = _website_pipeline.scan_review_backlog(
+                _wv, log=self.log_message.emit)
+            if not _scanned:
+                self.log_message.emit(
+                    "✅ The _review backlog is empty — no app-owned "
+                    "fetch-failed placeholders are waiting (anything "
+                    "else in _review needs your eyes, not a retry).",
+                    "success")
+                self.finished_signal.emit(
+                    True, "The _review backlog is empty — nothing to retry.")
+                return
+            self._review_backlog_items = _scanned
+            self._non_github_urls = [i['url'] for i in _scanned]
         else:
             urls = self._fetch_from_telegram()
 

@@ -1560,6 +1560,12 @@ class UiMixin:
         # v0.08 — 404 quarantine (dead-link) management: view the confirmed
         # list + reset for false positives.
         more_menu.addAction("🚫 View 404 Quarantine", self.view_dead_links)
+        # v0.42.0 — the _review backlog retry (the owner's ask): re-fetch
+        # the app-owned fetch-failed placeholders under v0.41's
+        # browser-grade presentation. The startup notice offers the same
+        # run once per launch; this is the anytime trigger.
+        more_menu.addAction("🔁 Retry _review backlog",
+                            self.retry_review_backlog_now)
         self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
         self.backup_export_btn.triggered.connect(self._backup_export_zip)
         more_menu.addSeparator()

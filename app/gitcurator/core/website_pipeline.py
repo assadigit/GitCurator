@@ -249,6 +249,84 @@ it is never lost; it will be retried automatically.
 
 
 # ===========================================================================
+# v0.42.0 — the _review backlog: scan + retry
+# ===========================================================================
+
+def _parse_review_frontmatter(path: str) -> Optional[Dict[str, str]]:
+    """Read the three keys the backlog retry needs from a note's
+    frontmatter (source / fetch_status / managed_by). None when the file
+    has no frontmatter block or cannot be read. String-scan only — core
+    never grows a YAML dependency for this."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return None
+    if not lines or lines[0].strip() != '---':
+        return None
+    out: Dict[str, str] = {}
+    for line in lines[1:]:
+        s = line.strip()
+        if s == '---':
+            break
+        if ':' not in s:
+            continue
+        key, _, val = s.partition(':')
+        key = key.strip().lower()
+        val = val.strip().strip('"').strip("'")
+        if key in ('source', 'fetch_status', 'managed_by'):
+            out[key] = val
+    return out
+
+
+def scan_review_backlog(vault_path: str,
+                        log: Optional[Callable] = None) -> List[Dict]:
+    """v0.42.0 — the owner's _review backlog scanner.
+
+    Walks ``<vault>/_review/*.md`` and returns the APP-OWNED
+    fetch-failed placeholders (``managed_by: gitcurator`` +
+    ``fetch_status: failed``): the links the pre-v0.41 honest-bot
+    User-Agent got walled on (HTTP 403/405 from bot defenses) — exactly
+    the pile the browser-grade presentation deserves to re-try. A
+    hand-written review note and a non-failed review note (low
+    classification confidence and friends) are NONE of our business:
+    they wait for human eyes, as designed.
+
+    Returns ``[{'url': source, 'path': note_path}, ...]`` — sorted by
+    filename for a deterministic order; one source may appear more than
+    once (legacy ``_v1``/``_v2`` stacking from older apps) — the retry
+    driver consolidates. Pure reads; no state DB, no network."""
+    review_dir = os.path.join(vault_path or '', REVIEW_FOLDER)
+    if not vault_path or not os.path.isdir(review_dir):
+        return []
+    try:
+        names = sorted(os.listdir(review_dir))
+    except Exception as e:
+        if log:
+            log(f"⚠️ Could not list {review_dir}: {e}", "warning")
+        return []
+    items: List[Dict] = []
+    for name in names:
+        if not name.lower().endswith('.md'):
+            continue
+        path = os.path.join(review_dir, name)
+        if not os.path.isfile(path):
+            continue
+        fm = _parse_review_frontmatter(path)
+        if not fm:
+            continue
+        if fm.get('managed_by', '').lower() != MANAGED_BY_GITCURATOR:
+            continue  # a human's note — never our call
+        if fm.get('fetch_status', '').lower() != 'failed':
+            continue  # in _review for OTHER reasons — human eyes
+        url = (fm.get('source') or '').strip()
+        if not url.lower().startswith(('http://', 'https://')):
+            continue
+        items.append({'url': url, 'path': path})
+    return items
+
+
+# ===========================================================================
 # The pipeline
 # ===========================================================================
 
@@ -1019,3 +1097,138 @@ class WebsitePipeline:
             results.append(self.process_link(u))
         self.counters['retried'] = len(due)
         return results
+
+    # -- v0.42.0: the _review backlog retry driver --------------------------
+
+    def retry_review_backlog(self, items: List[Dict],
+                             should_continue: Optional[Callable] = None,
+                             on_progress: Optional[Callable] = None
+                             ) -> List[Dict]:
+        """v0.42.0 — retry the scanned ``_review`` backlog (the owner's
+        ask: 100+ links walled off by 403/405 fetch refusals under the
+        pre-v0.41 honest-bot User-Agent).
+
+        ``items`` is what :func:`scan_review_backlog` returned. Per
+        unique URL:
+
+          * the whole retry queue is RE-ARMED first (attempts=0). The
+            wall pile is exactly the links whose 3 automatic retries
+            burned out under the OLD fetcher; without the re-arm
+            process_link would skip them as "no more retries" forever.
+            Same precedent as the proxy-epoch re-arm (v0.19.0).
+          * a placeholder whose state row was LOST (cache.db rebuilt,
+            note written by an older app) gets the row re-registered
+            from the disk truth — so the link routes through the
+            upgrade path in ONE run instead of "already in the vault".
+          * :meth:`process_link` does the rest: fetch (v0.41's
+            browser-grade presentation), extract, classify, analyze,
+            atomic write — and on success the upgrade path replaces the
+            old placeholder (SPEC §4.4's one-note-per-source rule).
+          * any OTHER app-owned failed placeholder for the same source
+            (legacy ``_v1``/``_v2`` stacking) is cleaned after the
+            verdict: one source, one note.
+
+        A link that fails AGAIN keeps its placeholder (refreshed in
+        place) and re-enters the retry queue with a fresh set of 3 —
+        nothing is silently dropped (SPEC §4.3 holds). Returns the
+        per-link result dicts (same shape as :meth:`run`)."""
+        results: List[Dict] = []
+        if not items:
+            return results
+        try:
+            rearmed = self.state.rearm_retries()
+            if rearmed:
+                self.log(
+                    f"🔁 _review backlog retry: re-armed {rearmed} queued "
+                    f"retry(ies) — their 3 attempts burned out under the "
+                    f"old fetcher; every link gets a fresh set", "info")
+        except Exception as e:  # bookkeeping never kills the batch
+            self.log(f"⚠️ Retry re-arm skipped: {e}", "warning")
+        # Consolidate the scan: one source may own several placeholder
+        # files; process the URL once, clean the leftovers after the
+        # verdict (dict order = scan order = sorted filenames).
+        by_url: Dict[str, List[str]] = {}
+        for it in items:
+            by_url.setdefault(it.get('url') or '', []).append(
+                it.get('path') or '')
+        by_url.pop('', None)
+        self.counters['retried'] = self.counters.get('retried', 0) \
+            + len(by_url)
+        for url, paths in by_url.items():
+            if should_continue is not None and not should_continue():
+                self.log("⏹️ _review backlog retry stopped by user — the "
+                         "remaining placeholders keep waiting", "warning")
+                break
+            if on_progress is not None:
+                try:
+                    on_progress(url)
+                except Exception:
+                    pass
+            canonical = normalize_website_url(url)
+            try:
+                prior = self.state.processed_row(canonical)
+            except Exception:
+                prior = None
+            if prior is None and paths:
+                # State row lost — the note on disk is the proof. Register
+                # the row the older app SHOULD have written (a failed
+                # placeholder at this path) so process_link routes this
+                # link through the upgrade path, not "already in the
+                # vault". Never clobbers an existing row (prior is None).
+                try:
+                    self.state.mark_processed(
+                        canonical, paths[0], '', '', 'failed')
+                    if self.state.retry_row(canonical) is None:
+                        self.state.enqueue_retry(
+                            canonical,
+                            're-discovered _review placeholder (state row '
+                            'was lost)')
+                    self.log(
+                        f"🗂️ {url}: state row was lost — re-registered its "
+                        f"_review placeholder before retrying", "info")
+                except Exception as e:
+                    self.log(f"⚠️ Row re-registration skipped for {url}: "
+                             f"{e}", "warning")
+            r = self.process_link(url)
+            fresh_path = r.get('note_path') or ''
+            outcome = r.get('outcome')
+            error = r.get('error') or ''
+            # Stale duplicate cleanup: only when THIS run produced a note
+            # (processed / review) or the link is already stored for real
+            # ("already in the websites vault") — never on a dismissed or
+            # blocked skip (those contracts forbid touching the files).
+            if outcome in ('processed', 'review') \
+                    or (outcome == 'skipped'
+                        and 'already in' in error):
+                for p in paths:
+                    if p and p != fresh_path:
+                        self._remove_scanned_placeholder(p)
+            results.append(r)
+        return results
+
+    def _remove_scanned_placeholder(self, path: str) -> None:
+        """Remove one scanned _review placeholder — but ONLY while it
+        still reads as an app-owned fetch-failed note (the scan's own
+        test, re-read at removal time, so a hand-edit that happened in
+        between is respected — same law as
+        _cleanup_replaced_review_note). Dry-run aware: every file
+        mutation in the pipeline goes through core/dryrun."""
+        if not path or not os.path.exists(path):
+            return
+        if not self._is_review_path(path):
+            return
+        fm = _parse_review_frontmatter(path)
+        if not fm \
+                or fm.get('managed_by', '').lower() != MANAGED_BY_GITCURATOR \
+                or fm.get('fetch_status', '').lower() != 'failed':
+            self.log(
+                f"⚠️ kept {os.path.basename(path)} — it no longer reads as "
+                f"an app-owned failed placeholder (hand-edited?)",
+                "warning")
+            return
+        try:
+            _dryrun.remove(path)
+            self.log(f"🧹 removed stale _review placeholder "
+                     f"{os.path.basename(path)}", "info")
+        except Exception as e:
+            self.log(f"⚠️ could not remove {path}: {e}", "warning")

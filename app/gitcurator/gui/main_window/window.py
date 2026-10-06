@@ -245,6 +245,18 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
         except Exception:
             pass  # best-effort — never crash on a timer issue
 
+        # v0.42.0 — the _review backlog notice (the owner's ask): after the
+        # UI settles, scan the Websites vault's _review folder. App-owned
+        # fetch-failed placeholders = links the pre-v0.41 honest-bot UA got
+        # walled on (403/405). One notice per launch, offered only when
+        # there is something to retry, never during a live batch — and
+        # self-extinguishing: retry them, they pass, the notice is gone
+        # forever. The scan itself is pure frontmatter reads.
+        try:
+            QTimer.singleShot(2500, self._startup_review_backlog_check)
+        except Exception:
+            pass  # best-effort — never crash on a timer issue
+
     # v0.34 (follow-up review): the app opens with NO focus ring anywhere.
     # The gear button is the FIRST tabbable child, so plain Qt behavior
     # hands it the initial focus at every launch — the keyboard-focus
