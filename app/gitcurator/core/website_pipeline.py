@@ -377,7 +377,9 @@ class WebsitePipeline:
                     self.log(
                         f"🌐 Web fetches via "
                         f"{_web_fetch.proxy_label(self.web_proxy)} proxy "
-                        f"(Settings → 🌐 Proxy)", "info")
+                        f"(Settings → 🌐 Proxy) — v0.43.0 both doors: the "
+                        f"direct line is still tried when the proxy path "
+                        f"fails or is walled (403/405/429/451)", "info")
                     _proxy = self.web_proxy
 
                     def _proxied_fetch(url, **kwargs):

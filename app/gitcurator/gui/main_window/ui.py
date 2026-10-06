@@ -244,16 +244,26 @@ class UiMixin:
         # (poisoned DNS), so the Websites pipeline fetches through the
         # proxy too. Default ON (a configured proxy is there to be used);
         # untick to fetch direct.
+        # v0.43.0 — both doors: with this ON the proxy is the FIRST route
+        # and the direct line is still tried whenever the proxy path
+        # fails OR is walled (403/405/429/451 — a wall aimed at the
+        # route's IP, not at the page). Unticked stays a hard opt-out:
+        # web fetches never touch the proxy.
         self.proxy_use_for_web = QCheckBox(
             "Use this proxy for web fetches too (Websites pipeline — "
-            "x.com / YouTube need it)")
+            "x.com / YouTube need it; the direct line stays the fallback)")
         self.proxy_use_for_web.setChecked(
             bool(self.config.get('proxy', {}).get('use_for_web', True)))
         self.proxy_use_for_web.setToolTip(
-            "When ON, every website fetch goes through this proxy and DNS "
-            "is resolved at the proxy exit. Fixes the connection-refused "
-            "failures on blocked sites (x.com, t.co, youtu.be). Loopback "
-            "(Ollama / llama.cpp) is NEVER proxied.")
+            "When ON, website fetches try the proxy FIRST and the direct "
+            "line SECOND (v0.43.0 both doors): if the proxy path fails, "
+            "times out, or is refused with 403/405/429/451 — a wall aimed "
+            "at that route's IP — the same URL is retried once direct, so "
+            "a datacenter-exit 403 cannot strand a site your own line can "
+            "reach (and x.com / YouTube still work through the tunnel). "
+            "When OFF, web fetches never touch the proxy. Loopback "
+            "(Ollama / llama.cpp) is NEVER proxied. Telegram is unchanged: "
+            "it always uses the proxy when one is enabled.")
 
         proxy_layout.addRow(self.proxy_enabled)
         proxy_layout.addRow("Type:", self.proxy_type)

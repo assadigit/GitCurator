@@ -25,6 +25,20 @@ Politeness:
     - connect+read timeout on every request
     - a hard byte cap (reads stream in chunks and stop at the cap)
 
+v0.43.0 — BOTH DOORS. The owner still met walls after v0.41.0:
+a 403 aimed at the PROXY EXIT's datacenter IP (the residential line
+was never asked), or both doors dead at once ("proxy: timeout |
+direct: connection: timed out"). A 403/405/429/451 is an answer aimed
+at the ROUTE'S IP — a bot wall, a per-IP rate limit, a method-block,
+a geo-block — NOT an answer about the page. The fetcher that already
+alternates to DIRECT on connection-class proxy failures (v0.21.0)
+now alternates on these route-aimed refusals too: one attempt per
+route, politeness untouched, a success via the second route is a
+real success (the wall is named in its reason), and a wall on BOTH
+routes reports both reasons in one honest line. Telegram keeps its
+own law — MTProto always rides the proxy when one is enabled; only
+HTTP website fetches get the second door.
+
 v0.41.0 — The UA wall comes down. The honest "GitCurator/…" User-Agent
 was answered with HTTP 403 by every CDN bot defense on the golden list
 (pixabay, reddit, coolors, iconscout — working sites that simply refuse
@@ -104,6 +118,17 @@ DEFAULT_TIMEOUT_S = 20          # connect + per-read timeout
 DEFAULT_MAX_BYTES = 2_000_000   # 2 MB body cap
 DEFAULT_DOMAIN_DELAY_S = 2.0    # min seconds between hits on one domain
 MAX_REDIRECTS = 5
+
+# v0.43.0 — HTTP answers that are aimed at the ROUTE, not the page:
+# the WAF/IP-reputation wall (403), the method-block some CDNs answer
+# bots with (405 — in the owner's own _review pile), the per-IP rate
+# limit (429 — the OTHER route has its own quota), and the geo-block
+# (451 — the other route is in another country). When the primary
+# route gets one of these, the OTHER route still gets its one attempt.
+# Every other HTTP error (404 gone, 401 auth, 410, 5xx broken) is the
+# site answering about the RESOURCE — the truth on any route, no
+# fallback.
+ROUTE_REFUSAL_STATUSES = (403, 405, 429, 451)
 
 # Content types that are HTML-ish enough to parse.
 _HTML_TYPES = ('text/html', 'application/xhtml', 'text/plain')
@@ -562,10 +587,19 @@ def fetch_url(url: str,
     exit IP is blocked by the site's CDN — or a timeout, or the proxy
     dying mid-batch), the SAME URL is retried once DIRECT. Sites the exit
     cannot reach but the local line can (gist.github.com) succeed; sites
-    blocked on both lines fail with BOTH reasons in the result. HTTP
-    errors (4xx/5xx) mean the site ANSWERED — no fallback, the response
-    is the truth. Loopback is never proxied, so it never falls back
-    either."""
+    blocked on both lines fail with BOTH reasons in the result. Loopback
+    is never proxied, so it never falls back either.
+
+    v0.43.0 — BOTH DOORS: a route-aimed refusal (403/405/429/451 —
+    ``ROUTE_REFUSAL_STATUSES``; the wall the owner kept meeting after
+    v0.41.0 was aimed at the proxy exit's datacenter IP, and the direct
+    residential line was never asked) alternates to the other route
+    exactly like a connection-class failure. HTTP errors OUTSIDE the
+    refusal family (404/401/410/5xx) still mean the site ANSWERED about
+    the resource — no fallback, the response is the truth. A success via
+    the second route is a real success (reason names the wall it went
+    around); a refusal on BOTH routes reports both reasons in the
+    ``proxy: … | direct: …`` house line."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -585,13 +619,21 @@ def fetch_url(url: str,
 
     first = _fetch_once(url, timeout_s, max_bytes, user_agent, proxy,
                         started)
-    if first.ok or first.http_status is not None:
-        # Success, or the site itself answered (HTTP error) — done.
+    if first.ok:
+        return first
+    if (first.http_status is not None
+            and first.http_status not in ROUTE_REFUSAL_STATUSES):
+        # The site answered about the RESOURCE (404 gone, 401 auth,
+        # 5xx broken) — the answer is the truth on any route.
         return first
     if not proxy or not direct_fallback or _is_loopback_url(url):
         return first
 
-    # Connection-class failure through the proxy: one DIRECT attempt.
+    # v0.43.0 — the both-doors rule. The primary (proxied) route either
+    # never got an answer (connection class, v0.21.0) or was REFUSED
+    # with a route-aimed status (403/405/429/451 — the wall aimed at
+    # THIS route's IP, not an answer about the page). Either way the
+    # OTHER door gets its one attempt: DIRECT.
     second = _fetch_once(url, timeout_s, max_bytes, user_agent, None,
                          started)
     if second.ok:

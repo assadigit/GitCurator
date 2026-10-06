@@ -1,3 +1,71 @@
+## [0.43.0] — Both doors: a wall against one route asks the other — 2026-10-07
+
+Owner ask (session): "I still get 403, find a robust way so websites
+do not deny this system. or this: Fetch failed: proxy: timeout |
+direct: connection: timed out. add this option: when fetching
+websites, try with both proxy on and proxy off. only use always
+proxy for telegram (if proxy was on)." Desktop release v0.43.0,
+Worker unchanged at **0.30.0** (the fetcher is the desktop's). Suite
+grows **1055 → 1076** (21 cases in the new tests/test_bothdoors.py —
+pure stdlib, runnable even where the GUI suite cannot), 83 compiles
+(unchanged), offline golden 30/30.
+
+**The situation.** v0.41.0 made the request browser-grade, but a 403
+can still be aimed at the ROUTE, not the request: the proxy exit's
+datacenter IP is exactly what IP-reputation walls distrust, and no
+header set talks that down. And v0.21.0's direct fallback only fired
+on connection-class failures — an HTTP 403 through the proxy was
+accepted as "the site answered", so the residential line was never
+asked and the link died in `_review` with a one-sided story. (The
+second quoted failure — "proxy: timeout | direct: connection: timed
+out" — is the both-doors-dead case; that one was already honest, and
+it stays exactly as it was.)
+
+**The law.** A 403/405/429/451 is an answer aimed at the route's IP —
+the WAF/IP-reputation wall (403), the method-block some CDNs answer
+bots with (405, sitting in the owner's own `_review` pile next to
+the 403s), the per-IP rate limit (429 — the other route has its own
+quota), the geo-block (451 — the other route is in another country) —
+NOT an answer about the page. So `fetch_url` now treats exactly these
+four the way v0.21.0 already treated connection-class failures: the
+OTHER door (direct) gets its one attempt. One attempt per route,
+politeness untouched. A success via the second door is a REAL
+success — status full, 200, the wall named in the reason ("via
+direct fallback (proxy path failed: HTTP 403 — bot defense (server:
+cloudflare))") — stored properly, not parked in `_review`. A wall on
+BOTH doors reports both reasons in the one honest line the owner
+already knows ("proxy: … | direct: …").
+
+**What did NOT change.** Every other HTTP answer — 404 gone, 401
+auth, 410, 5xx broken — is the site's truth about the resource: one
+attempt, the answer stands (the response IS the truth, any route).
+Loopback is never proxied and never alternates (the v0.15.1 rule).
+`use_for_web` unticked remains a hard opt-out — web fetches never
+touch the proxy; ticked (the default) the proxy is the FIRST door
+and direct the second, and the Settings checkbox label + tooltip now
+say exactly that. Telegram keeps its own law: MTProto always rides
+the proxy when one is enabled — no both-doors on the Telegram side
+(source-contract tested). The proxy preflight, the retry queue, the
+proxy-epoch re-arm, and the v0.42.0 `_review` retry driver all ride
+unchanged on top — a retried backlog link now benefits from both
+doors automatically.
+
+**Gates.** 21 new cases: the four refusal walls alternate (403 with
+the cloudflare hint, 405, 429, 451, both-walled combined reason,
+timeout regression guard, the owner's exact both-dead line, and
+success-on-first-door never dialing the second — 8); the resource
+truths do not (404/401/500 — 3); the old laws hold (no proxy
+configured, `direct_fallback` opt-out, loopback — 3); source
+contracts (the refusal family, the `fetch_url` branch, the pipeline
+log line, the Settings copy, Telegram's untouched law, the release
+bookkeeping — 6); and one REAL end-to-end on live sockets: a SOCKS5
+server that answers 403 cloudflare through the tunnel plus a plain
+HTTP server on a non-loopback address — one `fetch_url` call comes
+back FULL via the direct door with the wall named, both doors dialed
+exactly once each (1). Local: 21/21, webproxy 42 pass + 6
+environmental (libEGL — identical to the clean tree), reviewretry
+15/15, touched modules compile. CI is the authoritative full gate.
+
 ## [0.42.0] — The backlog gets its second chance: _review scanned, noticed, retried — 2026-10-07
 
 Owner ask (session): "The app must have an option to scan the _review
