@@ -280,8 +280,16 @@ class WorkerWebsitePhaseMixin:
                 # classify → analyze → store) and cleans stale duplicate
                 # placeholders. Manifest marking, the directory rebuild and
                 # the _inbox prune below work on its results unchanged.
-                _backlog_items = getattr(self, '_review_backlog_items',
-                                         None) or []
+                # NB: the read is guarded explicitly — a QObject that
+                # skipped __init__ (the headless test harness shape) makes
+                # getattr-with-default RAISE via PyQt's __getattr__
+                # fallback, so the default alone is not enough (same law
+                # as the _current_position read above).
+                try:
+                    _backlog_items = \
+                        getattr(self, '_review_backlog_items', None) or []
+                except Exception:
+                    _backlog_items = []
                 if _backlog_items:
                     _unique = len({i.get('url') for i in _backlog_items})
                     self.total = _github_done + _unique

@@ -168,6 +168,10 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # Flag set by MainWindow when the URLs come from the bot queue (so
         # the link tracker can record the correct source).
         self._bot_source = False
+        # v0.42.0 — the _review backlog retry (mode 'review_retry'): the
+        # scanned items (url + placeholder path) the websites phase drives
+        # through retry_review_backlog. Empty for every other mode.
+        self._review_backlog_items = []
         # v25 pre-flight: banner download throttle counter — incremented on
         # every _download_banner() call so we can pause periodically and
         # avoid opengraph.githubassets.com 429s during large batches.
