@@ -876,6 +876,26 @@ class WebsitePipeline:
                     "curl_cffi — the browser-TLS handshake for "
                     "Cloudflare-class challenges); stdlib doors only",
                     "info")
+        # v0.46.0 — THE LADDER: the dead-page rescue ladder (URL
+        # variants, then the Wayback Machine's archived copy) and the
+        # DNS-over-HTTPS verdict ride every production fetch, and every
+        # failure carries its CATEGORY so retries go only to what time
+        # can heal. Config "web_archive_fallback" / "web_doh_probe"
+        # (both default ON) opt the two new rungs out; the injected
+        # test fetchers take **kwargs, so they never break.
+        self.archive_fallback = self.config.get(
+            'web_archive_fallback') is not False
+        self.doh_probe = self.config.get('web_doh_probe') is not False
+        if fetch_fn is None and (self.archive_fallback or self.doh_probe):
+            _rungs = []
+            if self.archive_fallback:
+                _rungs.append('dead pages climb variants then the Wayback '
+                              'Machine')
+            if self.doh_probe:
+                _rungs.append('DNS failures get the DNS-over-HTTPS verdict')
+            self.log("🪜 v0.46.0 ladder armed: " + '; '.join(_rungs)
+                     + "; 429/503 pay Retry-After into the domain limiter",
+                     "info")
         self.rate_limiter = rate_limiter or _web_fetch.DomainRateLimiter(
             float(self.config.get('web_domain_delay_s', DOMAIN_DELAY_S)
                   or DOMAIN_DELAY_S))
@@ -1252,11 +1272,27 @@ class WebsitePipeline:
             return result
 
         # ---- 2. dedupe (SPEC §4.3 step 2) --------------------------------
+        _auto_verdict = ''
         if self.state.is_dismissed(canonical):
             result['outcome'] = 'skipped'
+            try:
+                _drow = self.state.dismissed_row(canonical) or {}
+                _dreason = str(_drow.get('reason') or '')
+            except Exception:
+                _dreason = ''
+            if _dreason.startswith('auto-verdict:'):
+                _auto_verdict = _dreason[len('auto-verdict:'):].strip()
             if canonical in self._graveyard_urls:
                 result['error'] = ('decommissioned by owner (graveyard) — '
                                    'never fetched again')
+            elif _auto_verdict:
+                # v0.46.0 — the fetcher's own verdict retired this link
+                # (dead / paywalled / refused): the graveyard's gate,
+                # earned by the ladder instead of the owner's hand.
+                result['error'] = (f'retired by auto-verdict '
+                                   f'({_auto_verdict}) — never fetched '
+                                   'again (revive via the graveyard if '
+                                   'it returns)')
             else:
                 result['error'] = 'dismissed (note was deleted)'
             self.counters['skipped'] += 1
@@ -1264,6 +1300,10 @@ class WebsitePipeline:
             if canonical in self._graveyard_urls:
                 self.log(f"🪦 {url}: decommissioned by owner — skipped "
                          "(the graveyard table's verdict)", "info")
+            elif _auto_verdict:
+                self.log(f"🪦 {url}: skipped — auto-verdict: "
+                         f"{_auto_verdict} (revive via the graveyard if "
+                         "the link returns)", "info")
             return result
 
         in_vault = self.vault_index_has(canonical)
@@ -1314,12 +1354,31 @@ class WebsitePipeline:
             url, timeout_s=self.fetch_timeout_s,
             max_bytes=self.fetch_max_bytes,
             rate_limiter=self.rate_limiter,
-            impersonate_fallback=self.impersonate_fallback)
+            impersonate_fallback=self.impersonate_fallback,
+            archive_fallback=self.archive_fallback,
+            doh_probe=self.doh_probe)
         result['fetch_status'] = fetch.status
 
         if not fetch.ok:
             # ---- failure handling: minimal _review note + retry queue -----
-            self.state.enqueue_retry(canonical, fetch.reason)
+            # v0.46.0 — the CATEGORY decides whether time can heal the
+            # failure. dead / paywalled / refused / bad_url never requeue:
+            # the note is still written (no link left behind), the retry
+            # row is DROPPED (nothing to wait for), and the link is
+            # auto-dismissed with the verdict as the reason — the same
+            # never-fetch-again gate the graveyard uses, earned here by
+            # the fetcher's own verdict instead of the owner's hand. The
+            # owner can revive (♻️) or decommission (🪦) as usual.
+            _no_heal = (getattr(fetch, 'category', '') or '') in (
+                'dead', 'paywalled', 'refused', 'bad_url')
+            if _no_heal:
+                if retry:
+                    self.state.resolve_retry(canonical)
+                self.state.dismiss(
+                    canonical,
+                    f"auto-verdict: {fetch.category} — {fetch.reason}")
+            else:
+                self.state.enqueue_retry(canonical, fetch.reason)
             note = build_review_note(canonical, 'failed',
                                      f"Fetch failed: {fetch.reason}")
             # Re-failure: overwrite the app-owned placeholder in place when
@@ -1333,9 +1392,42 @@ class WebsitePipeline:
                           error=f"fetch failed: {fetch.reason}")
             self.counters['review' if not upgraded else 'upgraded'] += 1
             self.last_results.append(result)
-            self.log(f"📥 [{self._vault_name}] {url}: fetch failed "
-                     f"({fetch.reason}) — minimal note in _review, retry "
-                     "scheduled", "warning")
+            if _no_heal:
+                self.log(f"🪦 [{self._vault_name}] {url}: fetch failed "
+                         f"({fetch.reason}) — minimal note in _review; "
+                         f"no retry scheduled (category: "
+                         f"{fetch.category} — the verdict does not heal "
+                         "with time; revive via the graveyard if the "
+                         "link returns)", "warning")
+            else:
+                self.log(f"📥 [{self._vault_name}] {url}: fetch failed "
+                         f"({fetch.reason}) — minimal note in _review, "
+                         "retry scheduled", "warning")
+            return result
+
+        if (getattr(fetch, 'category', '') or '') == 'archived':
+            # ---- v0.46.0 — an archived rescue files under _review -------
+            # Real content served by the Wayback Machine, but the LIVE
+            # page is gone: like every other partial it waits for the
+            # owner's move (a dead link's snapshot is the owner's call —
+            # keep, move, or bury), and unlike a failure it RESOLVES the
+            # retry row (the fetch itself succeeded; the note is indexed
+            # by the vault, so it is never re-fetched).
+            page = _web_extract.extract_from_bytes(fetch.body, fetch.charset)
+            reason = fetch.reason or 'archived copy of a dead page'
+            note = build_review_note(canonical, 'partial', reason,
+                                     title=page.title or '')
+            path = self._review_path(canonical, prior=prior)
+            self._write_note(path, note)
+            self._record(canonical, path, note, '', '', 'partial')
+            if retry:
+                self.state.resolve_retry(canonical)
+            result.update(outcome='review', note_path=path, error=reason,
+                          fetch_status='partial')
+            self.counters['review' if not upgraded else 'upgraded'] += 1
+            self.last_results.append(result)
+            self.log(f"🗄️ [{self._vault_name}] {url}: {reason} — filed "
+                     "under _review (the live page is gone)", "warning")
             return result
 
         # ---- 4. extract ----------------------------------------------------

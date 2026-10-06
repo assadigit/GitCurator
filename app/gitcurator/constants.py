@@ -164,6 +164,15 @@ CONFIG_EXAMPLE = {
     # coolors, iconscout on the golden list). Set the old honest string
     # here to opt back out of the browser presentation.
     "web_user_agent": "",
+    # v0.46.0 — THE LADDER's two new rungs (both default ON):
+    # "web_archive_fallback": false stops the dead-page rescue ladder
+    # from asking the Wayback Machine for an archived copy after the
+    # URL variants fail (a 404 stays a plain dead verdict);
+    # "web_doh_probe": false stops the DNS-over-HTTPS verdict that
+    # names whose fault a name-resolution failure is (poisoned local
+    # resolver vs. a dead domain).
+    "web_archive_fallback": True,
+    "web_doh_probe": True,
     "ollama": {
         "base_url": "http://localhost:11434",
         "model": "qwythos-9b"

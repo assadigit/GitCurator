@@ -270,6 +270,19 @@ class WebsiteStateDB:
                 "SELECT 1 FROM dismissed_urls WHERE url=?", (url,)).fetchone()
         return row is not None
 
+    def dismissed_row(self, url: str) -> Optional[Dict]:
+        """v0.46.0 — the dismissal's stored reason. The auto-verdicts
+        the fetcher writes (category 'dead'/'paywalled'/'refused') name
+        themselves in the reason so the skip line can tell a retired
+        link from a deleted note."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT url, reason, dismissed_at FROM dismissed_urls"
+                " WHERE url=?", (url,)).fetchone()
+        if not row:
+            return None
+        return {'url': row[0], 'reason': row[1], 'dismissed_at': row[2]}
+
     def retry_row(self, url: str) -> Optional[Dict]:
         with self._lock:
             row = self.conn.execute(

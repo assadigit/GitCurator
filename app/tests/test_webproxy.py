@@ -394,11 +394,18 @@ class TestHttpProxyAndOpeners(unittest.TestCase):
 
     def test_build_opener_variants(self):
         import ssl
+        import urllib.request
         ctx = ssl.create_default_context()
-        # no proxy: today's opener (redirect cap + ssl, no forced handler)
+        # no proxy: v0.46.0's opener — NO auto-following redirect handler
+        # (redirects are followed by _fetch_once's own loop, which carries
+        # hop cookies), ssl context, no forced proxy handler
         op = wf._build_opener(None, ctx)
-        self.assertTrue(any(isinstance(h, wf._RedirectCap)
+        self.assertTrue(any(isinstance(h, wf._NoRedirectHandler)
                             for h in op.handlers))
+        self.assertFalse(any(
+            isinstance(h, urllib.request.HTTPRedirectHandler)
+            and not isinstance(h, wf._NoRedirectHandler)
+            for h in op.handlers))
         self.assertFalse(any(isinstance(h, wf._SocksHandler)
                              for h in op.handlers))
         # socks proxy: the SOCKS handler rides along

@@ -211,7 +211,28 @@ class TestResourceAnswers(unittest.TestCase):
         self.assertEqual(res.reason, reason)
 
     def test_404_gone_is_the_truth(self):
-        self._single(404, 'HTTP 404')
+        """v0.46.0 — the dead page's truth never opens the SECOND ROUTE,
+        but it now climbs the rescue ladder first: the variant asks and
+        the Wayback probe all ride the SAME (primary) route, and the
+        verdict is category 'dead' when nothing rescues the link."""
+        calls = []
+
+        def _fake(url, timeout_s, max_bytes, user_agent, proxy, started):
+            calls.append(proxy)
+            return _route('HTTP 404', http_status=404)
+
+        with mock.patch.object(wf, '_fetch_once', side_effect=_fake):
+            res = wf.fetch_url('https://gone.test/404', timeout_s=2,
+                               proxy=dict(self.PROXY))
+        self.assertFalse(res.ok)
+        # every ask rode the PRIMARY route — the site answered, no
+        # second door: the original + two variants + the Wayback probe
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all(c == self.PROXY for c in calls),
+                        f'unexpected route: {calls}')
+        self.assertEqual(res.http_status, 404)
+        self.assertEqual(res.category, 'dead')
+        self.assertIn('variants tried', res.reason)
 
     def test_401_auth_is_the_truth(self):
         self._single(401, 'HTTP 401')
@@ -326,15 +347,16 @@ class TestSourceContracts(unittest.TestCase):
         self.assertIn("proxy_config.get('enabled')", src)
 
     def test_release_bookkeeping(self):
-        # v0.45.0 — the version pin follows the release (the third door
-        # owns the headline now; the both-doors beat stays in the log
+        # v0.46.0 — the version pin follows the release (the ladder owns
+        # the headline now; the both-doors beat stays in the log
         # below the new head).
         with open(os.path.join(_REPO_ROOT, '..', 'VERSION'),
                   encoding='utf-8') as fh:
-            self.assertEqual(fh.read().strip(), '0.45.0')
+            self.assertEqual(fh.read().strip(), '0.46.0')
         with open(os.path.join(_REPO_ROOT, '..', 'CHANGELOG.md'),
                   encoding='utf-8', errors='replace') as fh:
             head = fh.read(24000)
+        self.assertIn('[0.46.0]', head)
         self.assertIn('[0.45.0]', head)
         self.assertIn('[0.44.0]', head)
         self.assertIn('[0.43.0]', head)

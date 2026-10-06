@@ -545,7 +545,12 @@ class TestDirectFallback(unittest.TestCase):
             res = wf.fetch_url("https://x.example/gone", timeout_s=2,
                                proxy=dict(self.PROXY))
         self.assertFalse(res.ok)
-        self.assertEqual(calls, [self.PROXY])      # site ANSWERED — truth
+        # v0.46.0 — the site ANSWERED (no route fallback), but the dead
+        # page climbs its rescue ladder first: original + two variants +
+        # the Wayback probe, all on the PRIMARY route, then the verdict.
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all(c == self.PROXY for c in calls),
+                        f"unexpected route: {calls}")
 
     def test_opt_out_and_no_proxy_and_loopback(self):
         calls = []

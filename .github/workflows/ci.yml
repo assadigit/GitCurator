@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 83 audited
-# Python modules and runs the full 1128-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1187-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -9,7 +9,17 @@
 # websitesqueuefix + 11 swotfix + 10 webnote_v2 + 22 lawfix + 29
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
-# 26 decommission + 26 thirddoor).
+# 26 decommission + 26 thirddoor + 59 ladder).
+# v0.46.0 — THE LADDER: the owner's fresh failure pile (bare "HTTP
+# 307", TLS-handshake walls, getaddrinfo failures, 404s, 429s, 523s,
+# 402s) maps every failure class to its honest door — the redirect law
+# moved into the fetcher's own loop (hop cookies, 308, loop detection,
+# honest broken-redirect verdicts), TLS-handshake walls open the third
+# door, DNS failures get the DNS-over-HTTPS verdict, dead pages climb
+# variants then the Wayback Machine, 429/503 pay Retry-After into the
+# domain limiter, and FetchResult.category sends retries only to what
+# time can heal (dead/paywalled/refused retire via the graveyard's own
+# gate). 59 cases join in tests/test_ladder.py (1187).
 # v0.45.0 — THE THIRD DOOR: the owner's "proxy: HTTP 403 | direct:
 # HTTP 403 — bot defense (Cloudflare: challenge)" line is the wall
 # aimed at the requester's TLS FINGERPRINT — something urllib can
@@ -274,8 +284,8 @@ jobs:
           gitcurator/core/mirror_keys.py
           gitcurator/core/netctx.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -286,4 +296,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 83 compiles + 1030 tests + worker 50 + offline golden run (v0.40.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 83 compiles + 1187 tests + worker 50 + offline golden run (v0.46.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

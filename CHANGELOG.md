@@ -1,3 +1,126 @@
+## [0.46.0] — The ladder: every failure class gets its honest door — 2026-10-08
+
+Owner ask (session): a fresh failure pile — "Fetch failed: HTTP 307",
+"proxy: connection: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] sslv3 alert
+handshake failure (_ssl.c:1010) | direct: connection: [Errno 11001]
+getaddrinfo failed", "HTTP 404", "proxy: HTTP 429 | direct: HTTP 429",
+"proxy: HTTP 403 | direct: HTTP 429 — bot defense (server:
+cloudflare)", "HTTP 301", "proxy: timeout | direct: connection: timed
+out", "HTTP 523", "proxy: connection: _ssl.c:993: The handshake
+operation timed out | direct: connection: [SSL:
+UNEXPECTED_EOF_WHILE_READING]…", "proxy: HTTP 405 | direct: HTTP 405",
+"HTTP 402" — with the brief: "Fix the root cause of this errors."
+Desktop release v0.46.0, Worker unchanged at **0.30.0** (the fetcher is
+the desktop's). Suite grows **1128 → 1187** (59 cases in the new
+tests/test_ladder.py — hand-built FetchResults, patched seams, zero
+sockets except the one live-wire law: the redirect loop proves itself
+against a real local server), 83 compiles (unchanged), offline golden
+30/30.
+
+**The diagnosis.** The pile is not one wall — it is a dozen different
+root causes wearing the same "Fetch failed:" prefix. A bare "HTTP
+301/307" is urllib's redirect follower SILENTLY GIVING UP (a redirect
+answer with no Location header — or a hop chain whose "too many
+redirects" detail our own reason line threw away) while cookies set
+ON the hop never reached the next hop (the exact "lost a cookie
+during it" login-loop class). The "[SSL: SSLV3_ALERT_HANDSHAKE
+FAILURE]" lines are the fingerprint verdict aimed at the HANDSHAKE —
+which v0.45's third door refused to answer because it only fired on
+HTTP answers. "[Errno 11001] getaddrinfo failed" is the local resolver
+lying (the v0.19.0 poison class) or a domain that no longer exists —
+and until now nothing could tell the two apart. "HTTP 404" retried
+three times over days and then sat in _review forever, even when the
+page had merely moved (www, trailing slash) or the Wayback Machine
+held the only copy. "429 | 429" was the site asking for a pause and
+being ignored. "523"/"522" were Cloudflare saying the SITE's own
+server is down — and our reason line said nothing. "402"/"401"/"405"
+were paywall/private/method-refused — each retried as if time could
+heal it.
+
+**The ladder — every failure class gets its door.** The redirect law
+moved OUT of urllib into the fetcher's own loop: hops carry their
+cookies (a persistent, domain-scoped jar — a clearance cookie earned
+on one domain keeps working on the next visit), 308 is followed
+(urllib < 3.11 refuses it), loops are named, Referer joins hops the
+way a real browser sends it (full URL same-host, origin-only
+cross-host), and a redirect with no Location header is an honest
+"broken redirect — no Location header… site-side" failure instead of
+a bare "HTTP 307". A TLS-handshake-class wall (handshake failure,
+handshake timeout, UNEXPECTED_EOF) now opens the third door just like
+a refusal-family answer — curl_cffi's Chrome handshake is the one
+answer to a fingerprint verdict, whichever shape it arrives in. A
+name-resolution failure on the direct line gets a DNS verdict via
+DNS-over-HTTPS (Cloudflare's JSON resolver, one cached question per
+host): NXDOMAIN → "the domain itself is dead (the local resolver was
+right)" and category **dead**; resolves → "the local resolver is
+lying (poisoned DNS; the proxy route is the door that can still reach
+it)"; unreachable → "verdict unknown" — never a false accusation. A
+dead page (404/410) climbs its rescue ladder before the verdict is
+final: the trailing-slash and www variants (the "moved without a
+redirect" class — a rescue is a REAL success with the story in the
+reason), then the Wayback Machine's archived copy (partial, category
+**archived**, the capture's timestamp named — filed in _review where
+the owner decides where a dead link's snapshot belongs); nothing
+rescued → the verdict names every rung that was tried. 429/503 read
+the site's Retry-After (seconds or HTTP-date), name it in the reason,
+and pay it into the domain limiter — the polite circuit breaker,
+capped at five minutes so one slow domain never stalls a batch.
+521-524 get Cloudflare's own words ("the site's own server is
+down/unreachable — site-side, retry later, not the fetcher's fault");
+402/401/405 get their names too (paywalled / private / method
+refused).
+
+**The categories — retries go only to what time can heal.** Every
+failure now carries ``FetchResult.category``: paywalled, dead,
+refused, redirect_broken, blocked_bot, proxy_error, retry_later,
+archived. The pipeline reads it at the failure gate: a **dead /
+paywalled / refused** verdict still writes its _review note (no link
+left behind) but never requeues — the retry row is dropped and the
+link is auto-dismissed with the verdict as its reason, the SAME
+never-fetch-again gate the v0.44 graveyard uses, earned here by the
+fetcher's own ladder instead of the owner's hand (revivable via the
+graveyard's ♻️ like any dismissal; the skip line says exactly why).
+An archived rescue resolves the queue (the fetch succeeded) and is
+indexed like any note — the delete-then-refetch loop cannot restart.
+Everything else — blocked_bot walls, timeouts, 52x site-side truths,
+DNS-poison routes — keeps its spaced automatic retries exactly as
+before.
+
+**The law, kept tight.** Loopback never climbs any rung (the v0.15.1
+rule now covers variants, the archive, and DoH too); the ladder is
+polite at every rung (each ask waits its domain's turn, the archive
+and snapshot on their own domains); https never downgrades for a
+variant; certificate failures deliberately do NOT open the third door
+(a bad cert is the site's problem, not a wall to talk down); config
+"web_archive_fallback" / "web_doh_probe" (both default ON) opt the
+two new rungs out; the golden run and injected test fetchers stay
+hermetic (the ladder lives inside fetch_url's production path only);
+each batch logs the ladder's state in one honest line. Two tests were
+deliberately updated with this release (test_bothdoors'
+404-is-the-truth and test_sealfix's http-error-gets-no-fallback): the
+site's answer is still the truth — but the dead page now climbs its
+rescue ladder FIRST, on the same route, and the tests now assert
+exactly that.
+
+**Gates.** 59 new cases in tests/test_ladder.py: the redirect truth
+(hop cookies carried across a live 307, the no-Location 307 named,
+loops named, the hop budget, 308 followed, the Referer law), the
+verdict table (402/401/405/521-524/429/503 reasons, categories and
+Retry-After seconds-and-HTTP-date), the third door's TLS trigger (the
+owner's exact SSL line opens it; plain timeouts and certificate
+failures never do), the DNS verdict (nxdomain/exists/unknown, the
+per-host cache, the opt-out, non-DNS failures never probe), the
+rescue ladder (the www rescue, the archived partial with its
+timestamp story, the dead verdict with every rung named, the archive
+opt-out, loopback never climbs), the circuit breaker (Retry-After
+paid, capped, default when absent, the limiter honors a paid
+penalty), the category precedence (a 404 truth beats the 403 wall
+that hid it), and the pipeline gate (dead/paywalled retire without
+retries and are never re-fetched, heal-able 403s keep their retries,
+legacy fetchers without categories keep the old behavior, archived
+rescues file in _review and never re-fetch). Full suite **1187/1187**,
+offline golden 30/30 + 0 invalid, 83-module compile gate OK.
+
 ## [0.45.0] — The third door: the handshake itself — 2026-10-08
 
 Owner ask (session): "Also find a workaround for this specific block:

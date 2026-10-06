@@ -25,6 +25,36 @@ Politeness:
     - connect+read timeout on every request
     - a hard byte cap (reads stream in chunks and stop at the cap)
 
+v0.46.0 — THE LADDER. The owner's fresh failure pile ("HTTP 307",
+"proxy: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] | direct: getaddrinfo
+failed", "HTTP 404", "429 | 429", "HTTP 523", "HTTP 402" …) maps
+every remaining wall to its honest door:
+
+    - redirects are now followed by OUR loop, not urllib's: hop
+      cookies ride along (the "lost a cookie during it" login-loop
+      class), 308 is followed, loops are named, and a redirect with
+      no Location header is an honest broken-redirect failure — never
+      a bare "HTTP 307" again.
+    - a TLS-handshake-class wall (SSLV3_ALERT_HANDSHAKE_FAILURE,
+      handshake timed out, UNEXPECTED_EOF) opens the third door too:
+      v0.45 fired curl_cffi only on refusal-family HTTP answers, but a
+      handshake refusal is just as much a fingerprint verdict.
+    - a name-resolution failure on the direct line gets a DNS verdict
+      via DNS-over-HTTPS: the local resolver is lying (poisoned), the
+domain is really dead (NXDOMAIN), or the verdict is unknown.
+    - a dead page (404/410) climbs its rescue ladder before the
+      verdict: URL variants (trailing slash, www), then the Wayback
+      Machine's archived copy — a rescue is a real success with the
+      story in the reason; nothing rescued → category 'dead'.
+    - 429/503: the site's Retry-After is read, named, and paid into
+      the domain limiter (capped at five minutes — one slow domain
+      never stalls a batch).
+    - 521-524 (Cloudflare's "the origin is down") and 402/401/405
+      get their names in the reason, and every failure carries a
+      CATEGORY (``FetchResult.category``: paywalled, dead, refused,
+      redirect_broken, blocked_bot, proxy_error, retry_later,
+      archived) so the pipeline retries only what time can heal.
+
 v0.43.0 — BOTH DOORS. The owner still met walls after v0.41.0:
 a 403 aimed at the PROXY EXIT's datacenter IP (the residential line
 was never asked), or both doors dead at once ("proxy: timeout |
@@ -79,7 +109,9 @@ Pure stdlib + optional PySocks, no PyQt.
 
 import gzip
 import http.client
+import http.cookiejar
 import io
+import json
 import socket
 import ssl
 import threading
@@ -87,6 +119,8 @@ import time
 import urllib.error
 import urllib.request
 import zlib
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Dict, Optional, Tuple
 
 # ===========================================================================
@@ -118,6 +152,60 @@ DEFAULT_TIMEOUT_S = 20          # connect + per-read timeout
 DEFAULT_MAX_BYTES = 2_000_000   # 2 MB body cap
 DEFAULT_DOMAIN_DELAY_S = 2.0    # min seconds between hits on one domain
 MAX_REDIRECTS = 5
+
+# v0.46.0 — THE LADDER: every failure class gets its door.
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+# Cloudflare's "the site's own server is broken" answers (521-524):
+# site-side truths — never the fetcher's fault, worth a later retry,
+# and worth their name in the reason.
+_CLOUDFLARE_ORIGIN_STATUSES = {
+    521: 'web server is down',
+    522: 'connection to the origin timed out',
+    523: 'origin is unreachable',
+    524: 'timed out waiting for the origin',
+}
+
+# Connection-class reasons that mean "the TLS handshake itself was
+# refused" — a fingerprint verdict (the third door's trigger), not a
+# network truth. Certificate failures are deliberately NOT here: a
+# bad cert is the site's problem, never something to talk down.
+_TLS_HANDSHAKE_MARKERS = (
+    'SSLV3_ALERT_HANDSHAKE_FAILURE', 'alert handshake failure',
+    'handshake operation timed out', 'handshake timed out',
+    'UNEXPECTED_EOF_WHILE_READING', 'EOF occurred in violation of protocol',
+    'WRONG_VERSION_NUMBER', 'TLSV1_ALERT', 'sslv3 alert',
+)
+
+# Connection-class reasons that mean "the NAME would not resolve" —
+# the DNS verdict's trigger (the owner's [Errno 11001] line).
+_DNS_FAIL_MARKERS = (
+    'getaddrinfo', 'name or service not known', 'no such host',
+    'temporary failure in name resolution', 'nodename nor servname',
+    'WSAHOST_NOT_FOUND', 'Name or service not known',
+)
+
+# Failure categories (FetchResult.category): what TIME can heal.
+# The pipeline reads this to decide retry-vs-retire; '' on success.
+_CATEGORY_PRECEDENCE = ('paywalled', 'dead', 'refused', 'redirect_broken',
+                        'blocked_bot', 'proxy_error', 'retry_later')
+_NO_HEAL_CATEGORIES = ('dead', 'paywalled', 'refused')
+
+# The rate-limit penalty law: a 429/503 answer pays the site's
+# Retry-After (or a 60s default) into the domain limiter, capped at
+# five minutes — the long game is the retry queue's day-scale backoff.
+_RATE_PENALTY_DEFAULT_S = 60.0
+_RATE_PENALTY_CAP_S = 300.0
+
+# The DNS-over-HTTPS verdict (the owner's "getaddrinfo failed" class).
+_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query'
+_DOH_TIMEOUT_S = 5.0
+_DOH_CACHE: Dict[str, str] = {}
+_DOH_CACHE_LOCK = threading.Lock()
+
+# The archive door (the 404/410 rescue's last rung).
+_ARCHIVE_API = 'https://archive.org/wayback/available'
+_ARCHIVE_MAX_BYTES = 65_536
 
 # v0.43.0 — HTTP answers that are aimed at the ROUTE, not the page:
 # the WAF/IP-reputation wall (403), the method-block some CDNs answer
@@ -189,14 +277,23 @@ _HTML_TYPES = ('text/html', 'application/xhtml', 'text/plain')
 class FetchResult:
     """One fetch attempt. ``body`` is raw bytes (capped); ``text`` is the
     best-effort decode (charset from headers; web_extract re-decodes with
-    the page's own <meta charset> when the header lies)."""
+    the page's own <meta charset> when the header lies).
+
+    v0.46.0 — two new fields: ``category`` (the failure class: '' on
+    success, else one of paywalled / dead / refused / redirect_broken /
+    blocked_bot / proxy_error / retry_later / archived — what the
+    PIPELINE reads to retry only what time can heal) and
+    ``retry_after_s`` (the site's own Retry-After on a 429/503, paid
+    into the domain limiter by ``fetch_url``)."""
 
     __slots__ = ('url', 'final_url', 'status', 'reason', 'http_status',
-                 'content_type', 'charset', 'body', 'text', 'elapsed_s')
+                 'content_type', 'charset', 'body', 'text', 'elapsed_s',
+                 'category', 'retry_after_s')
 
     def __init__(self, url, final_url='', status='failed', reason='',
                  http_status=None, content_type='', charset='',
-                 body=b'', text='', elapsed_s=0.0):
+                 body=b'', text='', elapsed_s=0.0,
+                 category='', retry_after_s=None):
         self.url = url
         self.final_url = final_url or url
         self.status = status              # full | partial | failed
@@ -207,6 +304,8 @@ class FetchResult:
         self.body = body
         self.text = text
         self.elapsed_s = elapsed_s
+        self.category = category          # v0.46.0 — the failure class
+        self.retry_after_s = retry_after_s  # v0.46.0 — 429/503 Retry-After
 
     @property
     def ok(self) -> bool:
@@ -231,21 +330,43 @@ class DomainRateLimiter:
         self.delay_s = max(0.0, float(delay_s))
         self._lock = threading.Lock()
         self._last_hit: Dict[str, float] = {}
+        self._penalty_until: Dict[str, float] = {}
 
     def wait(self, domain: str) -> None:
-        """Block (sleep) until hitting ``domain`` is polite again."""
-        if not domain or self.delay_s <= 0:
+        """Block (sleep) until hitting ``domain`` is polite again.
+        v0.46.0 — a domain carrying a PAID penalty (a 429/503 answer)
+        waits until its penalty expires too: the site asked for a
+        pause, the limiter pays it. Sleeps in ≤1s slices so a big
+        penalty never locks the batch's thread unresponsively."""
+        if not domain or (self.delay_s <= 0
+                          and not self._penalty_until.get(domain)):
             return
         while True:
             with self._lock:
                 now = time.monotonic()
                 last = self._last_hit.get(domain, 0.0)
-                due = last + self.delay_s
+                due = max(last + self.delay_s,
+                          self._penalty_until.get(domain, 0.0))
                 if now >= due:
                     self._last_hit[domain] = now
                     return
                 sleep_for = due - now
-            time.sleep(min(sleep_for, self.delay_s))
+            time.sleep(min(sleep_for, 1.0))
+
+    def penalize(self, domain: str, seconds: float) -> None:
+        """v0.46.0 — the site answered 429/503 (maybe with Retry-After):
+        the domain's NEXT hit waits this much longer. The polite
+        circuit breaker — a hard wall would stall a batch; a delayed
+        next hit spreads the load honestly. Never raises."""
+        try:
+            if not domain or seconds <= 0:
+                return
+            until = time.monotonic() + float(seconds)
+            with self._lock:
+                if until > self._penalty_until.get(domain, 0.0):
+                    self._penalty_until[domain] = until
+        except Exception:
+            pass  # politeness bookkeeping never kills a fetch
 
 
 # ---------------------------------------------------------------------------
@@ -469,8 +590,16 @@ def _build_opener(proxy: Optional[Dict], context: ssl.SSLContext,
       ``ProxyHandler({})``: no proxy of ANY kind, not even the system one.
     - neither → today's behavior (system proxy settings, if any, still
       apply — urllib's default opener handlers).
+
+    v0.46.0 — the chain deliberately carries NO auto-following redirect
+    handler (``_NoRedirectHandler`` replaces urllib's): redirects are
+    followed by ``_fetch_once``'s OWN loop, which carries hop cookies,
+    follows 308s, and names broken redirects. urllib's follower cannot
+    do any of that — and its silent give-up was the bare "HTTP 307"
+    in the owner's failure pile.
     """
-    handlers = [_RedirectCap, urllib.request.HTTPSHandler(context=context)]
+    handlers = [_NoRedirectHandler,
+                urllib.request.HTTPSHandler(context=context)]
     if force_direct:
         handlers.insert(0, urllib.request.ProxyHandler({}))
     elif proxy:
@@ -482,12 +611,78 @@ def _build_opener(proxy: Optional[Dict], context: ssl.SSLContext,
 # The fetcher
 # ---------------------------------------------------------------------------
 
-class _RedirectCap(urllib.request.HTTPRedirectHandler):
-    """Counts redirects and refuses beyond MAX_REDIRECTS (default urllib
-    behavior is 10; a link that wanders 6+ hops is a redirect loop or a
-    tracker chute — failed, not followed)."""
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """v0.46.0 — the redirect law moved out of urllib. This handler
+    replaces the default ``HTTPRedirectHandler`` in the chain and
+    refuses every redirect (``redirect_request`` → None → urllib raises
+    HTTPError with the redirect's own headers) so ``_fetch_once``'s
+    loop can follow hops itself: hop cookies ride along, 308 is
+    followed (urllib <3.11 refuses it), loops are detected, and a
+    redirect with no Location header becomes an honest broken-redirect
+    failure instead of urllib's silent bare "HTTP 307"."""
 
-    max_redirections = MAX_REDIRECTS
+    max_redirections = 0
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# v0.46.0 — the persistent cookie jar (the browser-session law: a
+# clearance cookie earned on one domain keeps working on the next visit
+# to that domain, and cookies SET ON A REDIRECT HOP — the "lost a cookie
+# during it" login-loop class — reach the next hop). Process-lifetime,
+# domain-scoped by http.cookiejar itself, guarded by a lock.
+_COOKIE_JAR = http.cookiejar.CookieJar()
+_COOKIE_LOCK = threading.Lock()
+
+
+class _CookieResponseShim:
+    """http.cookiejar wants ``response.info()``; an HTTPMessage already
+    IS one — this shim just hands it over."""
+
+    __slots__ = ('_headers',)
+
+    def __init__(self, headers):
+        self._headers = headers
+
+    def info(self):
+        return self._headers
+
+
+def _absorb_cookies(headers, request) -> None:
+    """Extract Set-Cookie from one response into the shared jar.
+    Bookkeeping never kills a fetch."""
+    if headers is None or request is None:
+        return
+    try:
+        with _COOKIE_LOCK:
+            _COOKIE_JAR.extract_cookies(
+                _CookieResponseShim(headers), request)
+    except Exception:
+        pass
+
+
+def _attach_cookies(request) -> None:
+    """Add the jar's Cookie header for this request's domain."""
+    if request is None:
+        return
+    try:
+        with _COOKIE_LOCK:
+            _COOKIE_JAR.add_cookie_header(request)
+    except Exception:
+        pass
+
+
+class _RedirectBrokenError(Exception):
+    """v0.46.0 — a redirect answer that cannot be followed (no Location
+    header, a non-http target, a loop, or a hop chain past the budget).
+    Carried to ``_fetch_once``'s verdict as category 'redirect_broken'
+    with the precise story in the message."""
+
+    def __init__(self, code: int, detail: str):
+        super().__init__(f'HTTP {code} — broken redirect: {detail}')
+        self.code = int(code)
+        self.detail = str(detail)
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +744,204 @@ def _bot_defense_hint(headers) -> str:
     except Exception:
         return ''
     return ''
+
+
+def _redirect_target(headers) -> str:
+    """The Location (or URI) header of a redirect answer, '' when the
+    server sent none — urllib's silent give-up case (the bare
+    "HTTP 301/307" in the owner's pile: a redirect answer with no
+    Location is the server's answer being BROKEN, not ours)."""
+    if headers is None:
+        return ''
+    try:
+        loc = str(headers.get('Location') or '').strip()
+        if loc:
+            return loc.replace(' ', '%20')
+        loc = str(headers.get('URI') or '').strip()
+        if loc:
+            return loc.replace(' ', '%20')
+    except Exception:
+        return ''
+    return ''
+
+
+def _hop_headers(base: Dict[str, str], prev_url: str,
+                 next_url: str) -> Dict[str, str]:
+    """v0.46.0 — the header set for a redirect HOP. Chrome's navigation
+    headers stay (a redirect preserves the initiating request's
+    Sec-Fetch-* values — the address-bar navigation's 'none' rides
+    along); Referer joins the hop exactly the way a real browser sends
+    it: the full URL for a same-host hop, the ORIGIN only for a
+    cross-host hop (Chrome's default policy — leaking the full URL
+    cross-site is itself a bot tell)."""
+    from urllib.parse import urlparse
+    out = dict(base)
+    try:
+        prev_host = (urlparse(prev_url).netloc or '').lower()
+        next_host = (urlparse(next_url).netloc or '').lower()
+        parsed = urlparse(prev_url)
+        if prev_host and prev_host == next_host:
+            referer = prev_url
+        elif parsed.scheme and parsed.netloc:
+            referer = f'{parsed.scheme}://{parsed.netloc}/'
+        else:
+            referer = ''
+    except Exception:
+        referer = ''
+    if referer:
+        ordered = {}
+        for key, value in out.items():
+            if key == 'Accept-Encoding':
+                ordered['Referer'] = referer
+            ordered[key] = value
+        out = ordered
+    return out
+
+
+def _open_following(opener, url: str, headers: Dict[str, str],
+                    timeout_s: float):
+    """v0.46.0 — open ``url`` following redirect hops OURSELVES.
+
+    urllib's HTTPRedirectHandler silently gives up on a redirect with
+    no Location header (the bare "HTTP 307" in the owner's pile) and
+    never lets hop-set cookies reach the next hop — the "lost a cookie
+    during it" login-loop class (urllib re-opens from inside its error
+    handler, so the jar never sees the intermediate response). This
+    loop instead: carries the cookie jar across hops, follows
+    301/302/303/307/308 (308 needs it on urllib < 3.11), caps hops at
+    MAX_REDIRECTS, detects loops, and raises a precise
+    ``_RedirectBrokenError`` when the redirect answer is broken.
+
+    Returns ``(resp, final_url)`` — the FINAL non-redirect response
+    (the caller owns closing it). Non-redirect HTTP errors raise
+    HTTPError as before; everything else raises exactly what
+    ``opener.open`` raised."""
+    from urllib.parse import urljoin, urlparse
+    current = url
+    seen = {url}
+    hops = 0
+    while True:
+        req = urllib.request.Request(current, headers=dict(headers))
+        _attach_cookies(req)
+        try:
+            resp = opener.open(req, timeout=float(timeout_s))
+        except urllib.error.HTTPError as e:
+            _absorb_cookies(e.headers, req)
+            if e.code not in _REDIRECT_STATUSES:
+                raise
+            target = _redirect_target(e.headers)
+            try:
+                e.close()
+            except Exception:
+                pass
+            if not target:
+                raise _RedirectBrokenError(
+                    e.code, 'no Location header in the answer — the '
+                            "server's redirect is broken (site-side)") from e
+            try:
+                next_url = urljoin(current, target)
+                scheme = (urlparse(next_url).scheme or '').lower()
+            except Exception as ex:
+                raise _RedirectBrokenError(
+                    e.code, f'unusable Location ({ex})') from e
+            if scheme not in ('http', 'https'):
+                raise _RedirectBrokenError(
+                    e.code, f'redirect to a non-http target '
+                            f'({scheme or "no scheme"}: {target[:80]})') from e
+            if next_url in seen:
+                raise _RedirectBrokenError(
+                    e.code, f'redirect loop (the chain revisits '
+                            f'{next_url[:120]} after {hops} hop(s) — '
+                            'cookies are carried, so this is the '
+                            "server's own loop)") from e
+            if hops >= MAX_REDIRECTS:
+                raise _RedirectBrokenError(
+                    e.code, f'more than {MAX_REDIRECTS} redirects '
+                            '(a tracker chute or a wandering chain)') from e
+            hops += 1
+            seen.add(next_url)
+            headers = _hop_headers(headers, current, next_url)
+            current = next_url
+            continue
+        _absorb_cookies(resp.headers, req)
+        return resp, current
+
+
+def _parse_retry_after(headers) -> Optional[float]:
+    """v0.46.0 — the site's Retry-After (seconds or an HTTP-date) as a
+    float of seconds from NOW; None when absent or unparsable. The
+    politeness law: a site that says 'come back in N' gets believed."""
+    if headers is None:
+        return None
+    try:
+        raw = str(headers.get('Retry-After') or '').strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(int(raw)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return None
+
+
+def _http_error_verdict(code, headers) -> Tuple[str, str, Optional[float]]:
+    """v0.46.0 — one place that names every HTTP error the owner's pile
+    showed: (reason, category, retry_after_s). Codes outside the named
+    families keep the honest plain 'HTTP {code}' line. The 403/429
+    bot-defense hint keeps its v0.41.0 formatting byte-for-byte."""
+    code = int(code)
+    if code == 402:
+        return ('HTTP 402 — paywalled (payment required; the content '
+                'is behind a paywall, not gone)', 'paywalled', None)
+    if code == 401:
+        return ('HTTP 401 — authorization required (the page is '
+                'private; credentials the fetcher does not have)',
+                'refused', None)
+    if code == 405:
+        return ('HTTP 405 — method refused (the server does not allow '
+                'GET here — often an API-only endpoint)', 'refused', None)
+    if code in _CLOUDFLARE_ORIGIN_STATUSES:
+        return (f'HTTP {code} — Cloudflare: the site\'s own server '
+                f'{_CLOUDFLARE_ORIGIN_STATUSES[code]} (site-side, '
+                'retry later — not the fetcher\'s fault)',
+                'retry_later', None)
+    if code in (404, 410):
+        gone = 'the page is gone' if code == 404 else 'the page was removed'
+        return (f'HTTP {code} — {gone}', 'dead', None)
+    if code == 429:
+        retry_after = _parse_retry_after(headers)
+        hint = _bot_defense_hint(headers)
+        if hint:
+            return (f'HTTP 429 — {hint}', 'blocked_bot', retry_after)
+        if retry_after is not None:
+            return (f'HTTP 429 — rate limited (Retry-After: '
+                    f'{retry_after:.0f}s — the site asked for a pause)',
+                    'retry_later', retry_after)
+        return ('HTTP 429 — rate limited (no Retry-After given; the '
+                'domain limiter backs off anyway)', 'retry_later', None)
+    if code == 503:
+        retry_after = _parse_retry_after(headers)
+        if retry_after is not None:
+            return (f'HTTP 503 — service unavailable (Retry-After: '
+                    f'{retry_after:.0f}s)', 'retry_later', retry_after)
+        return ('HTTP 503 — service unavailable (the site is '
+                'temporarily down or maintaining)', 'retry_later', None)
+    if code == 403:
+        hint = _bot_defense_hint(headers)
+        if hint:
+            return (f'HTTP 403 — {hint}', 'blocked_bot', None)
+        return ('HTTP 403 — forbidden (the server refused this client '
+                'without naming a wall)', 'blocked_bot', None)
+    category = 'retry_later' if (code >= 500 or code == 408) else 'refused'
+    return f'HTTP {code}', category, None
 
 
 def _decompress_capped(body: bytes, encoding: str,
@@ -731,6 +1124,282 @@ def _impersonated_fetch_once(url: str, timeout_s: float, max_bytes: int,
                        elapsed_s=elapsed)
 
 
+def _is_tls_handshake_failure(reason: str) -> bool:
+    """v0.46.0 — True when a connection-class reason names a TLS
+    HANDSHAKE refusal (the fingerprint verdict). Certificate failures
+    are deliberately excluded: a bad cert is the site's problem, not a
+    wall to talk down."""
+    low = str(reason or '').lower()
+    return any(marker.lower() in low for marker in _TLS_HANDSHAKE_MARKERS)
+
+
+def _is_dns_failure(reason: str) -> bool:
+    """v0.46.0 — True when a connection-class reason says the NAME would
+    not resolve (the owner's [Errno 11001] getaddrinfo failed class)."""
+    low = str(reason or '')
+    return any(marker in low for marker in _DNS_FAIL_MARKERS)
+
+
+def _doh_probe_once(host: str, proxy: Optional[Dict]) -> str:
+    """v0.46.0 — ONE DNS-over-HTTPS question to Cloudflare's resolver
+    (JSON API): 'exists' / 'nxdomain' / 'unknown'. Rides the primary
+    route (the proxy when one is configured — the local resolver is
+    the suspect when direct DNS failed; the exit's resolver answers
+    the existence question). Pure stdlib, tiny, never raises. The
+    module-level seam tests swap (``wf._doh_probe_once``)."""
+    from urllib.parse import quote
+    try:
+        ctx = ssl.create_default_context()
+        opener = _build_opener(proxy, ctx)
+    except Exception:
+        return 'unknown'
+    req = urllib.request.Request(
+        f"{_DOH_ENDPOINT}?name={quote(host)}&type=A",
+        headers={'Accept': 'application/dns-json',
+                 'User-Agent': USER_AGENT})
+    try:
+        with opener.open(req, timeout=_DOH_TIMEOUT_S) as resp:
+            raw = resp.read(_ARCHIVE_MAX_BYTES)
+    except Exception:
+        return 'unknown'
+    try:
+        data = json.loads(raw.decode('utf-8', errors='replace'))
+        status = int(data.get('Status', -1))
+    except Exception:
+        return 'unknown'
+    if status == 0:
+        return 'exists'
+    if status == 3:
+        return 'nxdomain'
+    return 'unknown'
+
+
+def _doh_verdict(host: str, proxy: Optional[Dict]) -> str:
+    """The cached DoH verdict for a host (a domain's existence rarely
+    flips mid-process; one question per host, forever cached)."""
+    key = str(host or '').lower()
+    if not key:
+        return 'unknown'
+    with _DOH_CACHE_LOCK:
+        if key in _DOH_CACHE:
+            return _DOH_CACHE[key]
+    verdict = _doh_probe_once(key, proxy)
+    with _DOH_CACHE_LOCK:
+        _DOH_CACHE[key] = verdict
+    return verdict
+
+
+def _dns_verdict_suffix(direct_reason: str, url: str,
+                        proxy: Optional[Dict], doh_probe: bool
+                        ) -> Tuple[str, bool]:
+    """v0.46.0 — when the DIRECT line could not resolve the name, ask
+    DNS-over-HTTPS whose fault it is: (reason suffix, is_dead).
+
+    * nxdomain — the domain itself does not exist: the local resolver
+      was RIGHT, the link is dead, and no retry will heal it.
+    * exists — the name resolves out there: the LOCAL resolver is
+      lying (the v0.19.0 poisoned-DNS class) — the proxy route is the
+      door that can still reach the site.
+    * unknown — the DoH resolver itself could not be asked; no
+      verdict, no false accusation."""
+    if not doh_probe or not _is_dns_failure(direct_reason or ''):
+        return '', False
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url or '').hostname or '').strip()
+    except Exception:
+        return '', False
+    if not host:
+        return '', False
+    verdict = _doh_verdict(host, proxy)
+    if verdict == 'nxdomain':
+        return (' | dns: NXDOMAIN even via DNS-over-HTTPS — the domain '
+                'itself is dead (the local resolver was right)'), True
+    if verdict == 'exists':
+        return (' | dns: the name resolves via DNS-over-HTTPS — the '
+                'local resolver is lying (poisoned DNS; the proxy route '
+                'is the door that can still reach it)'), False
+    return (' | dns: DNS-over-HTTPS itself unreachable — verdict '
+            'unknown'), False
+
+
+def _is_bare_hostname(netloc: str) -> bool:
+    """True for a plain DNS host ('example.org') — no userinfo, no
+    port, not an IP, not localhost: only these have a meaningful www
+    variant."""
+    nl = str(netloc or '').strip()
+    if not nl or '@' in nl or ':' in nl:
+        return False
+    if nl.lower() == 'localhost' or '.' not in nl:
+        return False
+    try:
+        import ipaddress
+        ipaddress.ip_address(nl)
+        return False  # an IP has no www form
+    except ValueError:
+        return True
+
+
+def _url_variants(url: str) -> list:
+    """v0.46.0 — up to two honest variants of a dead URL: the
+    trailing-slash toggle and the www toggle — the two moves that
+    rescue the common 'moved without a redirect' class. https stays
+    https (never a scheme downgrade); an IP or localhost host has no
+    www form."""
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        parts = urlsplit(str(url or ''))
+    except ValueError:
+        return []
+    if parts.scheme not in ('http', 'https'):
+        return []
+    out = []
+    path = parts.path or ''
+    if path.endswith('/') and len(path) > 1:
+        variant_path = path[:-1]
+        label = 'no-trailing-slash'
+    else:
+        variant_path = path + '/'
+        label = 'trailing-slash'
+    out.append((label, urlunsplit(
+        (parts.scheme, parts.netloc, variant_path,
+         parts.query, parts.fragment))))
+    nl = parts.netloc
+    if nl.lower().startswith('www.'):
+        out.append(('non-www', urlunsplit(
+            (parts.scheme, nl[4:], path, parts.query, parts.fragment))))
+    elif _is_bare_hostname(nl):
+        out.append(('www', urlunsplit(
+            (parts.scheme, 'www.' + nl, path,
+             parts.query, parts.fragment))))
+    return [(label, u) for label, u in out if u and u != url]
+
+
+def _archive_lookup(url: str, proxy: Optional[Dict], timeout_s: float,
+                    started: float) -> Tuple[str, str]:
+    """v0.46.0 — the Wayback Machine's availability answer for a dead
+    page: ``('no-snapshot', '')`` when nothing is archived,
+    ``('unreachable', '')`` when the archive itself could not be asked,
+    or ``(snapshot_url, timestamp)`` when a capture exists. One polite
+    probe, primary route, 64 KB cap. The module-level seam tests swap
+    (``wf._archive_lookup``)."""
+    from urllib.parse import quote
+    probe_url = f"{_ARCHIVE_API}?url={quote(url, safe='')}"
+    try:
+        res = _fetch_once(probe_url, min(float(timeout_s), 15.0),
+                          _ARCHIVE_MAX_BYTES, USER_AGENT, proxy, started)
+    except Exception:
+        return 'unreachable', ''
+    if not res.ok:
+        return 'unreachable', ''
+    try:
+        data = json.loads((res.text or '').strip() or '{}')
+        closest = ((data.get('archived_snapshots') or {})
+                   .get('closest') or {})
+        if closest.get('available') and str(closest.get('url') or ''):
+            return (str(closest['url']),
+                    str(closest.get('timestamp') or ''))
+    except Exception:
+        pass
+    return 'no-snapshot', ''
+
+
+def _domain_of(url: str) -> str:
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(str(url or '')).netloc or '').lower()
+    except Exception:
+        return ''
+
+
+def _wait_polite(rate_limiter, url_or_domain: str) -> None:
+    """The ladder's every rung is polite: waiting on the domain before
+    a variant ask, the archive probe, or the snapshot fetch."""
+    if rate_limiter is None:
+        return
+    try:
+        rate_limiter.wait(_domain_of(url_or_domain) or str(url_or_domain))
+    except Exception:
+        pass  # politeness must never break the fetch
+
+
+def _dead_page_rescue(url: str, dead: FetchResult, timeout_s: float,
+                      max_bytes: int, user_agent: str,
+                      proxy: Optional[Dict], rate_limiter,
+                      archive_fallback: bool,
+                      started: float) -> Tuple[Optional[FetchResult], list, str]:
+    """v0.46.0 — a 404/410 verdict climbs its rescue ladder before it
+    is final: URL variants (trailing slash, www — the 'moved without a
+    redirect' class), then the Wayback Machine's archived copy. A
+    rescue is a REAL result (full from a variant, partial 'archived'
+    from the Wayback capture) with the story in the reason. Returns
+    (rescue|None, tried_labels, archive_verdict); loopback NEVER gets
+    the ladder (the v0.15.1 rule: no door escalates off-machine)."""
+    if _is_loopback_url(url):
+        return None, [], 'skipped'
+    tried = []
+    for label, variant in _url_variants(url):
+        _wait_polite(rate_limiter, variant)
+        res = _fetch_once(variant, timeout_s, max_bytes, user_agent,
+                          proxy, started)
+        tried.append(label)
+        if res.ok:
+            res.reason = (f"the original URL answered HTTP "
+                          f"{dead.http_status} — the {label} variant "
+                          "answered; rescued")
+            return res, tried, 'skipped'
+    archive_verdict = 'skipped'
+    if archive_fallback:
+        _wait_polite(rate_limiter, 'archive.org')
+        archive_verdict, timestamp = _archive_lookup(
+            url, proxy, timeout_s, started)
+        if archive_verdict not in ('no-snapshot', 'unreachable'):
+            snapshot_url, ts = archive_verdict, timestamp
+            _wait_polite(rate_limiter, 'web.archive.org')
+            page = _fetch_once(snapshot_url, timeout_s, max_bytes,
+                               user_agent, proxy, started)
+            if page.ok:
+                # An archived copy is real content, but the LIVE page
+                # is gone: partial + category 'archived' — the pipeline
+                # files it in _review with the story (the owner decides
+                # where a dead link's snapshot belongs).
+                page.status = 'partial'
+                page.category = 'archived'
+                page.reason = (
+                    f"archived copy — the live page answered HTTP "
+                    f"{dead.http_status}; the Wayback Machine's capture"
+                    + (f" ({ts})" if ts else '')
+                    + " served this")
+                return page, tried, 'served'
+    return None, tried, archive_verdict
+
+
+def _rate_limit_penalty(*results) -> Optional[float]:
+    """v0.46.0 — the polite circuit breaker's price: when any leg of
+    the final failure answered 429/503, the domain's next hit waits
+    the site's Retry-After (or a 60s default), capped at five minutes.
+    None when no rate-limit answer was seen."""
+    for res in results:
+        if res is not None and getattr(res, 'http_status', None) in (429, 503):
+            ra = getattr(res, 'retry_after_s', None)
+            return min(float(ra) if ra is not None else
+                       _RATE_PENALTY_DEFAULT_S, _RATE_PENALTY_CAP_S)
+    return None
+
+
+def _combined_category(*results) -> str:
+    """v0.46.0 — the most informative leg's failure class wins (a 404
+    truth beats the 403 wall that hid it; a paywall beats a timeout)."""
+    cats = set()
+    for res in results:
+        if res is not None and getattr(res, 'category', ''):
+            cats.add(res.category)
+    for cat in _CATEGORY_PRECEDENCE:
+        if cat in cats:
+            return cat
+    return ''
+
+
 def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
                        routes: list, enabled: bool,
                        walled: FetchResult,
@@ -741,23 +1410,28 @@ def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
     computes it: ``[proxy, None]`` when both stdlib doors ran,
     ``[proxy]`` when the direct opt-out held, ``[None]`` on a no-proxy
     install) — the third door never widens a route the owner opted out
-    of. Fires ONLY when every stdlib door is walled with a
-    refusal-family answer (403/405/429/451 — the wall aimed at the
-    REQUESTER; the owner's exact "proxy: HTTP 403 | direct: HTTP 403 —
-    bot defense (Cloudflare: challenge)" class). Connection-class
-    failures do NOT fire it (a timeout is a network truth, not a
-    fingerprint verdict); resource truths never reach here; loopback
-    never gets ANY door's escalation. One impersonated attempt per
-    allowed route. Success via the third door is a REAL success with
-    the wall named; a challenge that survives the Chrome handshake
-    gets the three-leg honest line (plus the "needs a live browser"
-    verdict — the owner's graveyard decision is then informed).
-    Missing curl_cffi → the install hint, never an error."""
+    of. Fires when every stdlib door is walled with a refusal-family
+    answer (403/405/429/451 — the wall aimed at the REQUESTER; the
+    owner's exact "proxy: HTTP 403 | direct: HTTP 403 — bot defense
+    (Cloudflare: challenge)" class). v0.46.0 — a TLS-handshake refusal
+    (SSLV3_ALERT_HANDSHAKE_FAILURE, handshake timed out,
+    UNEXPECTED_EOF — the owner's "proxy: connection: [SSL: …]" lines)
+    opens the door too: it is just as much a fingerprint verdict. A
+    plain timeout or DNS failure stays a network truth (no verdict to
+    answer); resource truths never reach here; loopback never gets ANY
+    door's escalation. One impersonated attempt per allowed route.
+    Success via the third door is a REAL success with the wall named; a
+    challenge that survives the Chrome handshake gets the three-leg
+    honest line (plus the "needs a live browser" verdict — the owner's
+    graveyard decision is then informed). Missing curl_cffi → the
+    install hint, never an error."""
     if not enabled or _is_loopback_url(url):
         return walled
-    if walled.http_status is None \
-            or walled.http_status not in ROUTE_REFUSAL_STATUSES:
-        return walled  # connection-class or resource truth — not ours
+    if walled.http_status is not None:
+        if walled.http_status not in ROUTE_REFUSAL_STATUSES:
+            return walled  # the site answered about the RESOURCE
+    elif not _is_tls_handshake_failure(walled.reason):
+        return walled  # connection-class truth — not a fingerprint verdict
     if not curl_cffi_available():
         walled.reason = (walled.reason or '') + _IMP_INSTALL_HINT
         return walled
@@ -777,6 +1451,29 @@ def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
     return walled
 
 
+def _final_verdict(result: FetchResult, direct_reason: str, url: str,
+                   proxy: Optional[Dict], rate_limiter, domain: str,
+                   doh_probe: bool, legs: tuple) -> FetchResult:
+    """v0.46.0 — the rungs every final failure answer shares: the DNS
+    verdict (when the DIRECT line could not resolve the name,
+    DNS-over-HTTPS names whose fault it is — a poisoned local resolver
+    vs. a dead domain) and the polite circuit breaker's price (a
+    429/503 leg pays its Retry-After into the domain limiter, capped).
+    Mutates and returns ``result``."""
+    suffix, dead = _dns_verdict_suffix(direct_reason, url, proxy, doh_probe)
+    if suffix:
+        result.reason = (result.reason or '') + suffix
+        if dead:
+            result.category = 'dead'
+    try:
+        penalty = _rate_limit_penalty(*legs)
+        if penalty is not None and rate_limiter is not None:
+            rate_limiter.penalize(domain, penalty)
+    except Exception:
+        pass  # politeness bookkeeping never breaks the verdict
+    return result
+
+
 def fetch_url(url: str,
               timeout_s: float = DEFAULT_TIMEOUT_S,
               max_bytes: int = DEFAULT_MAX_BYTES,
@@ -784,9 +1481,11 @@ def fetch_url(url: str,
               user_agent: str = USER_AGENT,
               proxy: Optional[Dict] = None,
               direct_fallback: bool = True,
-              impersonate_fallback: bool = True) -> FetchResult:
+              impersonate_fallback: bool = True,
+              archive_fallback: bool = True,
+              doh_probe: bool = True) -> FetchResult:
     """Fetch one URL politely. Never raises — every failure is a
-    FetchResult(status='failed', reason=...).
+    FetchResult(status='failed', reason=..., category=...).
 
     v0.19.0 ``proxy``: force the fetch through the configured proxy
     (``proxy_from_config`` shape). Loopback URLs NEVER ride a proxy (the
@@ -824,7 +1523,18 @@ def fetch_url(url: str,
     the proxy), and a success there is a REAL success with the wall
     named. ``impersonate_fallback=False`` (config
     ``web_impersonate_fallback``) opts out. Missing library → the
-    honest reason gains the install hint."""
+    honest reason gains the install hint.
+
+    v0.46.0 — THE LADDER: a TLS-handshake-class wall opens the third
+    door just like a refusal-family answer; a dead page (404/410)
+    climbs its rescue ladder — URL variants (trailing slash, www),
+    then the Wayback Machine's archived copy (``archive_fallback=False``
+    opts out; a rescue is a partial 'archived' result with the story);
+    a direct-line DNS failure gets a DNS-over-HTTPS verdict
+    (``doh_probe=False`` opts out; NXDOMAIN → category 'dead'); a
+    429/503 leg pays its Retry-After into the domain limiter; and every
+    failure carries its ``category`` so the pipeline retries only what
+    time can heal."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -840,6 +1550,7 @@ def fetch_url(url: str,
     if not url or not url.lower().startswith(('http://', 'https://')):
         return FetchResult(url, status='failed',
                            reason='not an http(s) URL',
+                           category='bad_url',
                            elapsed_s=time.monotonic() - started)
 
     first = _fetch_once(url, timeout_s, max_bytes, user_agent, proxy,
@@ -850,7 +1561,30 @@ def fetch_url(url: str,
             and first.http_status not in ROUTE_REFUSAL_STATUSES):
         # The site answered about the RESOURCE (404 gone, 401 auth,
         # 5xx broken) — the answer is the truth on any route.
-        return first
+        if first.http_status in (404, 410) and not _is_loopback_url(url):
+            # v0.46.0 — the dead-page rescue ladder: variants, then the
+            # Wayback Machine; the verdict only lands when nothing
+            # rescued the link.
+            rescue, tried, archive = _dead_page_rescue(
+                url, first, timeout_s, max_bytes, user_agent, proxy,
+                rate_limiter, archive_fallback, started)
+            if rescue is not None:
+                return rescue
+            extra = []
+            if tried:
+                extra.append('variants tried: ' + ', '.join(tried))
+            if archive == 'no-snapshot':
+                extra.append('no archived copy exists on the Wayback '
+                              'Machine')
+            elif archive == 'unreachable':
+                extra.append('the Wayback Machine itself could not be '
+                              'asked')
+            if extra:
+                first.reason = (f"{first.reason} ({'; '.join(extra)})")
+            # the ladder found nothing — the dead verdict is final
+            first.category = 'dead'
+        return _final_verdict(first, '', url, proxy, rate_limiter,
+                              domain, doh_probe, (first,))
     if not proxy or not direct_fallback or _is_loopback_url(url):
         # v0.45.0 — the single-door walled case still earns the third
         # door (the owner's challenge line names both routes, but a
@@ -858,8 +1592,11 @@ def fetch_url(url: str,
         # route list honors the direct opt-out: proxy-only when
         # direct_fallback is off, direct-only when no proxy exists.
         routes = [proxy] if (proxy and not direct_fallback) else [None]
-        return _maybe_impersonate(url, timeout_s, max_bytes, routes,
-                                  impersonate_fallback, first, started)
+        direct_reason = '' if proxy else (first.reason or '')
+        walled = _maybe_impersonate(url, timeout_s, max_bytes, routes,
+                                    impersonate_fallback, first, started)
+        return _final_verdict(walled, direct_reason, url, proxy,
+                              rate_limiter, domain, doh_probe, (first,))
 
     # v0.43.0 — the both-doors rule. The primary (proxied) route either
     # never got an answer (connection class, v0.21.0) or was REFUSED
@@ -872,11 +1609,15 @@ def fetch_url(url: str,
         second.reason = (f"via direct fallback (proxy path failed: "
                          f"{first.reason})")
         return second
-    second.reason = (f"proxy: {first.reason} | direct: {second.reason}")
+    direct_reason = second.reason or ''
+    second.reason = (f"proxy: {first.reason} | direct: {direct_reason}")
+    second.category = _combined_category(first, second)
     # v0.45.0 — both stdlib doors walled: ask the Chrome handshake on
     # the same two routes (one polite attempt each).
-    return _maybe_impersonate(url, timeout_s, max_bytes, [proxy, None],
-                              impersonate_fallback, second, started)
+    walled = _maybe_impersonate(url, timeout_s, max_bytes, [proxy, None],
+                                impersonate_fallback, second, started)
+    return _final_verdict(walled, direct_reason, url, proxy,
+                          rate_limiter, domain, doh_probe, (first, second))
 
 
 def _fetch_once(url: str, timeout_s: float, max_bytes: int,
@@ -886,7 +1627,10 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
     ``started`` is the outer monotonic clock so elapsed covers fallbacks.
     v0.41.0 — the request is browser-grade (Chrome's header set, gzip
     accepted and decoded); see ``_request_headers`` and
-    ``_decompress_capped``."""
+    ``_decompress_capped``.
+    v0.46.0 — redirects are followed by ``_open_following`` (hop cookies,
+    308, loop detection, honest broken-redirect verdicts) and every
+    failure carries its CATEGORY via ``_http_error_verdict``."""
     headers = _request_headers(user_agent)
 
     # Public websites: certificates are verified. A bad cert is a failed
@@ -899,11 +1643,54 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
             proxy, ctx, force_direct=_is_loopback_url(url))
     except WebProxyError as e:
         return FetchResult(url, status='failed', reason=str(e),
+                           category='proxy_error',
                            elapsed_s=time.monotonic() - started)
 
-    req = urllib.request.Request(url, headers=headers)
     try:
-        with opener.open(req, timeout=float(timeout_s)) as resp:
+        resp, final_url = _open_following(opener, url, headers, timeout_s)
+    except _RedirectBrokenError as e:
+        return FetchResult(url, status='failed', reason=str(e),
+                           http_status=e.code,
+                           category='redirect_broken',
+                           elapsed_s=time.monotonic() - started)
+    except urllib.error.HTTPError as e:
+        # v0.46.0 — every named family gets its reason and category from
+        # one place; the 403/429 bot-defense line keeps v0.41.0's format.
+        reason, category, retry_after = _http_error_verdict(e.code, e.headers)
+        try:
+            e.close()
+        except Exception:
+            pass
+        return FetchResult(url, status='failed', reason=reason,
+                           http_status=e.code, category=category,
+                           retry_after_s=retry_after,
+                           elapsed_s=time.monotonic() - started)
+    except urllib.error.URLError as e:
+        reason = getattr(e, 'reason', None) or str(e)
+        if isinstance(reason, WebProxyError):
+            reason = str(reason)
+        return FetchResult(url, status='failed', reason=f'connection: {reason}',
+                           category='proxy_error' if isinstance(
+                               getattr(e, 'reason', None), WebProxyError)
+                           else 'retry_later',
+                           elapsed_s=time.monotonic() - started)
+    except WebProxyError as e:
+        return FetchResult(url, status='failed',
+                           reason=f'proxy: {e}',
+                           category='proxy_error',
+                           elapsed_s=time.monotonic() - started)
+    except socket.timeout:
+        return FetchResult(url, status='failed', reason='timeout',
+                           category='retry_later',
+                           elapsed_s=time.monotonic() - started)
+    except Exception as e:  # never let one link break the batch
+        return FetchResult(url, status='failed',
+                           reason=f'{type(e).__name__}: {e}',
+                           category='retry_later',
+                           elapsed_s=time.monotonic() - started)
+
+    try:
+        with resp:
             content_type = (resp.headers.get('Content-Type') or '').lower()
             # v0.41.0 — we ask for gzip/deflate; record what actually
             # came back so the body can be decoded below.
@@ -914,7 +1701,6 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
                 part = part.strip()
                 if part.startswith('charset='):
                     charset = part.split('=', 1)[1].strip().strip('"\'')
-            final_url = resp.geturl() or url
             http_status = getattr(resp, 'status', None) or resp.getcode()
 
             # Stream with the size cap — never buffer a "huge page" whole.
@@ -932,34 +1718,10 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
                     break
                 chunks.append(chunk)
             body = b''.join(chunks)
-    except urllib.error.HTTPError as e:
-        reason = f'HTTP {e.code}'
-        if e.code in (403, 429):
-            # v0.41.0 — name the bot wall when one is visible: a
-            # "working site" that 403s a polite fetcher is almost always
-            # a challenge, and the _review note should say so.
-            hint = _bot_defense_hint(e.headers)
-            if hint:
-                reason = f'HTTP {e.code} — {hint}'
-        return FetchResult(url, status='failed', reason=reason,
-                           http_status=e.code,
-                           elapsed_s=time.monotonic() - started)
-    except urllib.error.URLError as e:
-        reason = getattr(e, 'reason', None) or str(e)
-        if isinstance(reason, WebProxyError):
-            reason = str(reason)
-        return FetchResult(url, status='failed', reason=f'connection: {reason}',
-                           elapsed_s=time.monotonic() - started)
-    except WebProxyError as e:
-        return FetchResult(url, status='failed',
-                           reason=f'proxy: {e}',
-                           elapsed_s=time.monotonic() - started)
-    except socket.timeout:
-        return FetchResult(url, status='failed', reason='timeout',
-                           elapsed_s=time.monotonic() - started)
     except Exception as e:  # never let one link break the batch
         return FetchResult(url, status='failed',
                            reason=f'{type(e).__name__}: {e}',
+                           category='retry_later',
                            elapsed_s=time.monotonic() - started)
 
     elapsed = time.monotonic() - started
