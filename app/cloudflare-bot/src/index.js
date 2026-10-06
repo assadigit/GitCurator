@@ -53,14 +53,12 @@ export default {
     // ========================================
     if (url.pathname === '/health' || url.pathname === '/') {
       const lastWebhook = await stateGet(env.DB, 'last_webhook_at');
-      const cutoverComplete = await stateGet(env.DB, 'cutover_complete');
 
       return jsonResponse({
         status: 'ok',
         service: 'github-curator-bot',
         version: WORKER_VERSION,
         last_webhook_at: lastWebhook,
-        cutover_complete: cutoverComplete === '1',
         timestamp: new Date().toISOString()
       });
     }

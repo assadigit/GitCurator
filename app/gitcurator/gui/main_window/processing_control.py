@@ -548,16 +548,32 @@ class ProcessingControlMixin:
         """v0.39.0 — a completed batch gets both halves of the fanfare:
         the chime FIRST (it plays while the modal's event loop runs, so
         the audio starts before the user even reaches for the mouse),
-        then the Batch Complete scorecard modal."""
-        self._play_batch_sound()
+        then the Batch Complete scorecard modal.
+
+        v0.40.0 — failures no longer celebrate: a batch that finished
+        WITH failed links gets the softer descending needs-retry tone
+        (retry.wav) instead of the success arpeggio — the chime says
+        what the scorecard's amber row says. The modal opens either
+        way (the routing keys on natural completion, not cleanliness)."""
+        _failed = 0
+        if summary:
+            try:
+                _failed = int(summary.get('failed_links', 0) or 0)
+            except (TypeError, ValueError):
+                _failed = 0
+        self._play_batch_sound(needs_retry=_failed > 0)
         self._show_batch_success_modal(summary, elapsed_str)
 
-    def _play_batch_sound(self):
-        """v0.39.0 — play assets/sounds/success.wav. Config keys (no
-        Settings UI — config.json only, defaults on): sound_enabled,
-        sound_volume (0.0..1.0). The BatchSound wrapper is failure-proof:
-        a missing module/WAV or an audio-less machine is a silent no-op
-        with at most ONE warning line in the log."""
+    def _play_batch_sound(self, needs_retry: bool = False):
+        """v0.39.0 — play assets/sounds/success.wav. Config keys
+        (Settings → Sound since v0.40.0): sound_enabled, sound_volume
+        (0.0..1.0, clamped into Qt's [0, 1]). The BatchSound wrapper is
+        failure-proof: a missing module/WAV or an audio-less machine is
+        a silent no-op with at most ONE warning line in the log.
+
+        v0.40.0 — ``needs_retry=True`` (a batch that finished with
+        failed links) plays the softer descending retry.wav instead —
+        same gate, same volume, same failure contract."""
         from gitcurator.gui.sound import BatchSound
         if not self.config.get('sound_enabled', True):
             return False
@@ -567,8 +583,30 @@ class ProcessingControlMixin:
             _vol = float(self.config.get('sound_volume', 0.8))
         except (TypeError, ValueError):
             _vol = 0.8
+        if needs_retry:
+            return self._batch_sound.play_retry(volume=_vol,
+                                                log=self.log_message)
         return self._batch_sound.play_success(volume=_vol,
                                               log=self.log_message)
+
+    def _preview_batch_sound(self, needs_retry: bool = False):
+        """v0.40.0 — Settings → Sound's Preview buttons: hear EXACTLY
+        what a batch would play, through the exact batch gate (the
+        switch, the volume, BatchSound's one-notice failure handling).
+        A preview is honest by construction — it shares every line of
+        the batch path except the modal."""
+        played = self._play_batch_sound(needs_retry=needs_retry)
+        if not played and not self.config.get('sound_enabled', True):
+            self.log_message(
+                "🔇 Preview silent — the chime is switched off "
+                "(the switch above).", "info")
+        elif not played and getattr(self, '_batch_sound', None) is not None \
+                and self._batch_sound.unavailable_reason:
+            # BatchSound already said it once (the 🔕 line) — do not
+            # repeat it here; this branch exists so the log doesn't
+            # blame the switch when the machine is audio-less.
+            pass
+        return played
 
     def _show_batch_success_modal(self, summary, elapsed_str=""):
         """v0.39.0 — the Batch Complete scorecard: what the batch did,
@@ -609,14 +647,24 @@ class ProcessingControlMixin:
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
-        # Header: 🎉 + "Batch Complete!" (msg roles, success tone)
+        # Header: 🎉 + "Batch Complete!" (msg roles, success tone).
+        # v0.40.0 — a finish WITH failures is honest: a neutral 🏁 flag
+        # (no party), the heading rides the warning tone — the amber
+        # "Needs retry" row and the softer retry.wav chime complete the
+        # "done, but look at me" triad.
+        _failed = 0
+        try:
+            _failed = int(summary.get('failed_links', 0) or 0)
+        except (TypeError, ValueError):
+            _failed = 0
         header = QHBoxLayout()
-        glyph = QLabel("🎉")
+        glyph = QLabel("🏁" if _failed else "🎉")
         glyph.setObjectName("msg_glyph")
         header.addWidget(glyph)
-        title = QLabel(" Batch Complete!")
+        title = QLabel(" Batch Complete!" if not _failed
+                       else " Batch Complete")
         title.setObjectName("msg_heading")
-        title.setProperty("tone", "success")
+        title.setProperty("tone", "warning" if _failed else "success")
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)

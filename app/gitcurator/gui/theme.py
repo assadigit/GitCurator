@@ -292,6 +292,15 @@ def _app_rules(t: Dict[str, str]) -> str:
             QCheckBox::indicator {{ width: 18px; height: 18px; border: 2px solid {t['border_input']}; border-radius: 4px; background: {t['sheet']}; }}
             QCheckBox::indicator:checked {{ background: {t['accent']}; border-color: {t['accent']}; }}
             QCheckBox::indicator:hover {{ border-color: {t['accent']}; }}
+            QSlider::groove:horizontal {{ height: 6px; border-radius: 3px; background: {t['progress_track']}; }}
+            QSlider::sub-page:horizontal {{ height: 6px; border-radius: 3px; background: {t['progress_chunk']}; }}
+            QSlider::add-page:horizontal {{ height: 6px; border-radius: 3px; background: {t['progress_track']}; }}
+            QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; background: {t['sheet']}; border: 2px solid {t['border_input']}; }}
+            QSlider::handle:horizontal:hover {{ border-color: {t['accent']}; }}
+            QSlider::handle:horizontal:focus {{ border-color: {t['focus']}; }}
+            QSlider::handle:horizontal:disabled {{ background: {t['disabled_bg']}; border-color: {t['border']}; }}
+            QSlider:focus {{ outline: none; }}
+            QSlider:disabled {{ color: {t['text_disabled']}; }}
             QPushButton {{ padding: 8px 16px; border: 1px solid {t['border_input']}; border-radius: 6px; background: {t['sheet']}; font-weight: bold; color: {t['text']}; }}
             QPushButton:hover {{ background: {t['sheet_hover']}; border-color: {t['border_hover']}; }}
             QPushButton:pressed {{ background: {t['sheet_hover']}; }}

@@ -812,7 +812,6 @@ async function loadSettings() {
   const s = d.settings || {};
   let html = '<div class="page-header"><h1>Settings</h1><p>System configuration</p></div>';
   html += '<div class="card" style="max-width:600px;margin-bottom:16px"><div class="card-header"><span class="card-title">System Status</span></div>';
-  html += statusRow('Cutover', s.cutover_complete === '1', s.cutover_complete === '1' ? 'Complete' : 'Pending');
   html += statusRow('Desktop', s.desktop_last_poll && Date.now()-new Date(s.desktop_last_poll).getTime()<600000, fmtAgo(s.desktop_last_poll));
   html += statusRow('Vault Index', s.vault_index_entry_count != null, (s.vault_index_entry_count||0)+' entries');
   html += '</div>';

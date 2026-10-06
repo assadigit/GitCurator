@@ -1152,6 +1152,109 @@ class UiMixin:
         backup_tab = self._create_backup_tab()
         self._settings_pages.append((self._wrap_scroll(backup_tab), "Backup"))
 
+        # ---- Tab: Sound (v0.40.0 — the batch-finish chime's controls) ----
+        # Two config keys existed since v0.39.0 with no UI (config.json
+        # only); this page is their home: the master toggle, the volume
+        # slider (0–100 in the UI, 0.0–1.0 in the file, clamped into Qt's
+        # [0, 1] on read AND write), and previews that route through the
+        # EXACT batch gate (_play_batch_sound) so a preview can never
+        # lie about what the next batch will sound like.
+        sound_tab = QWidget()
+        sound_layout = QVBoxLayout(sound_tab)
+        sound_layout.setSpacing(8)
+
+        sound_header = QLabel(
+            "Sound\n"
+            "What the app plays when a batch runs to its natural end: a "
+            "rising arpeggio for a clean finish, a softer descending tone "
+            "when links failed and need retry.")
+        sound_header.setWordWrap(True)
+        sound_header.setObjectName("info_header")
+        sound_layout.addWidget(sound_header)
+
+        sound_group = QGroupBox("Batch Completion")
+        sound_g = QVBoxLayout(sound_group)
+        sound_g.setSpacing(8)
+
+        self.sound_enabled_check = QCheckBox(
+            "Play the chime when a batch finishes")
+        self.sound_enabled_check.setChecked(
+            bool(self.config.get('sound_enabled', True)))
+        self.sound_enabled_check.setToolTip(
+            "sound_enabled — when OFF, every batch finishes in silence "
+            "(the scorecard modal still opens).")
+        sound_g.addWidget(self.sound_enabled_check)
+
+        # Volume — slider 0–100 in the UI; the file stores 0.0–1.0.
+        # Garbage / NaN / out-of-range config values heal to the 0.8
+        # default HERE too, so the widget never starts off-scale.
+        try:
+            _sv = float(self.config.get('sound_volume', 0.8))
+        except (TypeError, ValueError):
+            _sv = 0.8
+        if _sv != _sv:  # NaN
+            _sv = 0.8
+        _sv = max(0.0, min(1.0, _sv))
+
+        vol_row = QHBoxLayout()
+        vol_row.addWidget(QLabel("Volume:"))
+        self.sound_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sound_volume_slider.setRange(0, 100)
+        self.sound_volume_slider.setValue(int(round(_sv * 100)))
+        self.sound_volume_slider.setToolTip(
+            "sound_volume — 0 to 100 here, saved as 0.0–1.0 and clamped "
+            "into Qt's [0, 1] range.")
+        self.sound_volume_label = QLabel(f"{int(round(_sv * 100))}%")
+        self.sound_volume_label.setObjectName("cc_item")
+        vol_row.addWidget(self.sound_volume_slider, 1)
+        vol_row.addWidget(self.sound_volume_label)
+        sound_g.addLayout(vol_row)
+
+        # Previews — BOTH voices, through the same gate a batch uses.
+        preview_row = QHBoxLayout()
+        preview_success_btn = QPushButton("Preview — Clean Finish")
+        self._style_btn(preview_success_btn, 'secondary')
+        preview_success_btn.setToolTip(
+            "Play the success chime (success.wav) through the exact "
+            "batch path: the switch and the volume above apply.")
+        preview_success_btn.clicked.connect(
+            lambda: self._preview_batch_sound(needs_retry=False))
+        preview_row.addWidget(preview_success_btn)
+
+        preview_retry_btn = QPushButton("Preview — Needs Retry")
+        self._style_btn(preview_retry_btn, 'secondary')
+        preview_retry_btn.setToolTip(
+            "Play the softer needs-retry tone (retry.wav) through the "
+            "exact batch path — what a batch with failed links sounds "
+            "like.")
+        preview_retry_btn.clicked.connect(
+            lambda: self._preview_batch_sound(needs_retry=True))
+        preview_row.addWidget(preview_retry_btn)
+        sound_g.addLayout(preview_row)
+
+        sound_note = QLabel(
+            "💡 Both previews use the exact batch path (same switch, same "
+            "volume). The chime is best-effort by design: a machine "
+            "without an audio backend stays silent — one notice in the "
+            "log, never an error.")
+        sound_note.setWordWrap(True)
+        sound_note.setObjectName("info_note")
+        sound_g.addWidget(sound_note)
+
+        sound_layout.addWidget(sound_group)
+        sound_layout.addStretch(1)
+
+        # Save-on-change, the Vault page's pattern: the toggle saves at
+        # once; the slider saves on RELEASE (not every drag tick — no
+        # config.json write storm while scrubbing); the % label follows
+        # every tick.
+        self.sound_enabled_check.toggled.connect(self._save_sound_page)
+        self.sound_volume_slider.valueChanged.connect(
+            self._on_sound_volume_changed)
+        self.sound_volume_slider.sliderReleased.connect(self._save_sound_page)
+
+        self._settings_pages.append((self._wrap_scroll(sound_tab), "Sound"))
+
         # v33: the Bot-tab reorder block below was dead code (findChild never
         # matched) and is removed with the tab strip itself — every page now
         # lives in the Settings window's sidebar navigation.

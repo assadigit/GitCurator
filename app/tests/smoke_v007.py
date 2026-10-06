@@ -24,6 +24,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 from gitcurator.gui.app import MainWindow, CacheDB, dead_link_threshold  # noqa: E402
 from gitcurator.gui import icons  # noqa: E402
 from gitcurator.gui import theme as theme_kit  # noqa: E402
+from gitcurator.gui.sound import BatchSound  # noqa: E402
 
 CHECKS = []
 
@@ -67,14 +68,15 @@ for label, btn in (("settings_btn", w.settings_btn), ("theme_toggle_btn", w.them
     check(f"{label}.height() == 34", btn.height() == 34)
     check(f"{label} has an icon (no text glyph to clip)", not btn.icon().isNull() or not btn.text())
 
-# 3. Icons module: official Lucide pack (26 glyphs — 12 v0.08 + 9 sidebar
-#    v0.30.0 + 4 state glyphs v0.31.0 + the list empty-state glyph v0.34),
-#    renderable
-check("icons.ICON pack is loaded (26 official Lucide glyphs)",
-      len(icons.ICONS) == 26 and "settings" in icons.ICONS and "sun" in icons.ICONS
+# 3. Icons module: official Lucide pack (27 glyphs — 12 v0.08 + 9 sidebar
+#    v0.30.0 + 4 state glyphs v0.31.0 + the list empty-state glyph v0.34 +
+#    volume-2 for Settings → Sound v0.40.0), renderable
+check("icons.ICON pack is loaded (27 official Lucide glyphs)",
+      len(icons.ICONS) == 27 and "settings" in icons.ICONS and "sun" in icons.ICONS
       and "circle" in icons.ICONS and "check" in icons.ICONS
       and "triangle-alert" in icons.ICONS and "circle-x" in icons.ICONS
-      and "list" in icons.ICONS and "inbox" in icons.ICONS)
+      and "list" in icons.ICONS and "inbox" in icons.ICONS
+      and "volume-2" in icons.ICONS)
 check("QtSvg available in this env", icons._HAS_SVG)
 if icons._HAS_SVG:
     pm = icons.pixmap('settings', '#5F54B4', 16)
@@ -358,14 +360,35 @@ best = ProcessingWorker._pick_best_model("qwen3:27b", models)
 check("pick_best_model prefers same family, never an embedder", best in ("qwen3:14b", "qwen3.5:27b"))
 check("pick_best_model never returns the embedder", best != "nomic-embed-text")
 
+# 10. v0.40.0 — Settings → Sound: the batch chime's controls (the page
+#     itself, the 0–100 slider, the needs-retry voice, both previews)
+_sound_page_names = [name for _pg, name in w._settings_pages]
+check("Settings carries a Sound section", "Sound" in _sound_page_names)
+check("sound toggle exists and defaults ON",
+      w.sound_enabled_check is not None and w.sound_enabled_check.isChecked())
+check("volume slider is 0–100",
+      w.sound_volume_slider.minimum() == 0
+      and w.sound_volume_slider.maximum() == 100)
+check("% label spells the slider's value",
+      w.sound_volume_label.text() == f"{w.sound_volume_slider.value()}%")
+w.sound_volume_slider.setValue(37)
+check("% label follows drag ticks", w.sound_volume_label.text() == "37%")
+check("volume maps 0–100 into 0.0–1.0 (clamped)",
+      abs(w._sound_volume_value() - 0.37) < 1e-9)
+check("the needs-retry voice exists (play_retry + retry.wav asset)",
+      hasattr(BatchSound, "play_retry")
+      and os.path.isfile(os.path.join(_APP, "assets", "sounds", "retry.wav")))
+check("both previews route through the batch gate",
+      hasattr(w, "_preview_batch_sound")
+      and hasattr(w, "_play_batch_sound"))
+
 failed = [n for n, ok in CHECKS if not ok]
 print()
 print(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} smoke checks passed")
 if failed:
     print("FAILED:", ", ".join(failed))
     sys.exit(1)
-print("GUI smoke OK — v0.34 merged lineage verified (v0.08 redesign + "
+print("GUI smoke OK — v0.40.0 lineage verified (v0.08 redesign + "
       "v0.07.2 model picker + unified quarantine + v0.31 balance pass + "
-      "v0.32 five-change pass + v0.33 idle dedup + v0.34 follow-up review: "
-      "segmented bar, balanced CTA, real proxy words, keyboard-only focus, "
-      "empty-log toolbar, Last-sync line, Retry N)")
+      "v0.32 five-change pass + v0.33 idle dedup + v0.34 follow-up review "
+      "+ v0.40.0 Sound settings: the page, the slider, both voices, previews)")

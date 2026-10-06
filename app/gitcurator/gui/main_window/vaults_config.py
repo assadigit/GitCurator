@@ -147,6 +147,41 @@ class VaultConfigMixin:
         self._refresh_vault_page_status()
         self.save_config()
 
+    # -- v0.40.0 — the Sound page's save-on-change handlers --------------
+
+    def _sound_volume_value(self) -> float:
+        """The volume slider's value as the 0.0–1.0 float save_config
+        writes (sound_volume). The slider itself is 0–100; Qt's
+        QSoundEffect range is [0, 1] — the value is clamped on read
+        (widget init), on write (here) and again inside BatchSound, so
+        a hand-edited 7.5 or a NaN can never reach Qt. A missing widget
+        keeps the previous config value, defaulting to 0.8."""
+        if hasattr(self, 'sound_volume_slider'):
+            try:
+                return max(0.0, min(1.0,
+                                    self.sound_volume_slider.value() / 100.0))
+            except Exception:
+                pass
+        try:
+            _v = float(self.config.get('sound_volume', 0.8))
+        except (TypeError, ValueError):
+            _v = 0.8
+        if _v != _v:  # NaN
+            _v = 0.8
+        return max(0.0, min(1.0, _v))
+
+    def _on_sound_volume_changed(self, value: int):
+        """Every drag tick updates the % label ONLY — the write happens
+        on slider release (_save_sound_page), so scrubbing the slider
+        never becomes a config.json write storm."""
+        if getattr(self, 'sound_volume_label', None) is not None:
+            self.sound_volume_label.setText(f"{int(value)}%")
+
+    def _save_sound_page(self, *args):
+        """Commit the Sound page (switch + volume) via the ONE merge-based
+        save path — the Vault page's pattern, one write per commit."""
+        self.save_config()
+
     def remove_vault(self):
         current = self.vault_combo.currentText()
         if not current:
@@ -360,6 +395,15 @@ class VaultConfigMixin:
                              if hasattr(self, 'pipeline_websites_check')
                              else (self.config.get('pipelines') or {}).get('websites', False)),
             },
+            # v0.40.0 — the Sound page (Settings → Sound): the chime's
+            # master switch + volume. Same defensive hasattr pattern as
+            # every optional widget; the slider's 0–100 maps to 0.0–1.0
+            # and is clamped into Qt's [0, 1] (QSoundEffect's range).
+            "sound_enabled": (
+                self.sound_enabled_check.isChecked()
+                if hasattr(self, 'sound_enabled_check')
+                else bool(self.config.get('sound_enabled', True))),
+            "sound_volume": self._sound_volume_value(),
         }
 
         # Merge UI values into the EXISTING config — unknown keys survive,

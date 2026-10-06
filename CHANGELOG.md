@@ -1,3 +1,84 @@
+## [0.40.0] — The Sound page, and failures stop sounding like celebrations — 2026-10-06
+
+Owner ask (session): give the v0.39 chime its Settings UI
+(`sound_enabled` / `sound_volume` lived in config.json only), make a
+"needs retry" outcome announce itself differently from a success, and
+look into the never-moving `cutover_complete` flag. Desktop release
+v0.40.0 + Worker release **0.30.0** (the flag's retirement is a real
+worker change). Suite grows **1000 → 1030** (30 cases in the new
+tests/test_soundsettings.py), the worker suite **48 → 50** (two
+retirement guards), GUI smoke **98 → 106** (the Sound section), 83
+compiles (unchanged), offline golden 30/30 + 0 invalid.
+
+**The Sound page.** Settings → Sound is the chime's home: the master
+toggle, a 0–100 volume slider with a live % label, and TWO preview
+buttons — "Preview — Clean Finish" and "Preview — Needs Retry". The
+previews are honest by construction: they route through
+`_play_batch_sound`, the EXACT gate a batch goes through (the same
+switch, the same volume, the same one-notice failure handling), so a
+preview can never lie about what the next batch will sound like. A
+muted preview says why ("🔇 Preview silent — the chime is switched
+off") instead of blaming the machine. Save-on-change follows the
+Vault page's pattern: the toggle saves at once, the slider saves on
+RELEASE — drag ticks move only the % label, never a config.json
+write. The volume maps 0–100 in the UI to 0.0–1.0 in the file and is
+clamped into Qt's [0, 1] on read (widget init heals garbage / NaN /
+off-scale values), on write, and again inside BatchSound — a
+hand-edited 7.5 can never reach Qt. The page's glyph is `volume-2`
+(verbatim lucide-static v0.544.0 geometry — the 27th glyph of the
+pack), and the slider's QSS (groove / sub-page / handle / hover /
+focus / disabled) rides the existing progress-bar tokens — zero new
+color values, both themes.
+
+**Failures stop sounding like celebrations.** The investigation's
+key finding: since v0.39 the chime fired for EVERY naturally-finished
+batch — the routing keyed on natural completion, not cleanliness, so
+a batch with failed links played the same rising arpeggio as a clean
+one. The problem was never "no sound on failure" but "failure
+SOUNDS like a party." Now `_celebrate_batch` reads the summary's
+`failed_links` and routes: a clean finish keeps the ascending
+E5 → G5 → C6 success.wav; a finish WITH failures plays the new
+`assets/sounds/retry.wav` — a softer descending two-tone
+(C6 → G5, ~0.7 s, same 44.1 kHz / 16-bit / mono PCM, SYNTHESIZED like
+its sibling — sine partials + exponential envelopes, no third-party
+material). The softness is baked into the asset itself (normalized
+peak ~0.45 vs success.wav's ~0.72), so ONE user volume applies to
+both voices and the Settings preview is the truth. Same failure
+contract as v0.39: lazy QtMultimedia, per-asset cached effect, and
+the two WAVs ship together — a missing one poisons the session's
+player with one "🔕" notice, then silence. The scorecard heading
+turns honest too: a failed batch shows 🏁 "Batch Complete" (no
+exclamation mark) in the warning tone — the visual twin of the amber
+"Needs retry" row and the descending chime; a clean batch keeps 🎉
+"Batch Complete!" in the success tone.
+
+**The cutover_complete flag is RETIRED (worker 0.30.0).** The
+archaeology: `cutover_complete` was seeded as '0' by the v0.01 schema
+and NOTHING ever wrote '1' — the intended desktop setter
+(`cloudflare_manager.complete_cutover`) exists only in
+`tools/integration_snippet.py`, an example snippet whose worker-side
+counterpart was never implemented (the API stored the value as an
+ordinary `vault_index_hash`), and the desktop still fetches its links
+via Telethon (`bot_queue.py`), not via the worker — the "cutover"
+(desktop switching from Telegram polling to Worker polling) is an
+abandoned V0.01 plan. Meanwhile /health reported
+`cutover_complete: false` and the dashboard showed "Cutover:
+Pending" forever: pending work that would never happen. 0.30.0
+removes the flag from /health, from /api/pending, from the dashboard
+settings card, from the state-key list, and from the schema seed; two
+worker tests guard the retirement so the abandoned plan cannot
+quietly reappear in an API response. `EXPECTED_WORKER_VERSION`
+follows in lockstep (0.30.0), and the D1 row (if present on an
+existing deployment) is simply ignored — the schema change is purely
+subtractive and idempotent for existing databases.
+
+**Gate.** 83/83 compiles · 1030/1030 tests (32 modules) · offline
+golden 30/30 + 0 invalid · worker 50/50 (node --test) · GUI smoke
+106/106 (the Sound section: page registered, toggle default ON,
+0–100 slider, % label follows ticks, volume mapping, both voices,
+previews wired) · retry.wav verified by content (format, duration
+window, softer peak, descending contour — success.wav ascending).
+
 ## [0.39.0] — The batch-finish fanfare: a chime and a scorecard — 2026-10-06
 
 Owner ask (session): "I want the next version to play an audio for

@@ -55,6 +55,8 @@
     "github": true,
     "websites": false
   },
+  "sound_enabled": true,
+  "sound_volume": 0.8,
   "web_fetch_timeout_s": 20,
   "web_fetch_max_bytes": 2000000,
   "web_domain_delay_s": 2.0,

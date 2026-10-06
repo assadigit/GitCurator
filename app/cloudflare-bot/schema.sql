@@ -121,7 +121,6 @@ INSERT OR IGNORE INTO sync_state (key, value, updated_at) VALUES
   ('desktop_last_poll', '', datetime('now')),
   ('vault_index_hash', '', datetime('now')),
   ('vault_index_entry_count', '0', datetime('now')),
-  ('cutover_complete', '0', datetime('now')),
   ('gdrive_last_backup', '', datetime('now')),
   ('gdrive_auth_status', 'unknown', datetime('now')),
   ('last_webhook_at', '', datetime('now')),

@@ -390,7 +390,7 @@ async function handleDashboardBackups(env) {
 
 async function handleDashboardSettings(env) {
   const keys = [
-    'cutover_complete', 'desktop_last_poll', 'desktop_last_sync',
+    'desktop_last_poll', 'desktop_last_sync',
     'vault_index_hash', 'vault_index_entry_count',
     'gdrive_last_backup', 'gdrive_auth_status',
     'last_webhook_at'

@@ -164,6 +164,27 @@ test('/health reports the worker version (staleness check)', async () => {
   assert.equal(data.version, WORKER_VERSION);
 });
 
+// ── 0.30.0 ───────────────────────────────────────────────────────────
+// The cutover_complete flag is RETIRED: seeded '0' at v0.01, never set
+// to '1' by anything (the intended desktop setter lived only in an
+// example snippet; the worker never special-cased its signal), while
+// the dashboard showed "Cutover: Pending" forever — pending work that
+// would never happen. These assertions keep it retired: the abandoned
+// plan cannot quietly reappear in an API response.
+test('the retired cutover_complete flag is absent from /health (0.30.0)', async () => {
+  const env = makeEnv();
+  const res = await worker.fetch(new FakeRequest("https://bot.example/health", { body: null }), env, {});
+  const data = await res.json();
+  assert.equal('cutover_complete' in data, false);
+});
+
+test('the retired cutover_complete flag is absent from /api/pending (0.30.0)', async () => {
+  const env = makeEnv();
+  const res = await worker.fetch(new FakeRequest("https://bot.example/api/pending", { body: null }), env, {});
+  const data = await res.json();
+  assert.equal('cutover_complete' in data, false);
+});
+
 test('/api/health (public) is alive', async () => {
   const env = makeEnv();
   const res = await worker.fetch(new FakeRequest("https://bot.example/api/health", { body: null }), env, {});

@@ -89,6 +89,9 @@ class SettingsDialog(QDialog):
                         "GitHub links from RSS feeds and Reddit, no API key needed"),
         'Backup':      ('archive',
                         "Folder backups, VaultSeal and Good Repos publishing"),
+        # v0.40.0 — the batch-finish chime's controls (Settings → Sound).
+        'Sound':       ('volume-2',
+                        "The batch-finish chime — on/off, volume, both previews"),
     }
     _DEFAULT_HINT = "Pick a section — every former tab lives here"
 

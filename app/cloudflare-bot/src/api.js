@@ -233,13 +233,10 @@ async function handleGetPending(request, env) {
     ledger_id: row.id
   }));
 
-  const cutoverComplete = await stateGet(env.DB, 'cutover_complete');
-
   return jsonResponse({
     success: true,
     pending,
-    count: pending.length,
-    cutover_complete: cutoverComplete === '1'
+    count: pending.length
   });
 }
 
