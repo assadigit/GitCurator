@@ -316,6 +316,20 @@ class WebsitePipeline:
                         f"YouTube links will keep failing until the proxy "
                         f"client is up.", "warning")
                     self.web_proxy = None
+        # v0.41.0 — an owner-set User-Agent (config.json "web_user_agent";
+        # empty/missing = the default browser-grade Chrome UA). Wraps the
+        # SAME production fetcher as the proxy wrap (both compose), and —
+        # like the proxy wrap — NEVER touches an injected fetch_fn (the
+        # golden run and tests stay hermetic).
+        _custom_ua = str(self.config.get('web_user_agent') or '').strip()
+        if _custom_ua and fetch_fn is None:
+            _ua_base_fetch = self.fetch_fn
+
+            def _ua_fetch(url, **kwargs):
+                kwargs.setdefault('user_agent', _custom_ua)
+                return _ua_base_fetch(url, **kwargs)
+
+            self.fetch_fn = _ua_fetch
         self.taxonomy = taxonomy or load_taxonomy_from_config(self.config)
         self.vault_path = (self.config.get('website_vault_path') or '').strip()
         # v0.35.0 — the display name of the Websites vault for the

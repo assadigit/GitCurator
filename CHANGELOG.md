@@ -1,3 +1,74 @@
+## [0.41.0] — The UA wall: fetches present as the browser they're read in — 2026-10-06
+
+Owner ask (session): "Many website links get fetch error 403 … they're
+working sites." Desktop release v0.41.0, Worker unchanged at **0.30.0**
+(the fetcher is the desktop's; the Worker never fetches websites).
+Suite grows **1030 → 1040** (6 fetch-layer cases in test_phase2's
+TestWebFetch + 4 wrap-guarantee cases in test_webproxy's new
+TestCustomUserAgentWrap), 83 compiles (unchanged), offline golden
+30/30 + 0 invalid.
+
+**The root cause.** The Websites fetcher introduced itself honestly —
+`User-Agent: GitCurator/0.19 (+personal website library builder; polite
+fetcher; …)` — with a three-header request (UA, Accept,
+Accept-Language). But "honest bot" is exactly what a CDN bot defense
+filters FIRST: the golden report had been saying so since v0.30
+("6 links were fetch-blocked by bot defenses in BOTH runs — pixabay,
+t.co, reddit, coolors, iconscout, pageflows — HTTP 403/timeout: a
+fetch-layer matter"), and every one of those sites opens fine in the
+owner's browser on the same line. The sites were never down; they were
+refusing the handshake. (Verified directly: the same URL through the
+same socket, once as GitCurator and once as a browser, gets 403 and
+200 respectively on UA-filtering CDNs.)
+
+**The fix — a browser-grade request.** The fetcher now presents as a
+current stable Chrome on Windows 10 (the most common browser/OS combo
+on the owner's planet) with Chrome's own header set, in Chrome's own
+order: the full navigation Accept (xhtml, avif, webp, signed-exchange),
+`Accept-Language: en-US,en;q=0.9`, `Upgrade-Insecure-Requests`, the
+Sec-Fetch-* navigation quartet, and the sec-ch-ua client-hint trio.
+Custom UAs (the new `web_user_agent` config key) drop the Chrome-only
+client hints automatically — a Firefox UA carrying Chrome hints is
+itself a bot signal; the request never contradicts itself. The honest
+old string can be restored per install by setting it there.
+
+**gzip is now REAL.** Claiming `Accept-Encoding: gzip, deflate` means
+decoding it, so `_decompress_capped` decodes both (deflate accepts the
+zlib-wrapped AND raw variants) with the cap applied to the DECOMPRESSED
+size — a "gzip bomb" stops at the same max_bytes budget as everything
+else. A compressed stream cut at the wire cap is a partial fetch with
+the size-cap reason (honest: undecodable by construction); an
+undecodable whole body is a failed fetch, never an exception.
+
+**A 403 now names its wall.** When a 403/429 carries a visible
+bot-defense marker — Cloudflare's `cf-mitigated: challenge` header, or
+a `Server:` of cloudflare/akamai/cloudfront/fastly/imperva/incapsula/
+sucuri/edgecast — the failure reason says so: `HTTP 403 — bot defense
+(server: cloudflare)`. The _review note for a "working site" finally
+tells the owner WHY it refused us instead of a bare "HTTP 403". (On a
+200 the same Server header means nothing — the hint only reads
+refusals.)
+
+**What did NOT change.** Every politeness rule is byte-identical:
+per-domain rate limiting, connect+read timeout, the 2 MB cap, the
+redirect cap, the loopback-never-proxied rule, the v0.19 proxy routing
+and v0.21 direct fallback. The pipeline's UA wrap follows the proxy
+wrap's exact guarantees: applied only on the production path (an
+injected fetch_fn — tests, the offline golden run — stays verbatim),
+composes with an active proxy (both kwargs reach fetch_url), and an
+empty value changes nothing. One honest nuance, recorded rather than
+hidden: Wikimedia's UA policy PREFERS a descriptive UA, so from a
+datacenter IP a browser UA can be refused where the honest one passed;
+from the owner's residential line a browser UA is what his browser
+already sends and is accepted everywhere the browser is.
+
+**Gate.** 83/83 compiles · 1040/1040 tests (33 modules) · offline
+golden 30/30 + 0 invalid · the new cases cover the browser header set
+(echoed by a local server), custom-UA client-hint dropping, gzip and
+deflate decode, the gzip-bomb cap, the named bot-defense 403, and the
+four UA-wrap guarantees (applied, composed with proxy, empty = no-op,
+injected = verbatim).
+
 ## [0.40.0] — The Sound page, and failures stop sounding like celebrations — 2026-10-06
 
 Owner ask (session): give the v0.39 chime its Settings UI

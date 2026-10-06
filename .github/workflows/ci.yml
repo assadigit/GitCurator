@@ -1,14 +1,20 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 83 audited
-# Python modules and runs the full 1030-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1040-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 71 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
-# llamacpp + 45 phase6 + 68 connection + 47 detectset + 44 webproxy +
+# 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
+# llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
 # 49 intakefix + 38 sealfix + 30 v0230 + 24 refactor_surface + 22
 # websitesqueuefix + 11 swotfix + 10 webnote_v2 + 22 lawfix + 29
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings).
+# v0.41.0 — the UA wall comes down: the fetcher presents as a current
+# Chrome (browser-grade header set, REAL gzip/deflate decoding with the
+# cap on the decompressed size, custom UA via config "web_user_agent",
+# and 403/429 reasons that NAME the visible bot defense — the honest
+# bot UA was why working sites 403'd the pipeline); 6 fetch-layer
+# cases join test_phase2, 4 UA-wrap cases join test_webproxy (1040).
 # v0.40.0 — the Sound settings page (Settings → Sound: the chime's
 # switch + 0–100 volume slider + both previews through the exact
 # batch gate), the needs-retry voice (a batch that finishes WITH

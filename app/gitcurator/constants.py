@@ -158,6 +158,12 @@ CONFIG_EXAMPLE = {
     # never noted; the _inbox row (secret query values scrubbed) is the
     # record. Settings → 📁 Vault → "Self domains"; empty list = none.
     "web_self_domains": ["github-to-obsidian-bot.aliassadi-plus.workers.dev"],
+    # v0.41.0 — override the fetcher's User-Agent. Empty = the default
+    # browser-grade Chrome UA (the honest "GitCurator/…" bot string was
+    # 403-walled by CDN bot defenses on working sites — pixabay, reddit,
+    # coolors, iconscout on the golden list). Set the old honest string
+    # here to opt back out of the browser presentation.
+    "web_user_agent": "",
     "ollama": {
         "base_url": "http://localhost:11434",
         "model": "qwythos-9b"

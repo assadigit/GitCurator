@@ -758,7 +758,66 @@ class TestDefaultsAndPackaging(unittest.TestCase):
         self.assertIn('PySocks', req)
 
     def test_user_agent_version_bumped(self):
-        self.assertIn('GitCurator/0.19', wf.USER_AGENT)
+        # v0.41.0 — the UA is browser-grade Chrome (the honest bot string
+        # was 403-walled by CDN bot defenses on working sites).
+        self.assertIn('Chrome/131', wf.USER_AGENT)
+        self.assertTrue(wf.USER_AGENT.startswith('Mozilla/5.0'))
+        self.assertNotIn('GitCurator', wf.USER_AGENT)
+
+
+class TestCustomUserAgentWrap(_PipeProxyCase):
+    """v0.41.0 — config.json "web_user_agent" overrides the fetcher's
+    presentation. Mirrors the proxy wrap's guarantees: applied ONLY on
+    the production path (an injected fetch_fn stays verbatim), composes
+    with an active proxy (both kwargs reach fetch_url), and an empty
+    value changes nothing."""
+
+    def _config_no_proxy(self, ua=None):
+        cfg = {'website_vault_path': os.path.join(self.tmp, 'w'),
+               'web_domain_delay_s': 0}
+        if ua is not None:
+            cfg['web_user_agent'] = ua
+        return cfg
+
+    def test_custom_ua_reaches_fetch_url(self):
+        rec = self._record_fetch()
+        pipe = self._make(self._config_no_proxy('GitCurator-test/0.41'))
+        r = pipe.fetch_fn('https://example.test/ua', timeout_s=3,
+                          rate_limiter=None)
+        self.assertEqual(rec.call_count, 1)
+        self.assertEqual(rec.call_args.kwargs.get('user_agent'),
+                         'GitCurator-test/0.41')
+        self.assertEqual(r.reason, 'recorder')
+
+    def test_custom_ua_composes_with_proxy(self):
+        rec = self._record_fetch()
+        cfg = self._config()
+        cfg['web_user_agent'] = 'UA-via-proxy/1'
+        pipe = self._make(cfg)
+        self.assertIsNotNone(pipe.web_proxy)
+        pipe.fetch_fn('https://example.test/both', timeout_s=3,
+                      rate_limiter=None)
+        kwargs = rec.call_args.kwargs
+        self.assertEqual(kwargs.get('user_agent'), 'UA-via-proxy/1')
+        self.assertEqual(kwargs.get('proxy', {}).get('type'), 'socks5')
+
+    def test_empty_ua_changes_nothing(self):
+        rec = self._record_fetch()
+        pipe = self._make(self._config_no_proxy(ua='   '))
+        pipe.fetch_fn('https://example.test/plain', timeout_s=3,
+                      rate_limiter=None)
+        self.assertIsNone(rec.call_args.kwargs.get('user_agent'))
+
+    def test_injected_fetch_fn_never_wrapped_for_ua(self):
+        def injected(url, **kw):
+            return wf.FetchResult(url=url, status='failed',
+                                  reason='injected')
+        pipe = self._make(self._config_no_proxy('UA-should-not-apply'),
+                          fetch_fn=injected)
+        self.assertEqual(pipe.fetch_fn, injected)
+        pipe.fetch_fn('https://example.test/hermetic', timeout_s=1)
+        self.assertEqual(pipe.fetch_fn('https://example.test/x').reason,
+                         'injected')
 
 
 if __name__ == '__main__':

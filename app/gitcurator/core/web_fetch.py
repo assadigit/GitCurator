@@ -20,11 +20,27 @@ Statuses produced here:
 ``web_extract`` from the fetched body — the fetcher cannot know.)
 
 Politeness:
-    - a clear User-Agent identifying the app (not a browser impersonation)
     - per-domain rate limiting (``DomainRateLimiter``; shared instance so
       the whole batch pauses between hits on the same host)
     - connect+read timeout on every request
     - a hard byte cap (reads stream in chunks and stop at the cap)
+
+v0.41.0 — The UA wall comes down. The honest "GitCurator/…" User-Agent
+was answered with HTTP 403 by every CDN bot defense on the golden list
+(pixabay, reddit, coolors, iconscout — working sites that simply refuse
+non-browser clients), exactly as the v0.30 golden report suspected: "a
+fetch-layer matter". The fetcher now presents as a current Chrome on
+Windows — the most common browser on the owner's planet — with Chrome's
+own header set (Accept, Accept-Language, Sec-Fetch-*, sec-ch-ua client
+hints) and REAL gzip/deflate decoding to back the Accept-Encoding it
+sends. Politeness is untouched (rate limit, timeout, byte cap, proxy
+rules): presenting as a browser is not permission to hammer. A 403/429
+that carries a visible bot-defense marker (cf-mitigated, Server:
+cloudflare/akamai/…) now names the wall in the failure reason, so a
+_review note says WHY a working site refused us. An owner-set
+``web_user_agent`` in config.json overrides the presentation (the old
+honest string can be restored there); custom non-Chrome UAs drop the
+Chrome-only client-hint headers so the request stays self-consistent.
 
 v0.19.0 — Web fetches through the owner's proxy. Behind x.com / t.co /
 youtu.be the local DNS is poisoned (connection REFUSED on a fake IP) while
@@ -47,20 +63,31 @@ SOCKS5 listener). Rules:
 Pure stdlib + optional PySocks, no PyQt.
 """
 
+import gzip
 import http.client
+import io
 import socket
 import ssl
 import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from typing import Dict, Optional, Tuple
 
 # ===========================================================================
 # CONFIGURATION (safe to edit)
 # ===========================================================================
-USER_AGENT = ("GitCurator/0.19 (+personal website library builder; "
-              "polite fetcher; https://github.com/assadigit/GitCurator)")
+# v0.41.0 — browser-grade UA. The pre-v0.41 honest string
+# ("GitCurator/0.19 (+personal website library builder; polite fetcher;
+# …)") was 403-walled by CDN bot defenses on sites that work fine in a
+# browser — the UA is the FIRST thing a WAF checks. A current stable
+# Chrome on Windows 10 (the most common browser/OS combo worldwide) is
+# the presentation least likely to be challenged. Overridable per
+# install via config.json "web_user_agent".
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/131.0.0.0 Safari/537.36")
 
 DEFAULT_PROXY_TYPE = 'socks5'    # v2rayN's default listener
 DEFAULT_PROXY_HOST = '127.0.0.1'
@@ -386,6 +413,123 @@ class _RedirectCap(urllib.request.HTTPRedirectHandler):
     max_redirections = MAX_REDIRECTS
 
 
+# ---------------------------------------------------------------------------
+# v0.41.0 — the browser-grade request: headers, compression, bot walls
+# ---------------------------------------------------------------------------
+
+def _request_headers(user_agent: str) -> Dict[str, str]:
+    """Chrome 131's own navigation header set, in Chrome's own order —
+    v0.41.0's answer to the 403 wall (a WAF-classed "bot" UA plus a
+    3-header request was trivially filterable; a real browser's request
+    is not). Chrome-only client hints (sec-ch-ua*) are dropped for a
+    custom non-Chrome User-Agent so the request never contradicts
+    itself — a Firefox UA carrying Chrome hints is itself a bot signal."""
+    ua = user_agent or USER_AGENT
+    headers = {
+        'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", '
+                    '"Not_A Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': ua,
+        'Accept': ('text/html,application/xhtml+xml,application/xml;q=0.9,'
+                   'image/avif,image/webp,image/apng,*/*;q=0.8,'
+                   'application/signed-exchange;v=b3;q=0.7'),
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-User': '?1',
+        'Sec-Fetch-Dest': 'document',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    if 'Chrome/' not in ua:
+        for key in ('sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform'):
+            headers.pop(key, None)
+    return headers
+
+
+# Server values that, on a 403/429, mean "a bot-defense answered" — a
+# CDN fronting half the web is invisible on a 200, but is the likely
+# challenger on a refusal.
+_BOT_DEFENSE_SERVERS = ('cloudflare', 'akamai', 'cloudfront', 'fastly',
+                        'imperva', 'incapsula', 'sucuri', 'edgecast')
+
+
+def _bot_defense_hint(headers) -> str:
+    """A VISIBLE bot-defense marker on a 403/429 — '' when nothing
+    identifiable is on the wire. Names the wall in the failure reason so
+    the _review note for a "working site" says why it refused us
+    (v0.41.0): e.g. 'HTTP 403 — bot defense (server: cloudflare)'."""
+    if headers is None:
+        return ''
+    try:
+        mitigated = str(headers.get('cf-mitigated') or '').strip()
+        if mitigated:
+            return f'bot defense (Cloudflare: {mitigated})'
+        server = str(headers.get('Server') or '').strip().lower()
+        if server in _BOT_DEFENSE_SERVERS:
+            return f'bot defense (server: {server})'
+    except Exception:
+        return ''
+    return ''
+
+
+def _decompress_capped(body: bytes, encoding: str,
+                       max_bytes: int) -> Tuple[bytes, bool]:
+    """Decode a gzip/deflate response body, capped at ``max_bytes``
+    DECOMPRESSED bytes (v0.41.0: the fetcher asks for gzip like a
+    browser, so it must also decode it — and a "gzip bomb" must stop at
+    the same byte budget as everything else). Returns
+    ``(data, truncated)``; raises on an undecodable stream (the caller
+    turns that into a failed/partial FetchResult with an honest
+    reason — never an exception out of the fetcher)."""
+    out = io.BytesIO()
+    state = {'truncated': False}
+
+    def _absorb(piece: bytes) -> None:
+        if not piece:
+            return
+        if out.tell() + len(piece) > max_bytes:
+            out.write(piece[:max_bytes - out.tell()])
+            state['truncated'] = True
+            return
+        out.write(piece)
+
+    enc = (encoding or '').strip().lower()
+    if enc in ('gzip', 'x-gzip'):
+        with gzip.GzipFile(fileobj=io.BytesIO(body)) as gz:
+            while not state['truncated']:
+                chunk = gz.read(64 * 1024)
+                if not chunk:
+                    break
+                _absorb(chunk)
+    elif enc == 'deflate':
+        last_err: Exception = ValueError('deflate decode failed')
+        for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            out = io.BytesIO()
+            state['truncated'] = False
+            dec = zlib.decompressobj(wbits)
+            try:
+                data = body
+                while True:
+                    piece = dec.decompress(data, 64 * 1024)
+                    _absorb(piece)
+                    if state['truncated']:
+                        break
+                    tail = dec.unconsumed_tail
+                    if not tail:
+                        break
+                    data = tail
+                return out.getvalue(), state['truncated']
+            except zlib.error as e:
+                last_err = e
+                continue  # try the raw-deflate fallback
+        raise last_err
+    else:
+        raise ValueError(f'unsupported Content-Encoding: {encoding!r}')
+    return out.getvalue(), state['truncated']
+
+
 def _looks_like_pdf(content_type: str, url: str, body: bytes) -> bool:
     if 'application/pdf' in (content_type or ''):
         return True
@@ -462,10 +606,11 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
                 user_agent: str, proxy: Optional[Dict],
                 started: float) -> FetchResult:
     """One fetch attempt (the pre-v0.21.0 fetch_url body). Never raises;
-    ``started`` is the outer monotonic clock so elapsed covers fallbacks."""
-    headers = {'User-Agent': user_agent,
-               'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
-               'Accept-Language': 'en'}
+    ``started`` is the outer monotonic clock so elapsed covers fallbacks.
+    v0.41.0 — the request is browser-grade (Chrome's header set, gzip
+    accepted and decoded); see ``_request_headers`` and
+    ``_decompress_capped``."""
+    headers = _request_headers(user_agent)
 
     # Public websites: certificates are verified. A bad cert is a failed
     # fetch (recorded, retried, reported) — not silently accepted.
@@ -483,6 +628,10 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
     try:
         with opener.open(req, timeout=float(timeout_s)) as resp:
             content_type = (resp.headers.get('Content-Type') or '').lower()
+            # v0.41.0 — we ask for gzip/deflate; record what actually
+            # came back so the body can be decoded below.
+            content_encoding = (resp.headers.get('Content-Encoding')
+                                or '').strip().lower()
             charset = ''
             for part in content_type.split(';'):
                 part = part.strip()
@@ -507,7 +656,15 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
                 chunks.append(chunk)
             body = b''.join(chunks)
     except urllib.error.HTTPError as e:
-        return FetchResult(url, status='failed', reason=f'HTTP {e.code}',
+        reason = f'HTTP {e.code}'
+        if e.code in (403, 429):
+            # v0.41.0 — name the bot wall when one is visible: a
+            # "working site" that 403s a polite fetcher is almost always
+            # a challenge, and the _review note should say so.
+            hint = _bot_defense_hint(e.headers)
+            if hint:
+                reason = f'HTTP {e.code} — {hint}'
+        return FetchResult(url, status='failed', reason=reason,
                            http_status=e.code,
                            elapsed_s=time.monotonic() - started)
     except urllib.error.URLError as e:
@@ -529,6 +686,33 @@ def _fetch_once(url: str, timeout_s: float, max_bytes: int,
                            elapsed_s=time.monotonic() - started)
 
     elapsed = time.monotonic() - started
+
+    # v0.41.0 — decode the compressed body (we ask for gzip/deflate like
+    # a browser, so a compressed answer is the NORM on real sites). The
+    # cap bounds the DECOMPRESSED size too: a "gzip bomb" stops at
+    # max_bytes. A stream cut at the WIRE cap is undecodable by
+    # construction — the size cap IS the honest reason. An undecodable
+    # whole body is a failed fetch, never an exception.
+    if content_encoding and content_encoding != 'identity':
+        if truncated:
+            return FetchResult(url, final_url, status='partial',
+                               reason=f'size cap ({max_bytes:,} bytes) '
+                                       'reached',
+                               http_status=http_status,
+                               content_type=content_type,
+                               charset=charset, body=b'', text='',
+                               elapsed_s=elapsed)
+        try:
+            body, dec_truncated = _decompress_capped(
+                body, content_encoding, max_bytes)
+            truncated = truncated or dec_truncated
+        except Exception as e:
+            return FetchResult(url, status='failed',
+                               reason=f'{content_encoding} decode failed: '
+                                      f'{type(e).__name__}',
+                               http_status=http_status,
+                               content_type=content_type,
+                               elapsed_s=elapsed)
 
     if _looks_like_pdf(content_type, url, body):
         return FetchResult(url, final_url, status='partial', reason='pdf',

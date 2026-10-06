@@ -26,6 +26,7 @@ Covers (SPEC §6 Phase 2 + acceptance):
 Headless-safe: QT_QPA_PLATFORM=offscreen, no GUI is ever shown.
 """
 
+import gzip
 import json
 import os
 import shutil
@@ -33,6 +34,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import gitcurator.gui.app as gui_app
@@ -74,6 +76,60 @@ class _Handler(BaseHTTPRequestHandler):
         if path == '/slow':
             time.sleep(8)
             self.send_response(200)
+            self.end_headers()
+            return
+        # v0.41.0 — the browser-grade fetcher: compressed bodies, the
+        # bot-defense 403, and a request-header echo (all local).
+        if path == '/headers':
+            body = ('\n'.join(f'{k}: {v}' for k, v in self.headers.items())
+                    ).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == '/gzip':
+            body = ('<html><head><title>Gzip Page</title></head><body>'
+                    '<p>gzipped content about design tools and assets</p>'
+                    '</body></html>').encode('utf-8')
+            gz = gzip.compress(body)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Content-Length', str(len(gz)))
+            self.end_headers()
+            self.wfile.write(gz)
+            return
+        if path == '/deflate':
+            body = ('<html><head><title>Deflate Page</title></head><body>'
+                    '<p>deflated content for the reading list</p>'
+                    '</body></html>').encode('utf-8')
+            z = zlib.compress(body)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Encoding', 'deflate')
+            self.send_header('Content-Length', str(len(z)))
+            self.end_headers()
+            self.wfile.write(z)
+            return
+        if path == '/gzip-bomb':
+            # 500 KB of repeats inside a ~1 KB gzip — the decompression
+            # cap must stop it at max_bytes, not at the wire size.
+            gz = gzip.compress(b'bomb ' * 100_000)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Content-Length', str(len(gz)))
+            self.end_headers()
+            self.wfile.write(gz)
+            return
+        if path == '/blocked':
+            # A CDN-style refusal: 403 + a visible bot-defense Server
+            # header (send_response_only — no Python Server banner).
+            self.send_response_only(403)
+            self.send_header('Server', 'cloudflare')
+            self.send_header('Date', 'Tue, 07 Oct 2026 00:00:00 GMT')
             self.end_headers()
             return
         if path == '/redirect':
@@ -378,6 +434,58 @@ class TestWebFetch(unittest.TestCase):
     def test_bad_scheme_is_failed(self):
         r = _web_fetch.fetch_url('ftp://example.com/x', timeout_s=5)
         self.assertEqual(r.status, 'failed')
+
+    # v0.41.0 — the browser-grade fetcher --------------------------------
+
+    def test_browser_headers_sent(self):
+        r = _web_fetch.fetch_url(self._url('/headers'), timeout_s=10)
+        self.assertEqual(r.status, 'full')
+        self.assertIn('User-Agent: Mozilla/5.0', r.text)
+        self.assertIn('Chrome/131', r.text)
+        self.assertIn('Accept-Encoding: gzip, deflate', r.text)
+        self.assertIn('Sec-Fetch-Dest: document', r.text)
+        self.assertIn('Sec-Fetch-Mode: navigate', r.text)
+        self.assertIn('Accept-Language: en-US,en;q=0.9', r.text)
+        # urllib capitalizes outgoing header names — match case-blind.
+        self.assertIn('sec-ch-ua:', r.text.lower())
+
+    def test_custom_ua_drops_chrome_client_hints(self):
+        r = _web_fetch.fetch_url(self._url('/headers'), timeout_s=10,
+                                 user_agent='GitCurator/0.41 test')
+        self.assertEqual(r.status, 'full')
+        self.assertIn('User-Agent: GitCurator/0.41 test', r.text)
+        self.assertNotIn('sec-ch-ua', r.text.lower())
+        # The rest of the browser set stays for a custom UA.
+        self.assertIn('Accept-Encoding: gzip, deflate', r.text)
+
+    def test_gzip_body_decoded(self):
+        r = _web_fetch.fetch_url(self._url('/gzip'), timeout_s=10)
+        self.assertEqual(r.status, 'full')
+        self.assertTrue(r.ok)
+        self.assertEqual(r.http_status, 200)
+        self.assertIn('Gzip Page', r.text)
+        self.assertIn('design tools', r.text)
+
+    def test_deflate_body_decoded(self):
+        r = _web_fetch.fetch_url(self._url('/deflate'), timeout_s=10)
+        self.assertEqual(r.status, 'full')
+        self.assertIn('Deflate Page', r.text)
+
+    def test_gzip_bomb_is_capped_at_decompression(self):
+        r = _web_fetch.fetch_url(self._url('/gzip-bomb'), timeout_s=10,
+                                 max_bytes=50_000)
+        self.assertEqual(r.status, 'partial')
+        self.assertIn('size cap', r.reason)
+        self.assertLessEqual(len(r.body), 50_000)
+        self.assertTrue(r.body.startswith(b'bomb '))
+
+    def test_403_names_the_bot_defense(self):
+        r = _web_fetch.fetch_url(self._url('/blocked'), timeout_s=10)
+        self.assertEqual(r.status, 'failed')
+        self.assertEqual(r.http_status, 403)
+        self.assertIn('HTTP 403', r.reason)
+        self.assertIn('bot defense', r.reason)
+        self.assertIn('cloudflare', r.reason)
 
     def test_rate_limiter_enforces_delay(self):
         limiter = _web_fetch.DomainRateLimiter(delay_s=0.4)
