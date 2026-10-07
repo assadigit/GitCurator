@@ -5,6 +5,27 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.51.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-09** (worker version ID
+> `20a2a662-af9c-44be-b7a4-7be2b82b25fb`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.51.0 is a DESKTOP-ONLY release (the caught-up check reads the
+> table: before "everything is up to date" is said, the master table's
+> " - " rows — valid links whose fetches failed, no verdict emoji —
+> are found and fetched again through the full pipeline, burned-out
+> retry counters reborn one row at a time, succeeded rows stamped
+> '📁 stored' so the table never lies "waiting" about stored links);
+> the Worker's code is unchanged since v0.30.0 (it never touches the
+> vault), so the deploy is the release ritual's health-and-parity
+> re-verification: health `ok` with version 0.30.0, root 200, both
+> queue consumers attached (curator-ingest + curator-ingest-dlq),
+> secrets persisted. The deploy ran from the v0.51.0 release tree
+> (`3ea3205`) right after the push and BEFORE the desktop tag's zip
+> went out.
+
+---
+
 ## 📦 v0.50.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-09** (worker version ID
