@@ -5,6 +5,40 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.53.0 deploy record — the unchanged 0.30.0 worker, verified LIVE (✅)
+
+> **Verified in production on 2026-10-10** (the live worker version ID
+> `9639f0fb-b5c4-4640-a801-ce14d78cdda5` — the v0.52.0 deploy — at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.53.0 is a DESKTOP-ONLY release (the door waits for the page; a
+> crash is never a delivery — the fifth door's Chrome tab retry now
+> verifies each page it takes: the load watch + the page verdict +
+> the honest end-of-delivery modal, all desktop code in
+> `gitcurator/core/chrome_tabs.py`, `hand_delivery.py` and the GUI).
+> The Worker's code is unchanged since v0.30.0 —
+> `git diff v0.48.0..v0.53.0 -- app/cloudflare-bot/src/` is EMPTY, so
+> the v0.52.0 deployment already serves byte-identical code: this
+> round's ritual is the live health-and-parity check.
+>
+> **Verified live (no token needed):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` ✓. The ritual re-deploy itself (wrangler) needs
+> the owner's `CLOUDFLARE_API_TOKEN`, a chat-provided secret this
+> sandbox no longer holds — since the release changes NOTHING under
+> `src/`, the live 9639f0fb deployment IS the v0.53.0 worker; a
+> re-deploy would mint a functionally identical version ID. Next
+> time the token is in hand, `npx wrangler deploy` from this folder
+> is the whole ritual (secrets and bindings persist across deploys).
+>
+> Desktop release v0.53.0 (GitCurator-v0.53.0-windows.zip, 129 files,
+> 1,024,689 bytes, sha256
+> `5ef6b2ff1fb969f15edd58ecf808d4650edcde15c7f90c2e23d6c5ced49421ab`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.53.0 tag (runs 37690167422 / 37690167745 — 1468 tests, 85-module
+> compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.52.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-09** (worker version ID
