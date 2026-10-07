@@ -11,6 +11,19 @@ data that way."
 Covered here (unit law: temp vaults, patched seams, zero sockets, no
 browser ever launches):
 
+* v0.53.0 — THE DOOR WAITS FOR THE PAGE, A CRASH IS NEVER A
+  DELIVERY (the owner's report: "it tried to open a chrome tabs, but
+  crashed and closed, and app shown false positive of success …
+  didn't wait for sites to load and gather their data"):
+  ``page_is_real`` (the pure verdict: the tab's own URL law, the
+  ERR_* code in the DOM, the crash phrases, the challenge grammar),
+  the load watch (complete at an http(s) URL, the settle window with
+  its href-change restart, a challenge that passes is waited for, a
+  challenge that never passes is named, about:blank and
+  never-finishes named), the delivery report's failed_links detail,
+  the consume-side re-verification (an auto-delivered error page is
+  discarded — the app's own file — the owner's saves trusted), and
+  the GUI's end-of-delivery honest modal (the bare-mixin routing);
 * the WebSocket frame codec — client frames are MASKED with all three
   length encodings; a split feed yields no frame until it completes;
   server frames (unmasked AND masked) decode; fragmentation splits
@@ -378,8 +391,12 @@ class TestCDPSocket(unittest.TestCase):
         # "Execution context was destroyed" mid-navigation is a page
         # STILL LOADING, not a failure: the poll keeps going, and a
         # context swap landing exactly on the final DOM read gets ONE
-        # retry. ( ids: 1=readyState(err) 2=readyState(ok) 3=DOM(err)
-        # 4=DOM(ok) 5=title )
+        # retry. v0.53.0 — the load watch probes readyState AND the
+        # tab's URL in one call ('complete|<url>'), and the settle
+        # wants one more probe after the first complete (patched tiny
+        # here to keep the scripted run fast).
+        # ( ids: 1=probe(err) 2=probe(ok) 3=probe(settle) 4=DOM(err)
+        # 5=DOM(ok) 6=title )
         _ctx_err = {'id': 0, 'error': {'message':
                                        'Execution context was destroyed'}}
 
@@ -387,15 +404,21 @@ class TestCDPSocket(unittest.TestCase):
             _ctx_err['id'] = id_
             return _srv_frame(json.dumps(obj if 'error' not in obj
                                          else _ctx_err).encode())
+
+        def _probe(id_):
+            return _srv_frame(json.dumps(
+                {'id': id_, 'result': {'result':
+                 {'value': f'complete|{_URL}'}}}).encode())
+
         html = '<html><body>' + 'z' * 300 + '</body></html>'
         sock = self._sock(
             _frame({'error': True}, 1),                      # destroyed
-            _srv_frame(json.dumps({'id': 2, 'result': {'result':
-                {'value': 'complete'}}}).encode()),           # loaded
-            _frame({'error': True}, 3),                      # destroyed
-            _srv_frame(json.dumps({'id': 4, 'result': {'result':
-                {'value': html}}}).encode()),                 # the DOM
+            _probe(2),                                       # loaded
+            _probe(3),                                       # the settle
+            _frame({'error': True}, 4),                      # destroyed
             _srv_frame(json.dumps({'id': 5, 'result': {'result':
+                {'value': html}}}).encode()),                 # the DOM
+            _srv_frame(json.dumps({'id': 6, 'result': {'result':
                 {'value': 'Retried'}}}).encode()))            # the title
         ws = ct.CDPSocket('127.0.0.1', 9222, '/devtools/page/1', sock=sock)
 
@@ -414,13 +437,241 @@ class TestCDPSocket(unittest.TestCase):
         # the socket already handshaked; the page fetch re-opens its own
         # socket in real life — here we exercise the socket directly
         # through the same evaluate sequence the fetch driver makes
-        with mock.patch.object(ct, 'CDPSocket', return_value=ws):
+        with mock.patch.object(ct, 'PAGE_SETTLE_S', 0.05), \
+                mock.patch.object(ct, 'CDPSocket', return_value=ws):
             page = ct._fetch_opened_tab(session, _URL, tab, 10.0,
                                         lambda *a, **k: None)
         self.assertTrue(page['ok'], page)
         self.assertIn('z' * 100, page['html'])
         self.assertEqual(page['title'], 'Retried')
         self.assertEqual(session.closed, ['T1'])
+
+
+# ---------------------------------------------------------------------------
+# 2b. v0.53.0 — the page verdict + the load watch (the owner's report:
+# "it tried to open a chrome tabs, but crashed and closed, and app
+# shown false positive of success … didn't wait for sites to load")
+# ---------------------------------------------------------------------------
+
+_REAL_HTML = ('<html><head><title>The Real Page</title></head><body>'
+              + ('r' * 500) + '</body></html>')
+
+
+class TestPageVerdict(unittest.TestCase):
+    """page_is_real — the pure law: a Chrome error page, a crash page
+    or a challenge page is NEVER the site's page, whatever its
+    readyState said (the false positive the owner reported)."""
+
+    def test_a_real_page_passes(self):
+        ok, reason = ct.page_is_real(_REAL_HTML, _URL, 'The Real Page')
+        self.assertTrue(ok, reason)
+        self.assertEqual(reason, '')
+
+    def test_chrome_error_url_is_not_the_site(self):
+        ok, reason = ct.page_is_real(
+            '<html><body>' + 'e' * 500 + '</body></html>',
+            'chrome-error://chromewebdata/', '')
+        self.assertFalse(ok)
+        self.assertIn("Chrome's own page", reason)
+
+    def test_about_blank_is_not_the_site(self):
+        ok, reason = ct.page_is_real('<html></html>', 'about:blank', '')
+        self.assertFalse(ok)
+        self.assertIn("Chrome's own page", reason)
+
+    def test_an_empty_href_is_not_the_site(self):
+        ok, reason = ct.page_is_real(_REAL_HTML, '', '')
+        self.assertFalse(ok)
+        self.assertIn('empty URL', reason)
+
+    def test_an_err_code_names_the_error_page(self):
+        html = ('<html><head><title>walled.example.net</title></head>'
+                '<body><h1>This site can’t be reached</h1>'
+                '<p>walled.example.net unexpectedly refused…'
+                'ERR_CONNECTION_RESET</p></body></html>')
+        ok, reason = ct.page_is_real(html, _URL, 'walled.example.net')
+        self.assertFalse(ok)
+        self.assertIn('ERR_CONNECTION_RESET', reason)
+        self.assertIn("Chrome's error page", reason)
+
+    def test_the_crash_page_is_a_crash(self):
+        html = ('<html><head><title>Aw, Snap!</title></head><body>'
+                + 'c' * 500 + '</body></html>')
+        ok, reason = ct.page_is_real(html, _URL, 'Aw, Snap!')
+        self.assertFalse(ok)
+        self.assertIn('crashed', reason)
+
+    def test_the_challenge_title_is_a_challenge(self):
+        html = '<html><head><title>Just a moment...</title></head>' \
+               '<body>' + ('j' * 500) + '</body></html>'
+        ok, reason = ct.page_is_real(html, _URL, 'Just a moment...')
+        self.assertFalse(ok)
+        self.assertIn('challenge', reason)
+
+    def test_the_challenge_machinery_is_a_challenge(self):
+        html = ('<html><head><title>Some title</title></head><body>'
+                '<script src="/cdn-cgi/challenge-platform/h/b/or.js">'
+                '</script>' + ('j' * 400) + '</body></html>')
+        ok, reason = ct.page_is_real(html, _URL, 'Some title')
+        self.assertFalse(ok)
+        self.assertIn('challenge', reason)
+
+
+class TestLoadWatch(unittest.TestCase):
+    """The v0.53 load watch, driven through the same scripted sockets
+    the DevTools client tests use (no socket, no browser). The settle
+    is patched tiny — the LAW is what is tested, not the clock."""
+
+    def _sock(self, *chunks):
+        return _FakeSock([_HANDSHAKE] + list(chunks))
+
+    def _resp(self, id_, value):
+        return _srv_frame(json.dumps(
+            {'id': id_, 'result': {'result': {'value': value}}}).encode())
+
+    def _probe(self, id_, state='complete', href=None):
+        return self._resp(id_, f'{state}|{href or _URL}')
+
+    def _dom(self, id_, html):
+        return self._resp(id_, html)
+
+    def _session(self):
+        class _FakeSession:
+            port = 9222
+
+            def __init__(self):
+                self.closed = []
+
+            def close_tab(self, target_id):
+                self.closed.append(target_id)
+        s = _FakeSession()
+        return s, {'id': 'T1', 'webSocketDebuggerUrl':
+                   'ws://127.0.0.1:9222/devtools/page/T1'}
+
+    def _fetch(self, sock, timeout=10.0, settle=0.05):
+        ws = ct.CDPSocket('127.0.0.1', 9222, '/devtools/page/T1',
+                          sock=sock)
+        session, tab = self._session()
+        with mock.patch.object(ct, 'PAGE_SETTLE_S', settle), \
+                mock.patch.object(ct, 'CDPSocket', return_value=ws):
+            page = ct._fetch_opened_tab(session, _URL, tab, timeout,
+                                        lambda *a, **k: None)
+        return page, session
+
+    def test_a_waited_real_page_is_delivered(self):
+        # probe, settle probe, then the DOM + title — the happy path
+        page, session = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, _REAL_HTML), self._resp(4, 'The Real Page')))
+        self.assertTrue(page['ok'], page)
+        self.assertIn('r' * 100, page['html'])
+        self.assertEqual(page['title'], 'The Real Page')
+        self.assertEqual(session.closed, ['T1'])
+
+    def test_a_chrome_error_page_is_never_a_delivery(self):
+        # the EXACT false positive the owner reported: readyState
+        # 'complete', 500 bytes of DOM — and the DOM is Chrome's own
+        # "This site can't be reached" page with its ERR_ code
+        err_html = ('<html><head><title>walled.example.net</title></head>'
+                    '<body><h1>This site can’t be reached</h1>'
+                    '<p>ERR_CONNECTION_RESET</p></body></html>')
+        page, session = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, err_html), self._resp(4, 'walled.example.net')))
+        self.assertFalse(page['ok'])
+        self.assertNotIn('r', page.get('html') or '')
+        self.assertIn('ERR_CONNECTION_RESET', page['error'])
+        self.assertIn("Chrome's error page", page['error'])
+        self.assertEqual(session.closed, ['T1'])
+
+    def test_a_crash_page_is_never_a_delivery(self):
+        crash_html = ('<html><head><title>Aw, Snap!</title></head>'
+                      '<body><div id="crash">' + 'c' * 500
+                      + '</div></body></html>')
+        page, _ = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, crash_html), self._resp(4, 'Aw, Snap!')))
+        self.assertFalse(page['ok'])
+        self.assertIn('crashed', page['error'])
+
+    def test_a_challenge_that_passes_is_waited_for(self):
+        # the door's whole point: the tab loads a challenge, the owner's
+        # REAL Chrome passes it (the redirect swaps the page) — the
+        # settle restarts on the href change and the REAL page is taken.
+        # Script: probe, settle, challenge DOM+title → reset → probe,
+        # settle, real DOM+title.
+        challenge = ('<html><head><title>Just a moment...</title>'
+                     '</head><body>' + ('j' * 500) + '</body></html>')
+        page, session = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, challenge), self._resp(4, 'Just a moment...'),
+            self._probe(5), self._probe(6),
+            self._dom(7, _REAL_HTML), self._resp(8, 'The Real Page')))
+        self.assertTrue(page['ok'], page)
+        self.assertIn('r' * 100, page['html'])
+        self.assertEqual(page['title'], 'The Real Page')
+        self.assertEqual(session.closed, ['T1'])
+
+    def test_a_challenge_that_never_passes_is_named(self):
+        # the challenge stays and stays — the budget runs out and the
+        # honest sentence says it never got past it (never a delivery)
+        challenge = ('<html><head><title>Just a moment...</title>'
+                     '</head><body>' + ('j' * 500) + '</body></html>')
+        page, _ = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, challenge), self._resp(4, 'Just a moment...'),
+            self._probe(5), self._probe(6),
+            self._dom(7, challenge), self._resp(8, 'Just a moment...')),
+            timeout=1.5)
+        self.assertFalse(page['ok'])
+        self.assertIn('challenge', page['error'])
+        self.assertNotIn('r', page.get('html') or '')
+
+    def test_a_page_that_never_finishes_is_named(self):
+        page, _ = self._fetch(self._sock(
+            self._probe(1, state='loading'),
+            self._probe(2, state='loading'),
+            self._probe(3, state='loading'),
+            self._probe(4, state='loading')), timeout=1.5)
+        self.assertFalse(page['ok'])
+        self.assertIn('never finished loading', page['error'])
+
+    def test_a_tab_stuck_on_about_blank_is_named(self):
+        # the tab opened but the navigation never committed — Chrome's
+        # own page, honestly named, never delivered
+        page, _ = self._fetch(self._sock(
+            self._probe(1, href='about:blank'),
+            self._probe(2, href='about:blank'),
+            self._probe(3, href='about:blank'),
+            self._probe(4, href='about:blank')), timeout=1.5)
+        self.assertFalse(page['ok'])
+        self.assertIn("Chrome's own page", page['error'])
+
+    def test_the_settle_restarts_on_a_href_change(self):
+        # a late redirect after 'complete': the first URL settles
+        # halfway, the href swaps — the settle restarts and the page
+        # at the FINAL url is what gets taken (settle 1.2s so the swap
+        # lands mid-settle, exactly the real-world shape; the settle
+        # needs its probes at the final URL before the DOM is read)
+        final_url = 'https://walled.example.net/article?page=2'
+        page, _ = self._fetch(self._sock(
+            self._probe(1),                       # complete at _URL
+            self._probe(2),                       # settle…
+            self._probe(3, href=final_url),       # the swap (reset)
+            self._probe(4, href=final_url),       # settling…
+            self._probe(5, href=final_url),       # settling…
+            self._probe(6, href=final_url),       # settle met
+            self._dom(7, _REAL_HTML), self._resp(8, 'The Real Page')),
+            settle=1.2)
+        self.assertTrue(page['ok'], page)
+        self.assertIn('r' * 100, page['html'])
+
+    def test_an_empty_dom_is_not_a_delivery(self):
+        page, _ = self._fetch(self._sock(
+            self._probe(1), self._probe(2),
+            self._dom(3, '<html></html>'), self._resp(4, '')))
+        self.assertFalse(page['ok'])
+        self.assertIn('rendered empty', page['error'])
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +932,51 @@ class TestDelivery(_FifthCase):
         # fourth door — an owner may still deliver it by hand)
         self.assertIn(_URL, hd._read_queue(self.vault)['links'])
 
+    def test_failed_links_detail_rides_the_report(self):
+        # v0.53.0 — the owner's ask ("xx links didn't generate content
+        # … got error xxx"): every failure carries its url + error so
+        # the end-of-delivery modal can name them
+        def _fetcher(urls, log=None):
+            return [
+                {'url': 'https://a.example.net/1', 'ok': True,
+                 'title': 'A', 'html': '<html><body>'
+                 + ('x' * 400) + '</body></html>', 'error': ''},
+                {'url': 'https://b.example.net/2', 'ok': False,
+                 'title': '', 'html': '', 'error': "the tab showed "
+                 "Chrome's error page (ERR_CONNECTION_RESET)"},
+            ]
+        report = ct.deliver_pages_via_chrome(
+            self.vault, [{'url': 'https://a.example.net/1', 'error': ''},
+                         {'url': 'https://b.example.net/2', 'error': ''}],
+            log=lambda *a, **k: None, _fetcher=_fetcher)
+        self.assertEqual(report['delivered'], 1)
+        self.assertEqual(report['failed'], 1)
+        self.assertEqual(len(report['failed_links']), 1)
+        self.assertEqual(report['failed_links'][0]['url'],
+                         'https://b.example.net/2')
+        self.assertIn('ERR_CONNECTION_RESET',
+                      report['failed_links'][0]['error'])
+
+    def test_an_error_page_from_any_fetch_path_is_never_written(self):
+        # v0.53.0 — the verdict is the DELIVERY's law too: a fetch path
+        # that hands back a Chrome error page (the exact shape a
+        # crashed tab produced before the fix) is a named failure —
+        # no file, no consumed row, nothing delivered
+        err_page = ('<html><head><title>x.example</title></head><body>'
+                    '<h1>This site can’t be reached</h1>'
+                    '<p>ERR_TIMED_OUT</p></body></html>')
+        report = ct.deliver_pages_via_chrome(
+            self.vault, [{'url': _URL, 'error': _ERR}],
+            log=lambda *a, **k: None,
+            _fetcher=lambda urls, log=None: [
+                {'url': _URL, 'ok': True, 'title': 'x.example',
+                 'html': err_page, 'error': ''}])
+        self.assertEqual(report['delivered'], 0)
+        self.assertEqual(report['failed'], 1)
+        self.assertIn('ERR_TIMED_OUT', report['failed_links'][0]['error'])
+        self.assertFalse(os.path.exists(os.path.join(
+            report['folder'], hd.suggested_filename(_URL))))
+
     def test_crashing_fetcher_never_breaks_the_delivery(self):
         def _boom(urls, log=None):
             raise RuntimeError('chrome exploded')
@@ -759,6 +1055,97 @@ class TestConsumeWording(_FifthCase):
             meta = json.load(f)['links'][_URL]
         self.assertFalse(meta.get('consumed'))
         self.assertEqual(meta.get('door'), 'auto')
+
+
+# ---------------------------------------------------------------------------
+# 7b. v0.53.0 — the consume-side re-verification (an auto-delivered
+# error page is discarded, never consumed; the owner's saves are
+# trusted as always)
+# ---------------------------------------------------------------------------
+
+_ERR_PAGE = (b'<html><head><title>walled.example.net</title></head>'
+             b'<body><h1>This site can\xe2\x80\x99t be reached</h1>'
+             b'<p>ERR_CONNECTION_RESET</p></body></html>')
+
+_CHALLENGE_PAGE = (b'<html><head><title>Just a moment...</title></head>'
+                   b'<body><script '
+                   b'src="/cdn-cgi/challenge-platform/h/b/or.js">'
+                   b'</script></body></html>')
+
+
+class TestConsumeVerify(_FifthCase):
+
+    def test_an_auto_error_page_is_discarded_not_consumed(self):
+        # what a crashed Chrome session leaves behind: the fifth door
+        # wrote the file (door 'auto'), but it is Chrome's own error
+        # page — the consume side discards it, the link keeps waiting
+        hd.enqueue_hand_delivery(self.vault, [_URL], walls={_URL: _ERR},
+                                 log=lambda *a, **k: None, door='auto')
+        path = self.page(_URL, body=_ERR_PAGE)
+        logs = []
+        res = hd.take_hand_delivered(self.vault, _URL,
+                                     log=lambda m, l='info':
+                                     logs.append((l, m)))
+        self.assertIsNone(res)
+        self.assertFalse(os.path.exists(path))    # the app's own file
+        meta = hd._read_queue(self.vault)['links'][_URL]
+        self.assertFalse(meta.get('consumed'))    # keeps waiting
+        self.assertIn('NOT the site', '\n'.join(m for _, m in logs))
+
+    def test_an_auto_challenge_page_is_discarded_not_consumed(self):
+        hd.enqueue_hand_delivery(self.vault, [_URL], walls={_URL: _ERR},
+                                 log=lambda *a, **k: None, door='auto')
+        path = self.page(_URL, body=_CHALLENGE_PAGE)
+        res = hd.take_hand_delivered(self.vault, _URL)
+        self.assertIsNone(res)
+        self.assertFalse(os.path.exists(path))
+
+    def test_an_auto_real_page_is_consumed_as_before(self):
+        hd.enqueue_hand_delivery(self.vault, [_URL], walls={_URL: _ERR},
+                                 log=lambda *a, **k: None, door='auto')
+        path = self.page(_URL)             # the real-DOM default body
+        res = hd.take_hand_delivered(self.vault, _URL)
+        self.assertIsNotNone(res)
+        self.assertTrue(os.path.exists(path))    # the record stays
+
+    def test_an_owner_saved_error_page_is_trusted(self):
+        # no door stamp — the owner's Ctrl+S is the owner's verdict:
+        # even an error-page save is consumed, exactly as before
+        hd.enqueue_hand_delivery(self.vault, [_URL], walls={_URL: _ERR},
+                                 log=lambda *a, **k: None)
+        path = self.page(_URL, body=_ERR_PAGE)
+        res = hd.take_hand_delivered(self.vault, _URL)
+        self.assertIsNotNone(res)
+        self.assertTrue(os.path.exists(path))
+        self.assertTrue(hd._read_queue(self.vault)
+                        ['links'][_URL]['consumed'])
+
+    def test_consume_delivered_discards_auto_bad_pages(self):
+        # the batch-level pass: the same law for the table consume
+        hd.enqueue_hand_delivery(
+            self.vault, [_URL, 'https://ok.example.net/real'],
+            walls={_URL: _ERR}, log=lambda *a, **k: None, door='auto')
+        self.page(_URL, body=_ERR_PAGE)
+        self.page('https://ok.example.net/real')
+        out = hd.consume_delivered(self.vault,
+                                   log=lambda *a, **k: None)
+        self.assertEqual([i['url'] for i in out],
+                         ['https://ok.example.net/real'])
+        self.assertFalse(os.path.exists(
+            os.path.join(hd.hand_delivery_dir(self.vault),
+                         hd.suggested_filename(_URL))))
+
+    def test_pending_hand_links_reasks_after_a_discard(self):
+        # the discarded auto page leaves the queue row unconsumed and
+        # the file gone — the fifth door's to-do list asks for it again
+        hd.enqueue_hand_delivery(self.vault, [_URL], walls={_URL: _ERR},
+                                 log=lambda *a, **k: None, door='auto')
+        self.page(_URL, body=_ERR_PAGE)
+        before = hd.pending_hand_links(self.vault)
+        hd.take_hand_delivered(self.vault, _URL)
+        after = hd.pending_hand_links(self.vault)
+        self.assertEqual([l['url'] for l in after], [_URL])
+        self.assertEqual(len(before), 0)   # the file "landed" until judged
 
 
 # ---------------------------------------------------------------------------
@@ -869,6 +1256,79 @@ class TestSkullLaw(_PipelineCase):
 
 
 # ---------------------------------------------------------------------------
+# 9b. v0.53.0 — the end-of-delivery honest modal (the bare-mixin
+# routing: the owner's false-positive-of-success report ends in a
+# modal that names what could not be gathered)
+# ---------------------------------------------------------------------------
+
+
+class TestDeliveryFailureModal(unittest.TestCase):
+
+    def _win(self, visible=True):
+        from gitcurator.gui.main_window.processing_control \
+            import ProcessingControlMixin
+        win = ProcessingControlMixin()
+        win.logs = []
+        win.modals = []
+        win.log_message = lambda msg, level='info': win.logs.append(
+            (level, msg))
+        win._show_custom_message_box = \
+            lambda title, text, success=True: win.modals.append(
+                (title, text, success))
+        win._closing = False
+        win.isVisible = lambda: visible
+        return win
+
+    def test_failures_open_the_honest_modal(self):
+        win = self._win()
+        win._on_delivery_failed([
+            {'url': _URL, 'error': "the tab showed Chrome's error page "
+             '(ERR_CONNECTION_RESET)'}])
+        self.assertEqual(len(win.modals), 1)
+        title, text, success = win.modals[0]
+        self.assertIn('not taken', title)
+        self.assertFalse(success)
+        self.assertIn('1 link(s)', text)
+        self.assertIn(_URL, text)
+        self.assertIn('ERR_CONNECTION_RESET', text)
+        self.assertIn('retry queue', text)
+        # the log carries the honest summary line too
+        self.assertIn("couldn't be gathered",
+                      '\n'.join(m for _, m in win.logs))
+
+    def test_the_first_five_errors_and_the_count(self):
+        win = self._win()
+        failed = [{'url': f'https://x{i}.example.net/', 'error': f'e{i}'}
+                  for i in range(7)]
+        win._on_delivery_failed(failed)
+        self.assertEqual(len(win.modals), 1)
+        text = win.modals[0][1]
+        self.assertIn('7 link(s)', text)
+        self.assertIn('… and 2 more', text)
+        self.assertIn('https://x0.example.net/', text)
+        self.assertNotIn('https://x6.example.net/', text)
+
+    def test_no_failures_no_modal(self):
+        win = self._win()
+        win._on_delivery_failed([])
+        self.assertEqual(win.modals, [])
+        self.assertEqual(win.logs, [])
+
+    def test_an_invisible_window_logs_only(self):
+        # the shutdown guard: a modal no one can dismiss never opens
+        win = self._win(visible=False)
+        win._on_delivery_failed([{'url': _URL, 'error': 'boom'}])
+        self.assertEqual(win.modals, [])
+        self.assertEqual(len(win.logs), 1)
+
+    def test_junk_payload_is_tolerated(self):
+        win = self._win()
+        win._on_delivery_failed(None)
+        win._on_delivery_failed(['not-a-dict'])
+        self.assertEqual(win.modals, [])
+
+
+# ---------------------------------------------------------------------------
 # 10. release bookkeeping
 # ---------------------------------------------------------------------------
 
@@ -887,12 +1347,18 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0500(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.52.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.53.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
         self.assertIn('## [0.50.0]', text)
         self.assertIn('fifth door', text.lower())
+
+    def test_changelog_has_the_v053_beat(self):
+        text = self._read('CHANGELOG.md')
+        self.assertIn('## [0.53.0]', text)
+        self.assertIn('waits for the page', text.lower())
+        self.assertIn('false positive', text.lower())
 
     def test_ci_runs_this_module(self):
         text = self._read('.github', 'workflows', 'ci.yml')

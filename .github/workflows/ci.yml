@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1437-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1468-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -10,8 +10,32 @@
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
-# mastertable + 43 handdelivery + 27 reviewtable + 52 fifthdoor +
+# mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
 # 30 masterretry).
+# v0.53.0 — THE DOOR WAITS FOR THE PAGE; A CRASH IS NEVER A
+# DELIVERY: the owner's report — "it tried to open a chrome tabs, but
+# crashed and closed, and app shown false positive of success, in
+# other words it didn't wait for sites to load and gather their data"
+# — the fifth door's take step judged a tab by readyState 'complete'
+# + 200 bytes of DOM, both TRUE on Chrome's OWN error pages (ERR_*
+# codes), crash pages and bot-challenge interstitials. Now the load
+# watch polls readyState AND location.href together (about:blank /
+# chrome-error never loaded the site), a page must stay complete at
+# ONE http(s) URL for PAGE_SETTLE_S before the DOM is read (every
+# href change restarts the settle — the challenge→content redirect
+# is never mistaken for the page), and the DOM must pass
+# page_is_real: http(s) URL, no ERR_* code, no crash phrase, no
+# challenge grammar. A challenge keeps the whole budget (the real
+# Chrome may still pass it — the door's whole point); an error page
+# is a named failure immediately, never a delivered page. The report
+# carries failed_links (url + error each) and the GUI ends a failed
+# delivery with the owner's own modal grammar ("N link(s) didn't
+# generate content … got error xxx — they keep waiting"), never a
+# silent false positive of success. The consume side re-verifies
+# every door:'auto' page through the same verdict — an error page a
+# crashed Chrome left behind (including pre-v0.53 ones) is discarded
+# (the app's own file), the link keeps waiting; the owner's saves
+# stay trusted. 31 cases join in tests/test_fifthdoor.py (1468).
 # v0.51.0 — THE CAUGHT-UP CHECK READS THE TABLE: the owner's report —
 # "Currently app says everything is uptodate, but actually app must
 # look at decomissioned note, and try to fetch again those that dont
@@ -393,4 +417,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1437 tests + worker 50 + offline golden run (v0.52.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1468 tests + worker 50 + offline golden run (v0.53.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

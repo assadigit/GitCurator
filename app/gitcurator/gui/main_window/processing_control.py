@@ -1120,7 +1120,15 @@ class ProcessingControlMixin:
         into a backlog the finish handler drains — two Chrome
         deliveries at once would fight over the worker reference (Qt
         GC on a running QThread is the crash the kept-reference law
-        exists to prevent) and over the owner's screen."""
+        exists to prevent) and over the owner's screen.
+
+        v0.53.0 — the delivery's verdict is TOLD: the door waits for
+        each page (the load watch — complete at an http(s) URL, still
+        for the settle, real by the verdict), and a page that could
+        not be gathered fires ``delivery_failed`` — the honest modal
+        the owner asked for ("xx links didn't generate content or
+        wasn't successful or got error xxx"), never a silent false
+        positive of success after a Chrome that crashed and closed."""
         cfg = self.config or {}
         vault = (cfg.get('website_vault_path') or '').strip()
         if not vault or not links:
@@ -1139,6 +1147,7 @@ class ProcessingControlMixin:
         class ChromeTabRetryWorker(QThread):
             log_message = pyqtSignal(str, str)
             delivered = pyqtSignal(list)
+            delivery_failed = pyqtSignal(list)
 
             def __init__(self, vault, links, config):
                 super().__init__()
@@ -1155,8 +1164,17 @@ class ProcessingControlMixin:
                     self.log_message.emit(
                         f"⚠️ Chrome tab retry failed: {e}", "warning")
                     self.delivered.emit([])
+                    self.delivery_failed.emit(
+                        [{'url': '', 'error': f'Chrome tab retry failed: '
+                                             f'{e}'}])
                     return
                 self.delivered.emit(list(report.get('urls') or []))
+                # v0.53.0 — the failure detail rides back too: the
+                # modal words the owner's own ask ("didn't generate
+                # content … got error xxx") instead of silence
+                failed_links = list(report.get('failed_links') or [])
+                if failed_links:
+                    self.delivery_failed.emit(failed_links)
 
         worker = ChromeTabRetryWorker(vault, links, dict(cfg))
         self._chrome_retry_worker = worker  # a kept reference (Qt GC law)
@@ -1193,12 +1211,53 @@ class ProcessingControlMixin:
                 self._start_chrome_tab_retry(backlog)
 
         worker.delivered.connect(_on_delivered)
+        worker.delivery_failed.connect(self._on_delivery_failed)
         worker.start()
         self.log_message(
             f"🤖 Chrome tab retry: opening {len(links)} link(s) in your "
             f"real Chrome (a fresh window, one tab per link — watch the "
             f"tabs load; GitCurator takes each page when it is ready)",
             "info")
+
+    def _on_delivery_failed(self, failed):
+        """v0.53.0 — the end-of-delivery honesty: the owner's report
+        ("app shown false positive of success") ends here. A Chrome
+        delivery that could not gather pages is TOLD, in the owner's
+        own modal grammar ("xx number of links didn't generate content
+        or wasn't successful or got error xxx"), with the first errors
+        named — the links keep waiting in the retry queue, the next
+        run offers them again. Tolerated everywhere (a modal that
+        cannot be shown never breaks the finish path); the log already
+        carries the per-link warnings."""
+        try:
+            failed = [f for f in (failed or []) if isinstance(f, dict)]
+            if not failed:
+                return
+            names = []
+            for f in failed[:5]:
+                url = (f.get('url') or '').strip()
+                err = str(f.get('error') or '').strip()
+                names.append(f"• {url or '(a link)'}"
+                             + (f" — {err}" if err else ''))
+            if len(failed) > 5:
+                names.append(f"… and {len(failed) - 5} more")
+            self.log_message(
+                f"⚠️ Chrome tab retry: {len(failed)} link(s) couldn't be "
+                f"gathered from your Chrome — they keep waiting in the "
+                f"retry queue", "warning")
+            if getattr(self, '_closing', False) or not self.isVisible():
+                return
+            self._show_custom_message_box(
+                "Chrome tab retry — pages not taken",
+                f"{len(failed)} link(s) didn't generate content from "
+                f"your Chrome (the tabs crashed, showed an error page, "
+                f"or never finished loading).\n\nThey keep waiting in "
+                f"the retry queue — the next run offers them again "
+                f"(More ▸ 🤖 Chrome tab-retry anytime).\n\n"
+                + "\n".join(names),
+                success=False)
+        except Exception:
+            pass  # the log already told the honest story
 
     def chrome_tab_retry_now(self):
         """More ▸ 🤖 Chrome tab-retry failed links… — v0.50.0, the

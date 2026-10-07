@@ -1080,9 +1080,15 @@ def cmd_chrome_retry(args) -> int:
         vault, links, log=cli_print, config=cfg)
     delivered = list(report.get("urls") or [])
     failed = int(report.get("failed") or 0)
+    failed_links = list(report.get("failed_links") or [])
+    first_errs = "; ".join(
+        str(f.get("error") or "")[:90]
+        for f in failed_links[:3] if f.get("error"))
     if not delivered:
         cli_print(f"🤖 The fifth door delivered nothing — {failed} "
-                  f"tab(s) failed; the links keep waiting.", "warning")
+                  f"tab(s) failed"
+                  + (f" ({first_errs})" if first_errs else "")
+                  + "; the links keep waiting.", "warning")
         return 1
     cli_print(f"🤖 {len(delivered)} page(s) delivered from your real "
               f"Chrome — processing them now as real fetches…", "success")
@@ -1091,7 +1097,9 @@ def cmd_chrome_retry(args) -> int:
                           dry_run=bool(getattr(args, "dry_run", False)))
     if failed:
         cli_print(f"⚠️ {failed} tab(s) failed — those links keep "
-                  f"waiting in the retry queue.", "warning")
+                  f"waiting in the retry queue."
+                  + (f" ({first_errs})" if first_errs else ""),
+                  "warning")
     return rc
 
 

@@ -51,7 +51,15 @@ The law, kept as tight as the rest of the ladder:
     - everything here is tolerated: a missing folder, a corrupt queue,
       an unreadable page — the fourth door must never break a batch;
     - the config "web_hand_delivery" (default ON) opts the whole door
-      out.
+      out;
+    - v0.53.0 — the pages the APP delivered (queue rows stamped
+      ``door: 'auto'`` by the fifth door) are RE-VERIFIED at consume
+      time through :func:`gitcurator.core.chrome_tabs.page_is_real`:
+      one that turns out to be a Chrome error page, a crash page or a
+      stuck challenge (the file a crashed Chrome session could have
+      left behind) is DISCARDED — the app's own file, removed — and
+      the link keeps waiting. The owner's Ctrl+S pages carry no
+      ``door`` stamp and stay the owner's verdict, trusted as always.
 
 Pure stdlib; no network of its own (the browser is the owner's).
 """
@@ -429,11 +437,14 @@ def open_in_chrome(url: str, log: Optional[Callable] = None) -> str:
 
 def collect_delivered(vault_path: str) -> List[Dict]:
     """The queued links whose suggested page file HAS been delivered
-    (the owner saved it into the folder). Returns
-    ``[{'url', 'wall', 'suggested', 'file'}]`` — a pure read, nothing
-    is consumed yet (the batch does that). Orphan files (an .html in
-    the folder matching no queue row) are IGNORED — the README is the
-    contract, a stray file is the owner's business."""
+    (the owner saved it into the folder, or the fifth door wrote it).
+    Returns ``[{'url', 'wall', 'suggested', 'file', 'door'}]`` — a pure
+    read, nothing is consumed yet (the batch does that). ``door`` is
+    'auto' for pages the app itself delivered (v0.53: those are
+    re-verified at consume time — an error page is discarded, never
+    consumed), empty for the owner's own Ctrl+S saves. Orphan files
+    (an .html in the folder matching no queue row) are IGNORED — the
+    README is the contract, a stray file is the owner's business."""
     queue = _read_queue(vault_path)
     links = queue.get('links') or {}
     folder = hand_delivery_dir(vault_path)
@@ -445,9 +456,10 @@ def collect_delivered(vault_path: str) -> List[Dict]:
             or suggested_filename(url)
         path = os.path.join(folder, suggested)
         if os.path.isfile(path) and os.path.getsize(path) > 0:
-            out.append({'url': url, 'wall': str((meta or {}).get('wall')
-                                                 or ''),
-                        'suggested': suggested, 'file': path})
+            out.append({'url': url,
+                        'wall': str((meta or {}).get('wall') or ''),
+                        'suggested': suggested, 'file': path,
+                        'door': str((meta or {}).get('door') or '')})
     return out
 
 
@@ -459,14 +471,37 @@ def _decode_delivered(path: str) -> bytes:
         return f.read()
 
 
+def _auto_page_is_real(url: str, body: bytes) -> (bool, str):
+    """v0.53.0 — the fifth door's own verdict, asked again at consume
+    time for the pages the APP delivered: a file whose DOM carries a
+    Chrome ``ERR_`` code, a crash phrase or a challenge grammar is a
+    page a crashed or walled Chrome session left behind — never the
+    site's content. The URL passes as the page's href (the queue's own
+    canonical link — the protocol law holds for every enqueued row).
+    Pure; never raises."""
+    try:
+        from gitcurator.core.chrome_tabs import page_is_real
+        text = (body or b'').decode('utf-8', errors='replace')
+        ok, reason = page_is_real(text, url, '')
+        return ok, reason
+    except Exception as e:
+        return True, ''   # a verdict that cannot be asked is not a wall
+
+
 def consume_delivered(vault_path: str, log: Optional[Callable] = None
                       ) -> List[Dict]:
     """Take the delivered pages: read each one, mark it consumed in
     queue.json (the FILE stays — it is the record), and return
     ``[{'url', 'wall', 'body', 'file'}]`` for the pipeline to feed
-    through the normal extract/classify/write path. Dry-run aware
-    (nothing is marked, the pages are still read — a dry-run batch
-    SHOWS the hand-delivery without consuming it). Never raises."""
+    through the normal extract/classify/write path. v0.53.0 — a page
+    the APP delivered (door 'auto') is re-verified first: one that
+    fails the fifth door's verdict (a Chrome error page, a crash
+    page, a stuck challenge — what a crashed Chrome session leaves
+    behind) is DISCARDED (the app's own file, removed) and its link
+    keeps waiting; the owner's saved pages are trusted as always.
+    Dry-run aware (nothing is marked, the pages are still read — a
+    dry-run batch SHOWS the hand-delivery without consuming it).
+    Never raises."""
     log = log or (lambda *a, **k: None)
     try:
         delivered = collect_delivered(vault_path)
@@ -488,6 +523,15 @@ def consume_delivered(vault_path: str, log: Optional[Callable] = None
                 f"({item['suggested']}) — the link keeps waiting",
                 "warning")
             continue
+        if item.get('door') == 'auto':
+            ok, reason = _auto_page_is_real(item['url'], body)
+            if not ok:
+                _discard_auto_page(item['file'])
+                log(f"⚠️ The auto-delivered page for {item['url']} was "
+                    f"NOT the site ({reason}) — discarded (the app's "
+                    f"own file), the link keeps waiting for its doors",
+                    "warning")
+                continue
         out.append({'url': item['url'], 'wall': item['wall'],
                     'body': body, 'file': item['file']})
     if not out:
@@ -508,6 +552,18 @@ def consume_delivered(vault_path: str, log: Optional[Callable] = None
     log(f"🖐 Hand-delivery: {len(out)} delivered page(s) taken — "
         f"processing them as real fetches", "info")
     return out
+
+
+def _discard_auto_page(path: str) -> None:
+    """Remove a page the app itself delivered that failed its own
+    verdict — the file is OURS (the fifth door wrote it), never the
+    owner's save, and leaving it would re-fail every consume pass.
+    Best-effort; never raises."""
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except Exception:
+        pass
 
 
 def hand_fetch_result(url: str, body: bytes, wall: str,
@@ -545,7 +601,10 @@ def take_hand_delivered(vault_path: str, canonical: str,
     there a delivered page for THIS link? Returns a FetchResult (the
     real thing — status 'full', the story in the reason) or None.
     Consumption is the same one-movement law as
-    :func:`consume_delivered` (queue stamped, file kept)."""
+    :func:`consume_delivered` (queue stamped, file kept). v0.53.0 —
+    a page the APP delivered (door 'auto') is re-verified first: one
+    that fails the fifth door's verdict is discarded (the app's own
+    file, removed) and the link keeps waiting — None, honestly."""
     if not vault_path or not canonical:
         return None
     try:
@@ -567,6 +626,15 @@ def take_hand_delivered(vault_path: str, canonical: str,
         return None
     if not body.strip():
         return None
+    if (meta.get('door') or '') == 'auto':
+        ok, reason = _auto_page_is_real(canonical, body)
+        if not ok:
+            _discard_auto_page(path)
+            log and log(f"⚠️ The auto-delivered page for {canonical} "
+                        f"was NOT the site ({reason}) — discarded (the "
+                        f"app's own file), the link keeps waiting for "
+                        f"its doors", "warning")
+            return None
     if not dryrun.is_enabled():
         try:
             queue['links'][canonical]['consumed'] = \
