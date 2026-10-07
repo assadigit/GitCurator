@@ -986,6 +986,101 @@ def cmd_hand_delivery(args) -> int:
 
 
 # ----------------------------------------------------------------------------
+# --chrome-retry : v0.50.0 — the fifth door (the automatic tab retry)
+# ----------------------------------------------------------------------------
+
+def cmd_chrome_retry(args) -> int:
+    """v0.50.0 — the fifth door on the CLI: every link waiting in the
+    websites retry queue (the fetch-failed pile — each with its last
+    error) is re-fetched AUTOMATICALLY through the owner's own real
+    Chrome: the app launches a fresh Chrome session (a throwaway
+    profile — the running window is never touched), starts one tab
+    per link, waits for each page to load, and takes the live DOM.
+    Every delivered page is then processed in the same run as a REAL
+    fetch (the notes land, the retries clear). Links that still fail
+    keep waiting; nothing is retired."""
+    banner()
+    path = _config_path(args.config)
+    cfg = load_config(path) or {}
+    vault = (cfg.get("website_vault_path") or "").strip()
+    if not vault:
+        cli_print("website_vault_path is not set — run --cli --init first.",
+                  "warning")
+        return 1
+    if not (cfg.get("pipelines") or {}).get("websites", False):
+        cli_print("The websites pipeline is off — turn it on first "
+                  "(Settings → 📁 Vault, or config \"pipelines\").",
+                  "warning")
+        return 1
+    from gitcurator.core import chrome_tabs as _ct
+    from gitcurator.core import website_pipeline as _wp
+    from gitcurator.constants import APP_DIR as _APP_DIR
+    _db_file = os.path.join(_APP_DIR, "cache.db")
+    if not os.path.exists(_db_file):
+        cli_print("No cache.db yet — nothing has failed (nothing to "
+                  "retry in Chrome).", "success")
+        return 0
+    state = _wp.WebsiteStateDB(_db_file)
+    links = []
+    try:
+        for row in state.all_retry_rows():
+            url = (row.get("url") or "").strip()
+            if not url.lower().startswith(("http://", "https://")) \
+                    or _ct.is_loopback_url(url):
+                continue
+            if state.is_dismissed(url):
+                continue  # the ladder's own verdict answered it
+            links.append({"url": url,
+                          "error": str(row.get("last_error") or "")})
+    finally:
+        state.close()
+    print(paint("Failed links waiting for the fifth door "
+                "(your real Chrome, one tab each)", C.BOLD))
+    print(rule())
+    if not links:
+        print(paint("  ✓ empty — no fetch-failed link is waiting.",
+                    C.GREEN))
+        return 0
+    for l in links:
+        err = (l.get("error") or "")[:100]
+        print(f"  {paint('•', C.YELLOW)} {l['url']}")
+        if err:
+            print(f"      {paint(err, C.DIM)}")
+    print()
+    if getattr(args, "dry_run", False):
+        report = _ct.deliver_pages_via_chrome(vault, links,
+                                              log=lambda *_a, **_k: None,
+                                              config=cfg)
+        cli_print(f"🤖 Dry-run — Chrome is never launched; the fifth "
+                  f"door rehearsed {len(links)} link(s), delivered "
+                  f"{report.get('delivered', 0)}.", "success")
+        return 0
+    # v0.07.2 — same pre-flight as --auto / --retry-failed (the pages
+    # are processed right after they are delivered, and the processing
+    # needs the LLM).
+    if not preflight_checks(cfg):
+        return 1
+    cfg["__config_path__"] = path
+    report = _ct.deliver_pages_via_chrome(
+        vault, links, log=cli_print, config=cfg)
+    delivered = list(report.get("urls") or [])
+    failed = int(report.get("failed") or 0)
+    if not delivered:
+        cli_print(f"🤖 The fifth door delivered nothing — {failed} "
+                  f"tab(s) failed; the links keep waiting.", "warning")
+        return 1
+    cli_print(f"🤖 {len(delivered)} page(s) delivered from your real "
+              f"Chrome — processing them now as real fetches…", "success")
+    rc = run_batch_visual(cfg, "direct", urls=delivered,
+                          bot_source=False, vault_arg=args.vault,
+                          dry_run=bool(getattr(args, "dry_run", False)))
+    if failed:
+        cli_print(f"⚠️ {failed} tab(s) failed — those links keep "
+                  f"waiting in the retry queue.", "warning")
+    return rc
+
+
+# ----------------------------------------------------------------------------
 # --auto : fully automatic run (bot SYNC → process → seal → publish)
 # ----------------------------------------------------------------------------
 
@@ -1393,6 +1488,12 @@ def build_parser():
                         "(403/bot-defense/TLS), queue it for hand-delivery "
                         "and open it in your real Chrome; the saved page "
                         "becomes a real fetch on the next run")
+    p.add_argument("--chrome-retry", action="store_true",
+                   help="v0.50.0 — the fifth door: re-fetch every failed "
+                        "link AUTOMATICALLY through your own real Chrome "
+                        "(a fresh session, one tab per link, the live DOM "
+                        "taken as the content) and process the delivered "
+                        "pages as real fetches in the same run")
     p.add_argument("--status", action="store_true",
                    help="show config summary + cache/retry/404-quarantine stats")
     p.add_argument("--test-connection", action="store_true",
@@ -1459,6 +1560,8 @@ def cli_main(argv=None) -> int:
         return cmd_reset_dead(args)
     if getattr(args, "hand_delivery", None):
         return cmd_hand_delivery(args)
+    if getattr(args, "chrome_retry", None):
+        return cmd_chrome_retry(args)
     if args.mark_read:
         return cmd_mark_read(args)
 

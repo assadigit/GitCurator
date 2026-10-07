@@ -33,16 +33,18 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
   tests.test_reconfix tests.test_batchfinish tests.test_soundsettings \
   tests.test_reviewretry tests.test_bothdoors tests.test_decommission \
   tests.test_thirddoor tests.test_ladder tests.test_autopip \
-  tests.test_mastertable tests.test_handdelivery tests.test_reviewtable
+  tests.test_mastertable tests.test_handdelivery tests.test_reviewtable \
+  tests.test_fifthdoor
 ```
 
 That exact module list lives in `.github/workflows/ci.yml` (also: the
 compile step of the audited modules and the offline golden run —
 `python gitcurator/tools/run_golden_websites.py --offline`). The suite is
-**1314 tests, zero network** (v0.49.0; tests.test_reviewretry,
+**1366 tests, zero network** (v0.50.0; tests.test_reviewretry,
 tests.test_bothdoors, tests.test_decommission, tests.test_thirddoor,
 tests.test_ladder, tests.test_autopip, tests.test_mastertable,
-tests.test_handdelivery and tests.test_reviewtable are pure stdlib —
+tests.test_handdelivery, tests.test_reviewtable and tests.test_fifthdoor
+are pure stdlib —
 they run even where the Qt-importing modules cannot). New modules
 go into the CI compile list; new
 test modules into the unittest line. Version bumps: `VERSION` file +
@@ -52,7 +54,7 @@ test modules into the unittest line. Version bumps: `VERSION` file +
 
 | Area | What lives there |
 |---|---|
-| `core/` | Pure-stdlib, no-Qt pipeline logic: `links` (URL routing/identity), `storage` (atomic writes), `note_builder`, `llm_client` (Ollama/llama.cpp/cloud), `website_pipeline` (+ `website_state`), `note_state` (moves-as-corrections), `taxonomy`, `web_fetch`/`web_extract`, `mirror`, `linking`/`embeddings`/`recall` (Phase 6), `connection_check`, `dryrun` |
+| `core/` | Pure-stdlib, no-Qt pipeline logic: `links` (URL routing/identity), `storage` (atomic writes), `note_builder`, `llm_client` (Ollama/llama.cpp/cloud), `website_pipeline` (+ `website_state`), `note_state` (moves-as-corrections), `taxonomy`, `web_fetch`/`web_extract`, `hand_delivery` (the fourth door — pages saved by the owner's hand), `chrome_tabs` (the fifth door — the automatic real-Chrome tab retry, raw-socket CDP), `mirror`, `linking`/`embeddings`/`recall` (Phase 6), `connection_check`, `dryrun` |
 | `integrations/` | Outside world: `telegram_fetch_worker` (Telethon subprocess), `telethon_fetcher`, `subprocess_runner`, `vaultseal` (private backups), `goodrepos` (public directory), `backfill_manager`, `error_reporter` |
 | `gui/` | PyQt6 app: `app.py` is the **facade** (every old import path still works — keep it that way); `processing_worker.py` (the batch worker + `gui/worker/` mixins), `worker_jobs`, `dialogs`, `headless`; `main_window/` = `window.py` shell + domain mixins (theme, ui, bot_queue, backup_seal, …) |
 | `cloud/` | Desktop↔Worker sync (`cloudflare_sync` — used by backfill_manager) + dormant GDrive/Cloudflare helpers (`cloudflare_manager`, `cloudflare_gui`, `gdrive_backup`, `gdrive_gui` — **kept, not deleted, by owner decision "fixed, not deleted"**; nothing wires them into the UI today) |

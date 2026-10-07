@@ -66,6 +66,9 @@
   "web_impersonate_fallback": true,
   "web_impersonate_autopip": true,
   "web_hand_delivery": true,
+  "web_browser_retry": true,
+  "web_browser_retry_timeout_s": 45,
+  "web_browser_retry_wave": 8,
   "web_blocked_domains": [
     "x.com",
     "twitter.com",

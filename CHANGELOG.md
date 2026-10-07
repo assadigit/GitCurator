@@ -1,3 +1,113 @@
+## [0.50.0] — The fifth door: Chrome fetches the pages itself — 2026-10-09
+
+Owner ask (session): "Okay I've seen a note called decomissioned, I
+want to add this option, when user paste ☠️ on a row, app must not
+fetch it again, moreover, the ☠️ links do not need to stay
+independently in review anymore, So if a row got this '☠️', it must
+it's note from _review must be deleted in next fetch and run, and
+never be fetched again. but if it's still ' - ' it means the link is
+valid and fetch was a failed, for this we can I proposed something
+which you didn't implement, before finishing the run and fetch, app
+must show a modal, 'xx' number of links didn't generate content or
+wasn't successfull or got error xxx (mind the wording of it
+yourself), want to retry them in real browser? if user said this, app
+automatically opens them in a new session of user's own google chrome
+and start tabs and fetches the data that way." Desktop release
+v0.50.0, Worker unchanged at **0.30.0** (it never fetches websites).
+Suite grows **1314 → 1366** (52 cases in tests/test_fifthdoor.py —
+pure stdlib at the unit level, no browser ever launches under test).
+
+**The ☠️ half — already law, now re-verified against the exact
+gesture.** The graveyard (v0.44) and the master table (v0.47/v0.49)
+already do exactly what the owner asked: a Status cell with ☠️ (the
+emoji alone, no word needed — DEAD_MARKERS) retires the link at the
+START of the next run: dismissed (the never-fetch gate), retry row
+dropped, FAILED row forgotten, its app-owned ``_review`` placeholder
+SWEPT, the row confirmed "🪦 confirmed — decommissioned". The new
+test (TestSkullLaw) walks the owner's exact words: fail → placeholder
+waits → paste ☠️ → the next run sweeps the note and never fetches
+again, the run after that neither.
+
+**The modal half — the fifth door.** The fourth door (v0.48) hands
+the walled page back to the owner's hand: open Chrome, Ctrl+S, save
+into the folder — three manual moves per link. The owner's new ask
+removes the hand: **when the run ends with links that generated no
+content, the app itself opens the owner's REAL Google Chrome, starts
+one tab per failed link, and takes the content from the live page.**
+Before the batch's scorecard, the end-of-run modal (config
+``web_browser_retry``, default ON) asks the owner's question — "N
+link(s) couldn't generate content — the machine fetch failed for
+each… want to retry them in your real Google Chrome?" — the failed
+links listed with their last error under each URL (the " - " rows of
+the master table; auto-retired verdicts never nag — the ladder
+already answered those). One yes: the app launches the owner's own
+chrome.exe with ``--remote-debugging-port`` and a THROWAWAY
+``--user-data-dir`` (a fresh session of the owner's own Chrome — the
+running window, profile and cookies never touched, no profile-lock
+fight), reads the DevTools endpoint off the process's own stderr,
+opens one tab per link in waves (``/json/new``, PUT with a GET
+fallback — the Chrome 111+ law), waits for ``document.readyState`` to
+reach 'complete', reads ``document.documentElement.outerHTML`` — the
+LIVE DOM, after every script and challenge has done its work — and
+closes the tab. Every page is delivered into the SAME folder the
+fourth door consumes (``<vault>/_review/hand-delivered/`` — the queue
+row enqueued first with the ``door: 'auto'`` marker), and the
+delivered links are RE-PROCESSED immediately as REAL fetches (the
+pipeline takes a delivered page before any machine door is asked —
+the note is written, the retry row resolves, the reason tells the
+story: "auto-delivered via the owner's own Chrome (the fifth door's
+tab retry…)"). More ▸ "🤖 Chrome tab-retry failed links…" offers the
+same door on demand (the whole retry queue), and the CLI gets
+``--chrome-retry`` (the full circle: deliver, then process).
+
+**The engine, no new dependency.** ``gitcurator/core/chrome_tabs.py``
+(~900 lines, pure stdlib): a raw-socket DevTools WebSocket client —
+the RFC 6455 handshake (no Origin header — the raw-socket client is
+not a webpage), masked client frames with all three length
+encodings, server frames with fragmentation, ping/pong and close; a
+runaway-frame guard; the CDP command layer (id-matched, event-
+skipping, timeout-honest); the Chrome process manager (process-group
+kill on POSIX, the stderr pipe owned by its drain thread — closing a
+file another thread reads deadlocks, the lesson the fake-exe test
+taught the door); and the delivery layer (dry-run never launches,
+loopback never opens — the v0.15.1 law, no Chrome found is an honest
+per-URL miss, a crashing tab never breaks a batch — the promise is
+absolute).
+
+**The law, kept tight.** The owner's Chrome is launched, never
+hijacked (throwaway profile, own process group); delivered pages are
+the APP's (the owner's saved pages stay the owner's — the folder's
+README law unchanged); hand-delivery is NOT a retirement and neither
+is this (links that still fail keep waiting — their automatic
+retries continue, the master table's Status cell decides their
+fate); the modal offers once per link per session (no nag loop);
+dry-run rehearses without launching; everything is tolerated.
+
+**Gates.** 52 cases in tests/test_fifthdoor.py (the frame codec —
+masked small/16-bit/64-bit, split feeds, fragmentation with control
+frames, the runaway guard; the DevTools client — handshake refusal,
+the request shape (no Origin), command round-trips with events
+skipped, ping answered with a masked pong, close, error responses,
+timeouts, evaluate, fragmented responses; the candidates — the
+modal's data with dedupe/loopback/auto-retired filters; the session
+helpers — a fake exe prints the DevTools line, a dead exe and a
+silent exe raise honestly, the temp profile is always erased, and
+the launch ladder climbs honestly (a Chromium that needs
+``--no-sandbox`` comes up on the second attempt; a display-less box
+comes up HEADLESS on the third — both proven by scripted exes that
+refuse to start without the tier's flag); the
+fetch driver — no-Chrome and dry-run never launch; the delivery —
+queue rows stamped ``door: 'auto'`` with the error as the wall,
+pages at their suggested filenames, honest failure counts, a
+crashing fetcher never breaks the delivery, dry-run writes nothing;
+the consume side — the auto story in the reason, the manual wording
+unchanged, the re-enqueue keeps the door; the pipeline — an
+auto-delivered page answers before any machine door, the full
+circle deliver→re-run processes the pages as real fetches; the ☠️
+law re-verified against the exact gesture; release bookkeeping).
+Full suite **1366/1366**, 85-module compile gate OK, offline golden
+30/30.
+
 ## [0.49.0] — The table that lists them all — 2026-10-09
 
 Owner ask (session): "When app supposed to add tables so i can set

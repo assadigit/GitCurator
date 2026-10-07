@@ -266,16 +266,20 @@ def _readme_text(queue: Dict) -> str:
 def enqueue_hand_delivery(vault_path: str, urls: List[str],
                           walls: Optional[Dict[str, str]] = None,
                           log: Optional[Callable] = None,
-                          open_chrome: bool = False
+                          open_chrome: bool = False,
+                          door: Optional[str] = None
                           ) -> Dict:
     """Queue links for hand-delivery (the write side of the door).
 
     Merges into queue.json (an already-queued URL is refreshed, never
     duplicated); rewrites README.txt with the full current queue;
     optionally opens each NEW link in the real Chrome. Dry-run aware
-    (the queue and README are recorded, not written). Returns
-    ``{'added', 'queued_total', 'opened', 'folder'}`` — never raises
-    (a queue the app cannot write is a hint in the log, not a crash).
+    (the queue and README are recorded, not written). v0.50.0 —
+    ``door`` (e.g. 'auto') stamps which door queued the link, so the
+    consume side words the fetch's story honestly (the fifth door
+    delivered it, not the owner's Ctrl+S). Returns ``{'added',
+    'queued_total', 'opened', 'folder'}`` — never raises (a queue the
+    app cannot write is a hint in the log, not a crash).
     """
     log = log or (lambda *a, **k: None)
     report = {'added': 0, 'queued_total': 0, 'opened': 0,
@@ -303,12 +307,17 @@ def enqueue_hand_delivery(vault_path: str, urls: List[str],
             # hand-deliver again — e.g. the page changed)
             links[u]['consumed'] = False
             links[u]['requeued'] = now
+            if door:
+                links[u]['door'] = door
             added.append(u)
             continue
         if u in links:
             continue  # already queued — a no-op, never a duplicate
-        links[u] = {'wall': walls.get(u, ''), 'queued': now,
-                    'suggested': suggested_filename(u)}
+        meta = {'wall': walls.get(u, ''), 'queued': now,
+                'suggested': suggested_filename(u)}
+        if door:
+            meta['door'] = door
+        links[u] = meta
         added.append(u)
     if added:
         queue['links'] = links
@@ -495,21 +504,32 @@ def consume_delivered(vault_path: str, log: Optional[Callable] = None
     return out
 
 
-def hand_fetch_result(url: str, body: bytes, wall: str):
+def hand_fetch_result(url: str, body: bytes, wall: str,
+                      door: Optional[str] = None):
     """Build the FetchResult a delivered page becomes: a REAL full
     fetch whose reason tells the story (the honest line the note, the
-    master table, and the run report all carry)."""
+    master table, and the run report all carry). v0.50.0 — ``door ==
+    'auto'`` words the fifth door's story (the app took the page from
+    the owner's Chrome itself); the default wording stays the fourth
+    door's (the owner saved the page by hand)."""
     from gitcurator.core import web_fetch as _wf
     try:
         text = body.decode('utf-8', errors='replace')
     except Exception:
         text = ''
     wall = (wall or 'the machine doors were walled').strip()
+    if door == 'auto':
+        reason = (f"auto-delivered via the owner's own Chrome (the fifth "
+                  f"door's tab retry — one tab per failed link, the live "
+                  f"DOM taken after the page loaded) — the machine doors "
+                  f"failed: {wall}")
+    else:
+        reason = (f"hand-delivered via the owner's real Chrome — the "
+                  f"machine doors were walled: {wall}")
     return _wf.FetchResult(
         url, final_url=url, status='full', http_status=200,
         content_type='text/html', charset='utf-8', body=body, text=text,
-        reason=f"hand-delivered via the owner's real Chrome — the "
-                f"machine doors were walled: {wall}")
+        reason=reason)
 
 
 def take_hand_delivered(vault_path: str, canonical: str,
@@ -551,7 +571,9 @@ def take_hand_delivered(vault_path: str, canonical: str,
         except Exception as e:
             log and log(f"⚠️ Hand-delivery queue could not be "
                         f"stamped: {e}", "warning")
-    return hand_fetch_result(canonical, body, str(meta.get('wall') or ''))
+    return hand_fetch_result(canonical, body,
+                             str(meta.get('wall') or ''),
+                             door=meta.get('door'))
 
 
 # ---------------------------------------------------------------------------

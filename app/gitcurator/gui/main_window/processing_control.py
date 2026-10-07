@@ -29,6 +29,7 @@ from gitcurator.core import dryrun as _dryrun
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import hand_delivery as _hand_delivery
+from gitcurator.core import chrome_tabs as _chrome_tabs
 from gitcurator.core import connection_check as _connection_check
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
@@ -722,6 +723,304 @@ class ProcessingControlMixin:
                 picked.append(candidates[i]['url'])
         return picked
 
+    # ------------------------------------------------------------------
+    # v0.50.0 — the fifth door: Chrome fetches the pages itself
+    # ------------------------------------------------------------------
+
+    def _maybe_offer_chrome_tab_retry(self):
+        """v0.50.0 — the end-of-run offer (the owner's ask, verbatim:
+        \"before finishing the run and fetch, app must show a modal —
+        xx links didn't generate content… want to retry them in real
+        browser?\"). The fetch-failed links of THIS run (each with its
+        last error — the master table's \" - \" rows) are offered once:
+        one yes opens the owner's own Google Chrome in a fresh session,
+        starts one tab per link, and the app takes the content from
+        the live pages. Declined (or opted-out) links keep waiting —
+        their automatic retries continue, the master table's Status
+        cell still decides their fate. Quiet no-op whenever the offer
+        cannot be made (pipeline off, no vault, no failures, nothing
+        new, shutting down)."""
+        cfg = self.config or {}
+        if cfg.get('web_browser_retry') is False:
+            return  # opted out (the config knob, default ON)
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            return
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return
+        try:
+            summary = getattr(self.worker, '_website_summary', None)
+        except Exception:
+            summary = None
+        if not summary:
+            return
+        try:
+            results = summary.get('results') or []
+        except Exception:
+            results = []
+        links = _chrome_tabs.collect_failed_fetch_links(results)
+        if not links:
+            return
+        # drop the links the fetcher itself retired (auto-verdict:
+        # dead / paywalled / refused — the ladder's own final answers;
+        # ♻️ revived in the master table is their door back)
+        try:
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                links = [l for l in links
+                         if not state.is_dismissed(l['url'])]
+            finally:
+                state.close()
+        except Exception:
+            pass  # a state question that cannot be asked: offer them
+        offered = getattr(self, '_chrome_tab_offered', None)
+        if offered is None:
+            offered = self._chrome_tab_offered = set()
+        links = [l for l in links if l['url'] not in offered]
+        if not links:
+            return
+        picked = self._chrome_tab_retry_dialog(links)
+        if not picked:
+            self.log_message(
+                "⏭️ Chrome tab retry declined — the failed links keep "
+                "waiting (their automatic retries continue; the master "
+                "table's Status cell decides their fate).", "info")
+            return
+        offered.update(p['url'] for p in picked)
+        self._start_chrome_tab_retry(picked)
+
+    def _chrome_tab_retry_dialog(self, links):
+        """v0.50.0 — the offer modal: the fetch-failed links with their
+        last error under each URL (the owner's \"got error xxx\", mind
+        the wording), a plain question, and the two answers — retry in
+        the real Chrome now, or not now. Checkable list (the picker's
+        law — the owner may untick), all links ticked by default.
+        Returns the chosen ``[{'url', 'error'}]`` (empty = declined)."""
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return []
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Retry in your real Chrome?")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(720)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        icon_label = QLabel("🤖")
+        icon_label.setObjectName("msg_glyph")
+        header.addWidget(icon_label)
+        title_label = QLabel(
+            f"{len(links)} link(s) couldn't generate content")
+        title_label.setObjectName("msg_heading")
+        title_label.setProperty("tone", "info")
+        header.addWidget(title_label)
+        header.addStretch()
+        layout.addLayout(header)
+
+        msg_label = QLabel(
+            f"The machine fetch failed for {len(links)} link(s) this run — "
+            "no content was generated, each one's last error rides under "
+            "its URL (they are the \" - \" rows in the master table).\n\n"
+            "Want to retry them in your real Google Chrome? GitCurator "
+            "opens a fresh Chrome window (your own Chrome, a new session "
+            "— your running window is never touched), starts one tab per "
+            "link, waits for every page to load, and takes the content "
+            "from the live pages itself — no manual saving. Links that "
+            "still fail keep waiting; their automatic retries continue.")
+        msg_label.setWordWrap(True)
+        layout.addWidget(msg_label)
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(
+            QListWidget.SelectionMode.NoSelection)
+        for l in links:
+            err = (l.get('error') or '')[:110]
+            text = l['url'] + (f"   —   {err}" if err else '')
+            item = QListWidgetItem(text)
+            item.setToolTip(text)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            list_widget.addItem(item)
+        list_widget.setMinimumHeight(
+            min(320, 22 * min(len(links), 12) + 24))
+        layout.addWidget(list_widget)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        no_btn = QPushButton("Not now")
+        self._style_btn(no_btn, 'secondary')
+        no_btn.setToolTip("The failed links keep waiting — their "
+                          "automatic retries continue, and the master "
+                          "table's Status cell decides their fate.")
+        no_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(no_btn)
+        retry_btn = QPushButton("🤖 Retry in Chrome now")
+        self._style_btn(retry_btn, 'primary')
+        retry_btn.setToolTip("Opens your own Google Chrome (a fresh "
+                             "session), one tab per link, and takes the "
+                             "content from the live pages.")
+        retry_btn.clicked.connect(dialog.accept)
+        btn_row.addWidget(retry_btn)
+        layout.addLayout(btn_row)
+
+        self._animate_dialog(dialog)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return []
+        picked = []
+        for i in range(list_widget.count()):
+            if list_widget.item(i).checkState() == Qt.CheckState.Checked:
+                picked.append(links[i])
+        return picked
+
+    def _start_chrome_tab_retry(self, links):
+        """v0.50.0 — run the fifth door in the background (the GUI never
+        blocks): the pages are delivered from the owner's real Chrome
+        into the hand-delivered folder, then the delivered links are
+        re-processed as REAL fetches (a fresh mini-batch — the pipeline
+        takes each delivered page before any machine door is asked).
+        Same QThread pattern as the vault seals: a kept reference, log
+        lines into the main log, and a queued signal back."""
+        cfg = self.config or {}
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault:
+            return
+
+        class ChromeTabRetryWorker(QThread):
+            log_message = pyqtSignal(str, str)
+            delivered = pyqtSignal(list)
+
+            def __init__(self, vault, links, config):
+                super().__init__()
+                self._vault = vault
+                self._links = links
+                self._config = config
+
+            def run(self):
+                try:
+                    report = _chrome_tabs.deliver_pages_via_chrome(
+                        self._vault, self._links,
+                        log=self.log_message.emit, config=self._config)
+                except Exception as e:  # the door never breaks anything
+                    self.log_message.emit(
+                        f"⚠️ Chrome tab retry failed: {e}", "warning")
+                    self.delivered.emit([])
+                    return
+                self.delivered.emit(list(report.get('urls') or []))
+
+        worker = ChromeTabRetryWorker(vault, links, dict(cfg))
+        self._chrome_retry_worker = worker  # a kept reference (Qt GC law)
+        worker.log_message.connect(self.log_message)
+
+        def _on_delivered(urls):
+            if not urls:
+                return
+            if getattr(self, '_batch_running', False):
+                self.log_message(
+                    f"🤖 {len(urls)} page(s) delivered from your Chrome — "
+                    "a batch is running, so they join the NEXT one "
+                    "automatically (delivered pages are never left "
+                    "waiting)", "info")
+                return
+            self.log_message(
+                f"🤖 {len(urls)} page(s) delivered from your Chrome — "
+                "re-processing them now as real fetches…", "success")
+            try:
+                self._start_worker_with_urls(list(urls))
+            except Exception as e:
+                self.log_message(
+                    f"⚠️ The delivered-page re-run could not start "
+                    f"({e}) — the next SYNC batch takes them "
+                    f"automatically", "warning")
+
+        worker.delivered.connect(_on_delivered)
+        worker.start()
+        self.log_message(
+            f"🤖 Chrome tab retry: opening {len(links)} link(s) in your "
+            f"real Chrome (a fresh window, one tab per link — watch the "
+            f"tabs load; GitCurator takes each page when it is ready)",
+            "info")
+
+    def chrome_tab_retry_now(self):
+        """More ▸ 🤖 Chrome tab-retry failed links… — v0.50.0, the
+        fifth door on demand: every link waiting in the websites retry
+        queue (the fetch-failed pile — each with its last error, the
+        master table's \" - \" rows) is offered for the automatic
+        real-Chrome tab retry. Same dialog, same background worker,
+        same delivered-page re-run as the end-of-batch offer."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        if getattr(self, '_batch_running', False):
+            self._show_custom_message_box(
+                "Batch already running",
+                "A batch is already running — finish or stop it first.",
+                success=False)
+            return
+        candidates = []
+        try:
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                for row in state.all_retry_rows():
+                    url = (row.get('url') or '').strip()
+                    if not url.lower().startswith(('http://', 'https://')) \
+                            or _chrome_tabs.is_loopback_url(url):
+                        continue
+                    if state.is_dismissed(url):
+                        continue  # the ladder's own verdict answered it
+                    candidates.append(
+                        {'url': url,
+                         'error': str(row.get('last_error') or '')})
+            finally:
+                state.close()
+        except Exception as e:
+            self.log_message(f"⚠️ Retry-queue scan skipped: {e}", "warning")
+        offered = getattr(self, '_chrome_tab_offered', None)
+        if offered is None:
+            offered = self._chrome_tab_offered = set()
+        candidates = [c for c in candidates
+                      if c['url'] not in offered]
+        if not candidates:
+            self._show_custom_message_box(
+                "No failed links waiting",
+                "The websites retry queue has no failed link waiting "
+                "for the fifth door (loopback and auto-retired links "
+                "never ask). When a fetch fails, the end-of-run modal "
+                "offers the retry automatically.", success=True)
+            return
+        picked = self._chrome_tab_retry_dialog(candidates)
+        if not picked:
+            self.log_message(
+                "⏭️ Chrome tab retry cancelled — the failed links keep "
+                "waiting (their automatic retries continue).", "info")
+            return
+        offered.update(p['url'] for p in picked)
+        self._start_chrome_tab_retry(picked)
+
     def _start_review_retry(self):
         """Launch the _review backlog retry batch (worker mode
         'review_retry' — the worker scans, the websites phase drives the
@@ -1118,6 +1417,18 @@ class ProcessingControlMixin:
             _summary = getattr(self.worker, 'batch_summary', None) \
                 if self.worker else None
             if _summary and not _summary.get('stopped'):
+                # v0.50.0 — the fifth door's offer rides BEFORE the
+                # scorecard: the run's fetch failures are the run's last
+                # question ("want to retry them in your real Chrome?"),
+                # and only then does the fanfare celebrate what landed.
+                # Tolerated everywhere — an offer that cannot be made
+                # never costs the owner his scorecard.
+                try:
+                    self._maybe_offer_chrome_tab_retry()
+                except Exception as _chrome_err:
+                    self.log_message(
+                        f"⚠️ Chrome tab-retry offer skipped: "
+                        f"{_chrome_err}", "warning")
                 self._celebrate_batch(_summary, elapsed_str)
             else:
                 self._show_custom_message_box(

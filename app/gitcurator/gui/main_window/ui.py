@@ -1590,6 +1590,14 @@ class UiMixin:
         # same gesture by hand (never a retirement).
         more_menu.addAction("🖐 Hand-deliver walled links",
                             self.hand_deliver_walled_links_now)
+        # v0.50.0 — the fifth door: the failed links (the fetch pile
+        # waiting in the retry queue) can be re-fetched AUTOMATICALLY
+        # through the owner's own Chrome — one tab per link, the live
+        # DOM taken as the content, delivered pages processed as real
+        # fetches. The end-of-run modal offers the same after a batch
+        # with failures.
+        more_menu.addAction("🤖 Chrome tab-retry failed links",
+                            self.chrome_tab_retry_now)
         self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
         self.backup_export_btn.triggered.connect(self._backup_export_zip)
         more_menu.addSeparator()
