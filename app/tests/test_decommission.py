@@ -252,7 +252,8 @@ class TestWriteCandidates(_GraveyardCase):
                          'https://sub.example.org/lost'])
         self.assertEqual(n, 2)
         text = self.table_text()
-        self.assertIn('# Decommissioned Links — the Graveyard', text)
+        self.assertIn('# Review Master Table — decommission or approve',
+                      text)
         self.assertIn('| # | Date | URL | Domain | Source | Status |',
                       text)
         self.assertIn('https://example.com/gone', text)
@@ -406,7 +407,7 @@ class TestConsume(_GraveyardCase):
     def test_missing_table_is_a_no_op(self):
         report = wp.consume_decommission_table(self.db, self.vault,
                                                log=lambda *a, **k: None)
-        self.assertEqual(report, {'dead': 0, 'revived': 0,
+        self.assertEqual(report, {'dead': 0, 'reviewed': 0, 'revived': 0,
                                   'placeholders_swept': 0,
                                   'rows_confirmed': 0})
 
@@ -503,7 +504,7 @@ class TestNeverFetchAgain(_GraveyardCase):
             os.path.join(self.vault, '_review'))
             if n.endswith('.md') and n != wp.DECOMMISSION_TABLE]
         self.assertEqual(leftovers, [])
-        self.assertIn('🪦 Graveyard:', self.all_logs())
+        self.assertIn('🪦 Master table:', self.all_logs())
 
 
 class TestReleaseBookkeeping(unittest.TestCase):
@@ -519,7 +520,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0440(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.46.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.47.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

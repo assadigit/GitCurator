@@ -280,7 +280,9 @@ def _parse_review_frontmatter(path: str) -> Optional[Dict[str, str]]:
 
 
 def scan_review_backlog(vault_path: str,
-                        log: Optional[Callable] = None) -> List[Dict]:
+                        log: Optional[Callable] = None,
+                        is_dismissed: Optional[Callable] = None
+                        ) -> List[Dict]:
     """v0.42.0 — the owner's _review backlog scanner.
 
     Walks ``<vault>/_review/*.md`` and returns the APP-OWNED
@@ -296,6 +298,13 @@ def scan_review_backlog(vault_path: str,
     ``_review/DECOMMISSIONED.md`` is BURIED, not backlogged — the
     startup notice and the retry driver stop seeing it (the placeholder
     file itself is swept by the next consume).
+
+    v0.47.0 — ``is_dismissed(url) -> bool`` (optional, the caller
+    injects a WebsiteStateDB partial): a link RETIRED by the fetcher's
+    own auto-verdict (dead / paywalled / refused) leaves the backlog
+    too — its placeholder note is the record, not a waiting wall; the
+    master table is where the owner sees and ♻️-revives it. Without the
+    callable the scan stays a pure file read (the hermetic law).
 
     Returns ``[{'url': source, 'path': note_path}, ...]`` — sorted by
     filename for a deterministic order; one source may appear more than
@@ -332,8 +341,16 @@ def scan_review_backlog(vault_path: str,
         url = (fm.get('source') or '').strip()
         if not url.lower().startswith(('http://', 'https://')):
             continue
-        if normalize_website_url(url) in dead:
+        canonical = normalize_website_url(url)
+        if canonical in dead:
             continue  # v0.44.0 — buried in the graveyard, not backlogged
+        if is_dismissed is not None:
+            try:
+                if is_dismissed(canonical):
+                    continue  # v0.47.0 — retired (auto-verdict/owner),
+                    # not waiting — the master table is its ledger
+            except Exception:
+                pass  # a broken probe never hides a waiting link
         items.append({'url': url, 'path': path})
     return items
 
@@ -360,6 +377,16 @@ DEAD_MARKERS = ("🪦", "❌", "☠️", "💀", "decommissioned", "retired", "d
 #: What reads as REVIVED — the graveyard's other door: a link buried by
 #: mistake (or a domain that came back) is fetched like new again.
 REVIVE_MARKERS = ("♻️", "revived", "restored", "un-decommissioned")
+#: v0.47.0 — what reads as REVIEWED-AND-KEPT in a Status cell: the
+#: owner's original gesture on the _inbox tables ("tick emoji as
+#: reviewed so it never fetches again") raised to the master table's
+#: second retirement door. A ✅ row retires the link WITHOUT the
+#: graveyard's death sentence — the owner handled this link's fate by
+#: hand, so it is never fetched, never retried again, and its _review
+#: placeholder is swept; ♻️ revived still brings it back. 'unreviewed'
+#: (the pre-filled default) NEVER counts; a revived Status never
+#: counts either.
+REVIEWED_MARKERS = ("✅", "✔", "☑", "reviewed", "kept", "done")
 
 
 def decommission_table_path(vault_path: str) -> str:
@@ -407,6 +434,21 @@ def _status_is_revived(status: str) -> bool:
     return any(m in s for m in REVIVE_MARKERS)
 
 
+def _status_is_reviewed(status: str) -> bool:
+    """v0.47.0 — True when a Status cell reads as reviewed-and-kept
+    (the owner's ✅ gesture). 'unreviewed' (the pre-filled default)
+    never counts — it CONTAINS 'reviewed' but says the opposite; a
+    revived Status never counts (the ♻️ wins); a DEAD status never
+    reaches here (the caller checks dead first — death wins when a
+    hand-edited cell says both)."""
+    s = (status or '').strip().lower()
+    if not s or 'unreviewed' in s:
+        return False
+    if any(m in s for m in REVIVE_MARKERS):
+        return False
+    return any(m in s for m in REVIEWED_MARKERS)
+
+
 def scan_decommission_table(vault_path: str) -> Dict[str, str]:
     """v0.44.0 — read the owner's burial decisions.
 
@@ -423,22 +465,43 @@ def scan_decommission_table(vault_path: str) -> Dict[str, str]:
     return out
 
 
-_GRAVEYARD_HEADER = """# Decommissioned Links — the Graveyard
+_GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 
-> Auto-updated. DO NOT delete rows — only update the Status column.
-> Edit Status to: 🪦 dead / ❌ dead / ☠️ dead — the link is never
-> fetched, never retried, and its _review placeholder is swept.
-> Change a dead Status to ♻️ revived to bring a link back to life.
-> Last updated: {now}
+> The master note for links waiting in _review. One row per link;
+> edit ONLY the Status column — do not delete rows.
+> ✅ reviewed — you handled this link: never fetched, never retried
+>   again, its _review placeholder is swept.
+> 🪦 dead / ❌ dead / ☠️ dead — the link is dead: same never-fetch
+>   retirement, same placeholder sweep.
+> ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
+>   like new again.
+> blank / unreviewed — still waiting: the automatic retries continue.
+> Rows marked "auto" were retired by the fetcher's own verdict
+> (dead / paywalled / refused) — set ♻️ revived to disagree.
+> Auto-updated after every batch. Last updated: {now}
 
 | # | Date | URL | Domain | Source | Status | Notes |
 |---|------|-----|--------|--------|--------|-------|
 """
 
 
+def _table_cell(text: str, limit: int = 96) -> str:
+    """v0.47.0 — one markdown-table-safe cell: pipes and newlines are
+    the table's structure, so they become '·' / spaces; anything longer
+    than ``limit`` chars is truncated with an ellipsis (a table row
+    stays a row)."""
+    s = str(text or '').replace('|', '·').replace('\n', ' ').replace('\r', ' ')
+    s = ' '.join(s.split())
+    if len(s) > limit:
+        s = s[:limit - 1].rstrip() + '…'
+    return s
+
+
 def write_decommission_candidates(vault_path: str, urls: List[str],
                                   source: str = 'retry backlog',
-                                  log: Optional[Callable] = None
+                                  log: Optional[Callable] = None,
+                                  notes: Optional[Dict[str, str]] = None,
+                                  status: str = 'unreviewed'
                                   ) -> int:
     """v0.44.0 — pre-fill the graveyard with the failed links waiting in
     ``_review`` so the owner only has to SET THE EMOJI (his gesture, the
@@ -446,7 +509,11 @@ def write_decommission_candidates(vault_path: str, urls: List[str],
     URLs already present (any Status) are never duplicated, owner-edited
     rows are never touched. Creates the table with its header when the
     file does not exist. Atomic + dry-run aware (the house writer).
-    Returns how many new rows were written."""
+    v0.47.0 — ``notes`` fills the Notes column per URL (the last error
+    or the auto-verdict — table-sanitized, length-capped) and ``status``
+    is the pre-filled Status cell (the refresh writes '🪦 auto — <cat>'
+    rows for the fetcher's own retirements; the default stays
+    'unreviewed'). Returns how many new rows were written."""
     log = log or (lambda *a, **k: None)
     path = decommission_table_path(vault_path)
     if not vault_path:
@@ -460,6 +527,8 @@ def write_decommission_candidates(vault_path: str, urls: List[str],
     rows = _parse_decommission_rows(path) if os.path.isfile(path) else []
     existing = {r['url'] for r in rows}
     date_str = datetime.now().strftime('%Y-%m-%d')
+    notes = notes or {}
+    status = _table_cell(status, limit=48) or 'unreviewed'
     new_rows = []
     for url in urls:
         if not url or url in existing:
@@ -470,9 +539,12 @@ def write_decommission_candidates(vault_path: str, urls: List[str],
             domain = urlparse(url).netloc or 'unknown'
         except Exception:
             domain = 'unknown'
+        note = _table_cell(notes.get(url, ''))
         new_rows.append(
-            f"| - | {date_str} | {_links.scrub_url_token(url)} | {domain}"
-            f" | {source} | unreviewed | |")
+            f"| - | {date_str} | {_links.scrub_url_token(url)} | "
+            f"{_table_cell(domain, limit=64)} "
+            f"| {_table_cell(source, limit=32)} | {status}"
+            + (f" | {note} |" if note else " | |"))
     if not new_rows:
         return 0
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -500,9 +572,9 @@ def write_decommission_candidates(vault_path: str, urls: List[str],
     except Exception as e:
         log(f"⚠️ Could not write the graveyard table: {e}", "warning")
         return 0
-    log(f"🪦 {len(new_rows)} dead-link candidate(s) written to "
-        f"{DECOMMISSION_TABLE} — set Status to 🪦 dead to bury "
-        f"(♻️ revived brings one back)", "info")
+    log(f"📋 {len(new_rows)} row(s) written to {DECOMMISSION_TABLE} (the "
+        f"master table — set Status to 🪦 dead to bury or ✅ reviewed to "
+        f"keep; ♻️ revived brings one back)", "info")
     return len(new_rows)
 
 
@@ -561,7 +633,7 @@ def mark_urls_dead_in_table(vault_path: str, urls: List[str],
 
 def consume_decommission_table(state, vault_path: str,
                                log: Optional[Callable] = None) -> Dict:
-    """v0.44.0 — enforce the owner's burial decisions.
+    """v0.44.0/v0.47.0 — enforce the owner's master-table decisions.
 
     For every dead-marked row (``_status_is_dead``): the URL is
     ``dismiss()``ed (the never-fetch gate process_link already honors —
@@ -574,18 +646,27 @@ def consume_decommission_table(state, vault_path: str,
     ``🪦 confirmed — decommissioned <date>`` so the table itself shows
     the burial.
 
+    v0.47.0 — every ✅-reviewed row (``_status_is_reviewed``, the
+    owner's tick gesture) gets the SAME retirement: dismissed with the
+    reviewed reason, retry row dropped, placeholder swept, processed
+    row forgotten, Status rewritten to ``✅ confirmed — reviewed
+    <date>``. The only difference from a burial is the wording — both
+    are the never-fetch-again gate (that is what the owner asked for:
+    "tick emoji as reviewed so it never fetches again").
+
     For every ♻️-revived row: the dismissal is removed — the link is
     fetched like new the next time it appears.
 
-    Idempotent — a confirmed row still carries the 🪦 marker, so a
-    second run re-dismisses harmlessly (INSERT OR REPLACE) while the
-    Status rewrite is byte-stable ('confirmed' rows are skipped).
-    Tolerated everywhere (the graveyard is bookkeeping, never a batch
-    killer). Returns ``{'dead', 'revived', 'placeholders_swept',
-    'rows_confirmed'}``."""
+    Idempotent — a confirmed row still carries its marker, so a second
+    run re-dismisses harmlessly (INSERT OR REPLACE) while the Status
+    rewrite is byte-stable ('confirmed' rows are skipped). Dead beats
+    reviewed when a hand-edited cell says both (the burial is the
+    stronger sentence). Tolerated everywhere (the table is bookkeeping,
+    never a batch killer). Returns ``{'dead', 'reviewed', 'revived',
+    'placeholders_swept', 'rows_confirmed'}``."""
     log = log or (lambda *a, **k: None)
-    report = {'dead': 0, 'revived': 0, 'placeholders_swept': 0,
-              'rows_confirmed': 0}
+    report = {'dead': 0, 'reviewed': 0, 'revived': 0,
+              'placeholders_swept': 0, 'rows_confirmed': 0}
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
         return report
@@ -594,38 +675,47 @@ def consume_decommission_table(state, vault_path: str,
         return report
     lines = None
     date_str = datetime.now().strftime('%Y-%m-%d')
-    dead_canonicals: List[str] = []
+    retired_canonicals: List[str] = []
 
-    # ---- pass 1: the burials (DB first — the gate must hold even if a
-    # file sweep fails below) --------------------------------------------
+    # ---- pass 1: the retirements (DB first — the gate must hold even
+    # if a file sweep fails below) ---------------------------------------
     for row in rows:
-        if not _status_is_dead(row['status']):
+        dead = _status_is_dead(row['status'])
+        reviewed = (not dead) and _status_is_reviewed(row['status'])
+        if not (dead or reviewed):
             continue
         canonical = normalize_website_url(row['url'])
         if not canonical:
             continue
-        dead_canonicals.append(canonical)
-        report['dead'] += 1
+        retired_canonicals.append(canonical)
+        if dead:
+            report['dead'] += 1
+            reason = ('decommissioned by owner — graveyard table '
+                      '(v0.44.0)')
+            stamp = f" 🪦 confirmed — decommissioned {date_str} "
+        else:
+            report['reviewed'] += 1
+            reason = ('retired by owner (reviewed ✅) — the master '
+                      'table (v0.47.0); never fetched again')
+            stamp = f" ✅ confirmed — reviewed {date_str} "
         try:
-            state.dismiss(
-                canonical,
-                'decommissioned by owner — graveyard table (v0.44.0)')
+            state.dismiss(canonical, reason)
             state.resolve_retry(canonical)
             state.forget_failed_row(canonical)
         except Exception as e:
-            log(f"⚠️ Graveyard DB write skipped for {row['url']}: {e}",
+            log(f"⚠️ Master-table DB write skipped for {row['url']}: {e}",
                 "warning")
         # Confirm the row (byte-stable rewrite — the marker stays).
         parts = row['raw'].split('|')
         if len(parts) >= 8 and 'confirmed' not in row['status'].lower():
-            parts[6] = f" 🪦 confirmed — decommissioned {date_str} "
+            parts[6] = stamp
             if lines is None:
                 try:
                     with open(path, 'r', encoding='utf-8',
                               errors='replace') as f:
                         lines = f.read().splitlines()
                 except Exception as e:
-                    log(f"⚠️ Could not re-read the graveyard table: {e}",
+                    log(f"⚠️ Could not re-read the master table: {e}",
                         "warning")
                     lines = []
             if lines and row['line'] < len(lines):
@@ -648,11 +738,13 @@ def consume_decommission_table(state, vault_path: str,
             log(f"⚠️ Graveyard revival skipped for {row['url']}: {e}",
                 "warning")
 
-    # ---- pass 3: sweep the dead links' placeholder FILES -----------------
+    # ---- pass 3: sweep the retired links' placeholder FILES --------------
     # Walk _review like the backlog scan does — this catches both the
     # tracked placeholder (processed row knew it) and a LOST-row one.
-    if dead_canonicals:
-        dead_set = set(dead_canonicals)
+    # v0.47.0 — a ✅-reviewed link's placeholder is swept too (the
+    # owner handled this link's fate; the table row is the record).
+    if retired_canonicals:
+        retired_set = set(retired_canonicals)
         review_dir = os.path.join(vault_path, REVIEW_FOLDER)
         try:
             names = sorted(os.listdir(review_dir))
@@ -670,7 +762,7 @@ def consume_decommission_table(state, vault_path: str,
                     or fm.get('fetch_status', '').lower() != 'failed':
                 continue  # a human's note — never our call
             src = normalize_website_url((fm.get('source') or '').strip())
-            if src not in dead_set:
+            if src not in retired_set:
                 continue
             try:
                 _dryrun.remove(p)
@@ -692,13 +784,113 @@ def consume_decommission_table(state, vault_path: str,
             atomic_write_text(path,
                               '\n'.join(lines).rstrip('\n') + '\n')
         except Exception as e:
-            log(f"⚠️ Could not write the graveyard table: {e}",
+            log(f"⚠️ Could not write the master table: {e}",
                 "warning")
 
     if report['dead']:
-        log(f"🪦 Graveyard: {report['dead']} link(s) decommissioned — "
+        log(f"🪦 Master table: {report['dead']} link(s) decommissioned — "
             f"dismissed, {report['placeholders_swept']} placeholder(s) "
             f"swept, never fetched again", "info")
+    if report['reviewed']:
+        log(f"✅ Master table: {report['reviewed']} link(s) retired as "
+            f"reviewed — dismissed, never fetched again (♻️ revived "
+            f"brings any back)", "info")
+    return report
+
+
+# ===========================================================================
+# v0.47.0 — the master table: the ledger the owner was promised
+# ===========================================================================
+
+def refresh_master_table(state, vault_path: str,
+                         log: Optional[Callable] = None) -> Dict:
+    """v0.47.0 — keep the master note honest after every batch.
+
+    The owner's report: "I also didn't get that table yet" — v0.44.0
+    only wrote ``_review/DECOMMISSIONED.md`` from the manual picker
+    action, so a vault whose owner never opened More ▸ Decommission
+    never saw the table at all. Now every batch refreshes it:
+
+    * every WAITING failure (the whole retry queue — attempts, last
+      error) and every scanned ``_review`` placeholder whose state row
+      was lost, as fresh 'unreviewed' rows with the last error in the
+      Notes column;
+    * every auto-verdict retirement (the fetcher's own dead / paywalled
+      / refused verdicts) as a '🪦 auto — <category>' row — visible,
+      revivable (♻️), and consumed by the next batch like any burial.
+
+    Existing rows are never duplicated or clobbered (the writer's law);
+    a vault with nothing waiting and nothing retired stays table-less
+    (a cheap no-op). Tolerated everywhere — the master table is
+    bookkeeping, never a batch killer. Returns
+    ``{'waiting', 'retired', 'written'}``."""
+    log = log or (lambda *a, **k: None)
+    report = {'waiting': 0, 'retired': 0, 'written': 0}
+    if not vault_path:
+        return report
+    try:
+        waiting_urls: List[str] = []
+        waiting_notes: Dict[str, str] = {}
+        dismissed_cache: Dict[str, bool] = {}
+
+        def _is_retired(u: str) -> bool:
+            if u not in dismissed_cache:
+                try:
+                    dismissed_cache[u] = bool(state.is_dismissed(u))
+                except Exception:
+                    dismissed_cache[u] = False
+            return dismissed_cache[u]
+
+        for row in state.all_retry_rows():
+            u = row.get('url') or ''
+            if not u or _is_retired(u):
+                continue  # retired — its row comes below, not here
+            waiting_urls.append(u)
+            waiting_notes[u] = str(row.get('last_error') or '')
+            report['waiting'] += 1
+        for it in scan_review_backlog(vault_path, is_dismissed=_is_retired):
+            u = it.get('url') or ''
+            if not u or u in waiting_notes:
+                continue
+            waiting_urls.append(u)
+            waiting_notes[u] = ('placeholder in _review (state row was '
+                                'lost)')
+            report['waiting'] += 1
+
+        retired_urls: List[str] = []
+        retired_notes: Dict[str, str] = {}
+        for row in state.dismissed_rows('auto-verdict:'):
+            u = row.get('url') or ''
+            if not u:
+                continue
+            verdict = str(row.get('reason') or '')[len('auto-verdict:'):].strip()
+            retired_urls.append(u)
+            retired_notes[u] = verdict
+            report['retired'] += 1
+
+        n1 = write_decommission_candidates(
+            vault_path, waiting_urls, source='waiting',
+            log=None, notes=waiting_notes) if waiting_urls else 0
+        n2 = 0
+        if retired_urls:
+            by_status: Dict[str, List[str]] = {}
+            for u in retired_urls:
+                verdict = retired_notes.get(u, '')
+                cat = verdict.split(' —', 1)[0].strip() or 'retired'
+                by_status.setdefault(f"🪦 auto — {cat}", []).append(u)
+            for status, urls in by_status.items():
+                n2 += write_decommission_candidates(
+                    vault_path, urls, source='auto-verdict',
+                    log=None, notes=retired_notes, status=status)
+        report['written'] = n1 + n2
+        if report['written']:
+            log(f"📋 Master table refreshed: {report['waiting']} waiting, "
+                f"{report['retired']} auto-retired link(s) — "
+                f"{report['written']} new row(s) in "
+                f"{DECOMMISSION_TABLE} (🪦 dead / ✅ reviewed retire; ♻️ "
+                f"revived re-fetches)", "info")
+    except Exception as e:  # bookkeeping never kills a batch
+        log(f"⚠️ Master table refresh skipped: {e}", "warning")
     return report
 
 
@@ -861,15 +1053,39 @@ class WebsitePipeline:
         # so they never break).
         self.impersonate_fallback = self.config.get(
             'web_impersonate_fallback') is not False
+        # v0.47.0 — THE DOOR THAT SHIPS ITSELF: when the third door is
+        # wanted but curl_cffi is missing, ONE pip install runs through
+        # this interpreter and arms it (the owner's five "a third door
+        # exists: pip install curl_cffi" lines were a missing LIBRARY,
+        # not a missing feature — his install predates requirements'
+        # entry). Config "web_impersonate_autopip": false opts out.
+        self.impersonate_autopip = self.config.get(
+            'web_impersonate_autopip') is not False
         if fetch_fn is None and self.impersonate_fallback:
             # Production only (the golden run and injected tests stay
-            # hermetic). One honest line per batch: the door's state.
+            # hermetic). One honest line per batch: the door's state —
+            # and the self-install when it is wanted and missing.
             if _web_fetch.curl_cffi_available():
                 self.log(
                     "🤝 v0.45.0 third door armed: a refusal-family wall on "
                     "every door is re-asked with Chrome's own TLS "
                     "handshake (curl_cffi) — the "
                     "'bot defense (Cloudflare: challenge)' class", "info")
+            elif self.impersonate_autopip:
+                self.log(
+                    "🤝 v0.47.0: the third door is missing — installing "
+                    "curl_cffi automatically (one-time, ~a minute)…",
+                    "info")
+                if _web_fetch.ensure_curl_cffi_installed():
+                    self.log(
+                        "🤝 third door ARMED — curl_cffi installed "
+                        "automatically; fingerprint-class walls get "
+                        "Chrome's own handshake from now on", "info")
+                else:
+                    self.log(
+                        "ℹ️ the automatic install failed (offline? no pip?) "
+                        "— run 'pip install curl_cffi' by hand; the "
+                        "stdlib doors keep working meanwhile", "info")
             else:
                 self.log(
                     "ℹ️ v0.45.0 third door not installed (pip install "
@@ -1356,7 +1572,8 @@ class WebsitePipeline:
             rate_limiter=self.rate_limiter,
             impersonate_fallback=self.impersonate_fallback,
             archive_fallback=self.archive_fallback,
-            doh_probe=self.doh_probe)
+            doh_probe=self.doh_probe,
+            impersonate_autopip=self.impersonate_autopip)
         result['fetch_status'] = fetch.status
 
         if not fetch.ok:
@@ -1594,6 +1811,7 @@ class WebsitePipeline:
                 continue
             seen.add(canonical)
             results.append(self.process_link(url))
+        self._refresh_master_table()
         return results
 
     def run_due_retries(self, should_continue=None, on_progress=None) -> List[Dict]:
@@ -1618,6 +1836,7 @@ class WebsitePipeline:
                     pass
             results.append(self.process_link(u))
         self.counters['retried'] = len(due)
+        self._refresh_master_table()
         return results
 
     # -- v0.42.0: the _review backlog retry driver --------------------------
@@ -1726,7 +1945,24 @@ class WebsitePipeline:
                     if p and p != fresh_path:
                         self._remove_scanned_placeholder(p)
             results.append(r)
+        self._refresh_master_table()
         return results
+
+    def _refresh_master_table(self) -> None:
+        """v0.47.0 — one call at every driver's end (run /
+        run_due_retries / retry_review_backlog): the master table at
+        ``<vault>/_review/DECOMMISSIONED.md`` gets every waiting failure
+        and every auto-verdict retirement as rows — the owner finally
+        GETS the table (it existed only when the manual picker had been
+        used before). Tolerated everywhere; the dry-run law applies
+        through the writer."""
+        if not self.vault_path:
+            return
+        try:
+            refresh_master_table(self.state, self.vault_path,
+                                 log=self.log)
+        except Exception as e:  # bookkeeping never kills a batch
+            self.log(f"⚠️ Master table refresh skipped: {e}", "warning")
 
     def _remove_scanned_placeholder(self, path: str) -> None:
         """Remove one scanned _review placeholder — but ONLY while it

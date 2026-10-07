@@ -207,6 +207,10 @@ _DOH_CACHE_LOCK = threading.Lock()
 _ARCHIVE_API = 'https://archive.org/wayback/available'
 _ARCHIVE_MAX_BYTES = 65_536
 
+# v0.47.0 — the origin-down courtesy's own probe budget (the same 15s
+# cap the dead-page rescue's archive rung uses).
+_ORIGIN_ARCHIVE_TIMEOUT_S = 15.0
+
 # v0.43.0 — HTTP answers that are aimed at the ROUTE, not the page:
 # the WAF/IP-reputation wall (403), the method-block some CDNs answer
 # bots with (405 — in the owner's own _review pile), the per-IP rate
@@ -252,6 +256,56 @@ def curl_cffi_available() -> bool:
             _CURL_CFFI_STATE['ok'] = False
         _CURL_CFFI_STATE['tried'] = True
     return _CURL_CFFI_STATE['ok']
+
+
+# v0.47.0 — THE DOOR THAT SHIPS ITSELF. The owner's failure pile carried
+# five lines ending "a third door exists: pip install curl_cffi" — the
+# door was armed in code (v0.45.0) but the LIBRARY never landed on his
+# machine (his install predates the requirements.txt entry; no
+# re-installer runs). A hint the owner must act on is not a workaround.
+# So the door now installs itself: the first time a fingerprint-class
+# wall actually needs the Chrome handshake (or a batch warms the door
+# at startup), ONE pip install runs through the SAME interpreter that
+# runs the app; the probe re-arms; the wall gets answered. Offline or
+# pip-less machines keep the honest hint — nothing breaks. Config
+# "web_impersonate_autopip": false opts out.
+_AUTOPIP_TIMEOUT_S = 240.0
+_AUTOPIP_STATE = {'tried': False, 'ok': False}
+
+
+def _pip_install_curl_cffi() -> bool:
+    """v0.47.0 — the one pip install behind the self-arming door:
+    ``{sys.executable} -m pip install --quiet curl_cffi``. Pure
+    subprocess, capture everything, never raises (False = failed).
+    The module-level seam tests swap (``wf._pip_install_curl_cffi``)."""
+    try:
+        import subprocess
+        import sys
+        proc = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '--quiet',
+             '--disable-pip-version-check', '--no-input', 'curl_cffi'],
+            capture_output=True, timeout=_AUTOPIP_TIMEOUT_S)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_curl_cffi_installed() -> bool:
+    """v0.47.0 — install curl_cffi ONCE per process when the third door
+    is wanted but the library is missing, then re-probe. Returns True
+    when the door is armed afterwards. The attempt is remembered either
+    way (a second wall in the same batch never re-runs pip)."""
+    if _AUTOPIP_STATE['tried']:
+        return _AUTOPIP_STATE['ok']
+    _AUTOPIP_STATE['tried'] = True
+    ok = _pip_install_curl_cffi()
+    if ok:
+        # Reset the import probe so curl_cffi_available() re-arms it.
+        _CURL_CFFI_STATE['tried'] = False
+        _CURL_CFFI_STATE['ok'] = False
+        ok = curl_cffi_available()
+    _AUTOPIP_STATE['ok'] = ok
+    return ok
 
 
 # One cached impersonation session (a curl handle + cookie jar — a
@@ -1403,7 +1457,8 @@ def _combined_category(*results) -> str:
 def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
                        routes: list, enabled: bool,
                        walled: FetchResult,
-                       started: float) -> FetchResult:
+                       started: float,
+                       autopip: bool = False) -> FetchResult:
     """v0.45.0 — the third door's own law.
 
     ``routes`` is the door sequence the CALLER allows (fetch_url
@@ -1424,7 +1479,9 @@ def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
     challenge that survives the Chrome handshake gets the three-leg
     honest line (plus the "needs a live browser" verdict — the owner's
     graveyard decision is then informed). Missing curl_cffi → the
-    install hint, never an error."""
+    install hint, never an error — UNLESS autopip is on (v0.47.0, the
+    production default): the door installs itself through pip first
+    (once per process) and the wall gets answered instead of hinted."""
     if not enabled or _is_loopback_url(url):
         return walled
     if walled.http_status is not None:
@@ -1433,8 +1490,11 @@ def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
     elif not _is_tls_handshake_failure(walled.reason):
         return walled  # connection-class truth — not a fingerprint verdict
     if not curl_cffi_available():
-        walled.reason = (walled.reason or '') + _IMP_INSTALL_HINT
-        return walled
+        if autopip and ensure_curl_cffi_installed():
+            pass  # v0.47.0 — the door armed itself; dial it below
+        else:
+            walled.reason = (walled.reason or '') + _IMP_INSTALL_HINT
+            return walled
     tried = []
     for route in routes:
         res = _impersonated_fetch_once(url, timeout_s, max_bytes, route,
@@ -1453,12 +1513,21 @@ def _maybe_impersonate(url: str, timeout_s: float, max_bytes: int,
 
 def _final_verdict(result: FetchResult, direct_reason: str, url: str,
                    proxy: Optional[Dict], rate_limiter, domain: str,
-                   doh_probe: bool, legs: tuple) -> FetchResult:
+                   doh_probe: bool, legs: tuple,
+                   archive_fallback: bool = True,
+                   started: float = 0.0) -> FetchResult:
     """v0.46.0 — the rungs every final failure answer shares: the DNS
     verdict (when the DIRECT line could not resolve the name,
     DNS-over-HTTPS names whose fault it is — a poisoned local resolver
     vs. a dead domain) and the polite circuit breaker's price (a
     429/503 leg pays its Retry-After into the domain limiter, capped).
+    v0.47.0 — the origin-down courtesy: when any leg answered 521-524
+    (Cloudflare saying the SITE's own server is down — the owner's
+    "HTTP 523" line), ONE Wayback availability probe checks for a
+    last-good copy; a snapshot that exists is NAMED in the reason (the
+    owner reads it straight from the _review note). No note is written,
+    no category changes, the spaced retry stays — the live page comes
+    back, and the archived copy answers "what did this say?" meanwhile.
     Mutates and returns ``result``."""
     suffix, dead = _dns_verdict_suffix(direct_reason, url, proxy, doh_probe)
     if suffix:
@@ -1471,6 +1540,19 @@ def _final_verdict(result: FetchResult, direct_reason: str, url: str,
             rate_limiter.penalize(domain, penalty)
     except Exception:
         pass  # politeness bookkeeping never breaks the verdict
+    try:
+        if archive_fallback and not _is_loopback_url(url) and any(
+                getattr(r, 'http_status', None) in _CLOUDFLARE_ORIGIN_STATUSES
+                for r in legs if r is not None):
+            _wait_polite(rate_limiter, 'archive.org')
+            snapshot, ts = _archive_lookup(
+                url, proxy, _ORIGIN_ARCHIVE_TIMEOUT_S, started)
+            if snapshot not in ('no-snapshot', 'unreachable'):
+                result.reason = (result.reason or '') + (
+                    f" | wayback: an archived copy exists — {snapshot}"
+                    + (f" (captured {ts})" if ts else ''))
+    except Exception:
+        pass  # the courtesy never breaks the verdict
     return result
 
 
@@ -1483,7 +1565,8 @@ def fetch_url(url: str,
               direct_fallback: bool = True,
               impersonate_fallback: bool = True,
               archive_fallback: bool = True,
-              doh_probe: bool = True) -> FetchResult:
+              doh_probe: bool = True,
+              impersonate_autopip: bool = False) -> FetchResult:
     """Fetch one URL politely. Never raises — every failure is a
     FetchResult(status='failed', reason=..., category=...).
 
@@ -1534,7 +1617,15 @@ def fetch_url(url: str,
     (``doh_probe=False`` opts out; NXDOMAIN → category 'dead'); a
     429/503 leg pays its Retry-After into the domain limiter; and every
     failure carries its ``category`` so the pipeline retries only what
-    time can heal."""
+    time can heal.
+
+    v0.47.0 — ``impersonate_autopip`` (the pipeline passes it from
+    config ``web_impersonate_autopip``, default ON in production): when
+    the third door is wanted but curl_cffi is missing, ONE pip install
+    runs through this interpreter and the door arms itself — the
+    "a third door exists: pip install curl_cffi" hint class becomes a
+    answered wall instead of an instruction. Default OFF at this layer
+    so direct/hermetic callers never see a subprocess."""
     started = time.monotonic()
     try:
         from urllib.parse import urlparse
@@ -1584,7 +1675,9 @@ def fetch_url(url: str,
             # the ladder found nothing — the dead verdict is final
             first.category = 'dead'
         return _final_verdict(first, '', url, proxy, rate_limiter,
-                              domain, doh_probe, (first,))
+                              domain, doh_probe, (first,),
+                              archive_fallback=archive_fallback,
+                              started=started)
     if not proxy or not direct_fallback or _is_loopback_url(url):
         # v0.45.0 — the single-door walled case still earns the third
         # door (the owner's challenge line names both routes, but a
@@ -1594,9 +1687,12 @@ def fetch_url(url: str,
         routes = [proxy] if (proxy and not direct_fallback) else [None]
         direct_reason = '' if proxy else (first.reason or '')
         walled = _maybe_impersonate(url, timeout_s, max_bytes, routes,
-                                    impersonate_fallback, first, started)
+                                    impersonate_fallback, first, started,
+                                    autopip=impersonate_autopip)
         return _final_verdict(walled, direct_reason, url, proxy,
-                              rate_limiter, domain, doh_probe, (first,))
+                              rate_limiter, domain, doh_probe, (first,),
+                              archive_fallback=archive_fallback,
+                              started=started)
 
     # v0.43.0 — the both-doors rule. The primary (proxied) route either
     # never got an answer (connection class, v0.21.0) or was REFUSED
@@ -1615,9 +1711,12 @@ def fetch_url(url: str,
     # v0.45.0 — both stdlib doors walled: ask the Chrome handshake on
     # the same two routes (one polite attempt each).
     walled = _maybe_impersonate(url, timeout_s, max_bytes, [proxy, None],
-                                impersonate_fallback, second, started)
+                                impersonate_fallback, second, started,
+                                autopip=impersonate_autopip)
     return _final_verdict(walled, direct_reason, url, proxy,
-                          rate_limiter, domain, doh_probe, (first, second))
+                          rate_limiter, domain, doh_probe, (first, second),
+                          archive_fallback=archive_fallback,
+                          started=started)
 
 
 def _fetch_once(url: str, timeout_s: float, max_bytes: int,

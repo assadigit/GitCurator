@@ -271,8 +271,16 @@ class TestRetryReviewBacklog(_BacklogCase):
         self.assertIn('fetch_status: "failed"', body)
         self.assertIn('Needs review', body)
         review_files = [n for n in os.listdir(
-            os.path.join(self.vault, '_review')) if n.endswith('.md')]
+            os.path.join(self.vault, '_review'))
+            if n.endswith('.md') and n != wp.DECOMMISSION_TABLE]
         self.assertEqual(len(review_files), 1)
+        # v0.47.0 — the refailure also leaves the MASTER TABLE behind
+        # (the owner finally gets it): the failed link waits there as a
+        # row too, with the last error in its Notes column.
+        table = wp.decommission_table_path(self.vault)
+        self.assertTrue(os.path.exists(table))
+        self.assertIn('https://example.com/stuck',
+                      open(table, encoding='utf-8').read())
         row = self.db.retry_row(canonical)
         self.assertEqual(row['attempts'], 1)
 

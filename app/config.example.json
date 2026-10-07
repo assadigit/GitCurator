@@ -63,6 +63,8 @@
   "web_user_agent": "",
   "web_archive_fallback": true,
   "web_doh_probe": true,
+  "web_impersonate_fallback": true,
+  "web_impersonate_autopip": true,
   "web_blocked_domains": [
     "x.com",
     "twitter.com",

@@ -995,7 +995,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return fh.read()
 
     def test_version_is_0460(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.46.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.47.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -1020,3 +1020,109 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# 10. v0.47.0 — the origin-down courtesy: a 52x leg (the owner's
+# "HTTP 523 — Cloudflare: the site's own server origin is unreachable"
+# line) names the Wayback Machine's last good copy in the reason; the
+# category and the spaced retry are untouched (the live page comes
+# back — the archived copy answers "what did this say?" meanwhile).
+class TestOriginDownCourtesy(unittest.TestCase):
+
+    def setUp(self):
+        self._archive = wf._archive_lookup
+        wf._DOH_CACHE.clear()
+
+    def tearDown(self):
+        wf._archive_lookup = self._archive
+        wf._DOH_CACHE.clear()
+
+    def arm_archive(self, verdict, timestamp=''):
+        calls = []
+
+        def _fake(url, proxy, timeout_s, started):
+            calls.append(url)
+            return verdict, timestamp
+
+        wf._archive_lookup = _fake
+        return calls
+
+    def _verdict(self, legs, url='https://origin.example.net/x',
+                 category='blocked_bot'):
+        result = wf.FetchResult(
+            url, status='failed',
+            reason='proxy: HTTP 403 — forbidden | direct: HTTP 523 — '
+                   'Cloudflare: the site\'s own server origin is '
+                   'unreachable (site-side, retry later — not the '
+                   'fetcher\'s fault)',
+            category=category)
+        return wf._final_verdict(result, '', url, None, None,
+                                 'origin.example.net', False, legs)
+
+    def test_52x_leg_names_the_wayback_snapshot(self):
+        snap = ('https://web.archive.org/web/20230101120000/'
+                'https://origin.example.net/x')
+        calls = self.arm_archive(snap, '20230101120000')
+        res = self._verdict((_res('HTTP 403', 403),
+                             _res('HTTP 523', 523)))
+        self.assertIn(f'wayback: an archived copy exists — {snap}',
+                      res.reason)
+        self.assertIn('(captured 20230101120000)', res.reason)
+        self.assertEqual(calls, ['https://origin.example.net/x'])
+        # the verdict class is untouched — the spaced retry continues:
+        self.assertEqual(res.category, 'blocked_bot')
+
+    def test_no_snapshot_no_suffix(self):
+        calls = self.arm_archive('no-snapshot')
+        before = ('proxy: HTTP 403 — forbidden | direct: HTTP 523 — '
+                  'Cloudflare')
+        res = self._verdict((_res('HTTP 403', 403),
+                             _res('HTTP 523', 523)))
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('wayback', res.reason)
+
+    def test_unreachable_archive_no_suffix(self):
+        self.arm_archive('unreachable')
+        res = self._verdict((_res('HTTP 403', 403),
+                             _res('HTTP 523', 523)))
+        self.assertNotIn('wayback', res.reason)
+
+    def test_archive_optout_never_probes(self):
+        calls = self.arm_archive('no-snapshot')
+        result = wf.FetchResult('https://origin.example.net/x',
+                                status='failed', reason='HTTP 523',
+                                category='retry_later')
+        wf._final_verdict(result, '', 'https://origin.example.net/x',
+                          None, None, 'origin.example.net', False,
+                          (_res('HTTP 523', 523),),
+                          archive_fallback=False)
+        self.assertEqual(calls, [])
+
+    def test_no_52x_leg_never_probes(self):
+        calls = self.arm_archive('no-snapshot')
+        res = self._verdict((_res('HTTP 403', 403),
+                             _res('HTTP 429', 429)))
+        self.assertEqual(calls, [])
+        self.assertNotIn('wayback', res.reason)
+
+    def test_loopback_never_probes(self):
+        calls = self.arm_archive('no-snapshot')
+        url = 'http://127.0.0.1:9/x'
+        result = wf.FetchResult(url, status='failed', reason='HTTP 523',
+                                category='retry_later')
+        wf._final_verdict(result, '', url, None, None, '127.0.0.1:9',
+                          False, (_res('HTTP 523', 523, url=url),))
+        self.assertEqual(calls, [])
+
+    def test_single_52x_leg_also_earns_the_courtesy(self):
+        snap = 'https://web.archive.org/web/2023/https://solo.example.org'
+        calls = self.arm_archive(snap)
+        url = 'https://solo.example.org/y'
+        result = wf.FetchResult(url, status='failed',
+                                reason='HTTP 523 — Cloudflare',
+                                category='retry_later')
+        res = wf._final_verdict(result, '', url, None, None,
+                                'solo.example.org', False,
+                                (_res('HTTP 523', 523, url=url),))
+        self.assertEqual(len(calls), 1)
+        self.assertIn(snap, res.reason)

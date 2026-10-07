@@ -384,10 +384,10 @@ class TestFetchUrlWiring(_ThirdDoorCase):
         real_maybe = wf._maybe_impersonate
 
         def spy(url, timeout_s, max_bytes, routes, enabled, walled,
-                started):
+                started, **kwargs):
             routes_probe['routes'] = routes
             return real_maybe(url, timeout_s, max_bytes, routes, enabled,
-                              walled, started)
+                              walled, started, **kwargs)
 
         wf._maybe_impersonate = spy
         self.arm_fake_session(_FakeImpResponse(status_code=200))
@@ -408,10 +408,10 @@ class TestFetchUrlWiring(_ThirdDoorCase):
         real_maybe = wf._maybe_impersonate
 
         def spy(url, timeout_s, max_bytes, routes, enabled, walled,
-                started):
+                started, **kwargs):
             routes_probe['routes'] = routes
             return real_maybe(url, timeout_s, max_bytes, routes, enabled,
-                              walled, started)
+                              walled, started, **kwargs)
 
         wf._maybe_impersonate = spy
         self.arm_fake_session(_FakeImpResponse(status_code=200),
@@ -436,7 +436,7 @@ class TestSourceContracts(unittest.TestCase):
             return f.read()
 
     def test_version_is_0450(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.46.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.47.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -460,7 +460,7 @@ class TestSourceContracts(unittest.TestCase):
 
     def test_bothdoors_pin_follows_the_release(self):
         src = self._read('app', 'tests', 'test_bothdoors.py')
-        self.assertIn("'0.46.0'", src)
+        self.assertIn("'0.47.0'", src)
 
 
 # ---------------------------------------------------------------------------

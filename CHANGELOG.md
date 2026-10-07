@@ -1,3 +1,105 @@
+## [0.47.0] — The door that ships itself, and the master table — 2026-10-08
+
+Owner ask (session): "This errors still remained, find a workaround
+for them and fix them" — a seven-line pile where FIVE lines end
+"a third door exists: pip install curl_cffi (the browser-TLS
+handshake)" ("proxy: HTTP 403 | direct: HTTP 403", "proxy: connection:
+[SSL: SSLV3_ALERT_HANDSHAKE_FAILURE]… | direct: connection: timed
+out", "proxy: connection: _ssl.c:993: The handshake operation timed
+out | direct: timed out"), one is the dead-domain line ("direct:
+[Errno 11001] getaddrinfo failed | dns: NXDOMAIN even via
+DNS-over-HTTPS — the domain itself is dead"), and one is the 523 line
+("proxy: HTTP 403 | direct: HTTP 523 — Cloudflare: the site's own
+server origin is unreachable") — plus: "I also didn't get that table
+yet which is supposed that i can decomission some links there … The
+review folder must have a master note inside it, with tables, there
+you can decomission links, mark as reviewed etc." Desktop release
+v0.47.0, Worker unchanged at **0.30.0**. Suite grows **1187 → 1244**
+(23 cases in tests/test_autopip.py, 27 in tests/test_mastertable.py,
+7 in tests/test_ladder.py — all pure stdlib at the unit level).
+
+**The diagnosis.** Those five hint lines are not five new walls — they
+are the SAME fingerprint-class walls v0.45.0 armed a door against,
+reported by a machine where the DOOR ITSELF never arrived: the owner's
+install predates curl_cffi's requirements.txt entry and no
+re-installer ever runs, so the third door sat locked behind an
+instruction. A hint the owner must act on is not a workaround. The
+dead-domain line had already earned its category 'dead' verdict (the
+ladder's DNS rung) — but its placeholder note kept the error line
+front and center and the startup notice kept counting it, because
+retired links had no LEDGER. And the 523 line is Cloudflare saying the
+SITE's own origin is down: honest, retry-later — but the owner was
+left empty-handed with no copy of what the page said.
+
+**The door that ships itself.** When a fingerprint-class wall needs the
+Chrome handshake (or a batch warms the door at startup) and curl_cffi
+is missing, ONE pip install now runs through the SAME interpreter that
+runs the app; the import probe re-arms; the wall gets ANSWERED instead
+of hinted. Once per process (a second wall never re-runs pip); offline
+or pip-less machines keep the honest hint — nothing breaks; config
+"web_impersonate_autopip": false opts out (the fetch layer's default
+is OFF so hermetic callers never see a subprocess; the pipeline passes
+it from config, default ON). The batch log tells the whole story:
+"installing curl_cffi automatically (one-time, ~a minute)…" → "third
+door ARMED — curl_cffi installed automatically".
+
+**The master table.** _review/DECOMMISSIONED.md is reborn as the
+REVIEW MASTER TABLE — the master note with tables the owner asked for:
+* refreshed after EVERY batch (run / run_due_retries /
+  retry_review_backlog) — not only from the manual picker action
+  (v0.44.0's table existed only there; a vault whose owner never
+  opened the menu never saw it — "I didn't get that table yet");
+* every WAITING failure is a row (the whole retry queue — the last
+  error lives in the Notes column — plus scanned lost-row
+  placeholders);
+* every AUTO-VERDICT retirement (the ladder's own dead / paywalled /
+  refused verdicts) is a "🪦 auto — <category>" row: visible, its
+  verdict in the Notes, revivable (♻️) if the owner disagrees — and
+  consumed by the next batch like any burial;
+* **✅ reviewed joins 🪦 dead as a retirement door** — the owner's
+  original gesture ("tick emoji as reviewed so it never fetches
+  again") is now enforced: a ✅ Status cell retires the link (dismissed
+  with the reviewed reason, retry row dropped, placeholder swept, row
+  stamped "✅ confirmed — reviewed <date>"); dead beats reviewed when a
+  hand-edited cell says both; ♻️ revived still brings either back;
+* retired links LEAVE the startup notice and the backlog count (the
+  scan takes an optional is_dismissed probe — a broken probe falls
+  back to the pure file read, never hiding a waiting link), and the
+  notice now names the table's path and its grammar.
+
+**The origin-down courtesy.** A 521-524 leg (Cloudflare: the site's
+own server is down — the owner's 523 line) now asks the Wayback
+Machine ONCE for a last-good copy; a snapshot that exists is NAMED in
+the reason ("| wayback: an archived copy exists — <snapshot-url>
+(captured <ts>)") so the owner reads it straight from the _review
+note. No note is written, no category changes, the spaced retry stays
+(the live page comes back) — the archived copy answers "what did this
+say?" meanwhile. Loopback never asks; "web_archive_fallback": false
+opts out.
+
+**The law, kept tight.** The autopip subprocess never touches the
+golden run or injected test fetchers (production-only wiring, the
+PySocks pattern); the master-table refresh is bookkeeping — tolerated
+everywhere, never a batch killer, dry-run aware through the house
+writer; the table's rows are pipe-safe and length-capped (a note can
+never break the table); 'unreviewed' NEVER reads as reviewed (it
+contains the word but says the opposite — the pre-filled default must
+stay a non-retirement); existing rows are never duplicated or
+clobbered; the golden run stays offline (the refresh runs on injected
+pipelines but writes nothing when nothing is pending).
+
+**Gates.** 23 cases in tests/test_autopip.py (the trigger law, the
+once-per-process law, the failed-install hint, fetch_url wiring on a
+real non-loopback wall, the pipeline pre-arm and its config opt-out,
+release bookkeeping), 27 in tests/test_mastertable.py (the marker law
+incl. the 'unreviewed' trap, the header grammar, the writer's notes
+and status, the ✅ consume pass, the refresh, the pipeline hooks — THE
+owner complaint closed, the backlog probe, THE FULL CIRCLE of a
+dead-domain link), 7 in tests/test_ladder.py (the origin-down
+courtesy: the snapshot named, no-snapshot and unreachable, the
+opt-out, loopback, the single-leg case, the category untouched). Full
+suite **1244/1244**, 83-module compile gate OK, offline golden 30/30.
+
 ## [0.46.0] — The ladder: every failure class gets its honest door — 2026-10-08
 
 Owner ask (session): a fresh failure pile — "Fetch failed: HTTP 307",

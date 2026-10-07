@@ -295,6 +295,41 @@ class WebsiteStateDB:
                 'next_attempt_at': row[3], 'first_failed_at': row[4],
                 'last_failed_at': row[5]}
 
+    def all_retry_rows(self) -> List[Dict]:
+        """v0.47.0 — EVERY waiting retry-queue row (not only the due
+        ones): the master table's waiting section is the whole queue —
+        attempts spent, last error, and the whole backoff story — so the
+        owner sees the full picture, not just what a batch would touch
+        today. Oldest first (the longest-suffering link leads)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT url, attempts, last_error, next_attempt_at,"
+                " first_failed_at, last_failed_at FROM"
+                " website_retry_queue ORDER BY first_failed_at").fetchall()
+        return [{'url': r[0], 'attempts': r[1], 'last_error': r[2],
+                 'next_attempt_at': r[3], 'first_failed_at': r[4],
+                 'last_failed_at': r[5]} for r in rows]
+
+    def dismissed_rows(self, reason_prefix: str = '') -> List[Dict]:
+        """v0.47.0 — the dismissals whose reason starts with
+        ``reason_prefix`` (the pipeline asks for the 'auto-verdict:'
+        class — links the fetcher's own ladder retired: dead /
+        paywalled / refused). The master table lists them so the owner
+        can see every retirement in one ledger and ♻️-revive any he
+        disagrees with. Oldest first."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT url, reason, dismissed_at FROM dismissed_urls"
+                " ORDER BY dismissed_at").fetchall()
+        out: List[Dict] = []
+        for url, reason, at in rows:
+            if reason_prefix \
+                    and not str(reason or '').startswith(reason_prefix):
+                continue
+            out.append({'url': url, 'reason': reason or '',
+                        'dismissed_at': at})
+        return out
+
     def due_retries(self, now: Optional[datetime] = None) -> List[str]:
         """Retry-queue URLs whose backoff has elapsed (attempts < cap)."""
         now = now or datetime.now()

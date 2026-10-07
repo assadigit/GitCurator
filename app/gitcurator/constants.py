@@ -173,6 +173,15 @@ CONFIG_EXAMPLE = {
     # resolver vs. a dead domain).
     "web_archive_fallback": True,
     "web_doh_probe": True,
+    # v0.45.0/v0.47.0 — THE THIRD DOOR and its self-install (both
+    # default ON): "web_impersonate_fallback": false never re-asks a
+    # walled URL through curl_cffi's Chrome handshake;
+    # "web_impersonate_autopip": false keeps the door hint-only when
+    # the library is missing (with it ON — the default — the first
+    # batch that needs the door installs curl_cffi through this
+    # interpreter, once per process, offline-safe).
+    "web_impersonate_fallback": True,
+    "web_impersonate_autopip": True,
     "ollama": {
         "base_url": "http://localhost:11434",
         "model": "qwythos-9b"

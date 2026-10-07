@@ -147,6 +147,29 @@ class ProcessingControlMixin:
 
     # -- v0.42.0: the _review backlog notice + retry ------------------------
 
+    def _scan_backlog_alive(self, vault: str):
+        """v0.47.0 — the backlog scan minus the RETIRED links: a URL the
+        fetcher's own auto-verdict retired (dead / paywalled / refused)
+        is not a waiting wall — its placeholder is the record and the
+        MASTER TABLE is its ledger. Opens the state DB with the same
+        dry-run-shadow law the decommission enforcement uses; on any
+        failure falls back to the pure file read (a broken probe never
+        hides a waiting link from the owner)."""
+        try:
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                return _website_pipeline.scan_review_backlog(
+                    vault, is_dismissed=state.is_dismissed)
+            finally:
+                state.close()
+        except Exception:
+            return _website_pipeline.scan_review_backlog(vault)
+
     def _startup_review_backlog_check(self):
         """v0.42.0 — the startup notice (the owner's ask): scan the Websites
         vault's _review folder; app-owned fetch-failed placeholders are the
@@ -160,7 +183,14 @@ class ProcessingControlMixin:
         404s, lost pages, abandoned domains), so the notice also offers
         "🪦 Decommission dead…" (the graveyard table procedure). URLs
         already marked dead never reach this notice — the scan filters
-        them out."""
+        them out.
+
+        v0.47.0 — links RETIRED by the fetcher's own auto-verdict (dead /
+        paywalled / refused) leave the notice too (their placeholder is
+        the record, not a waiting wall — the MASTER TABLE is their
+        ledger), and the notice now names the table itself:
+        ``<vault>/_review/DECOMMISSIONED.md`` — the master note with
+        tables the owner asked for, refreshed after every batch."""
         try:
             if getattr(self, '_batch_running', False):
                 return
@@ -170,25 +200,29 @@ class ProcessingControlMixin:
             vault = (cfg.get('website_vault_path') or '').strip()
             if not vault or not os.path.isdir(vault):
                 return
-            items = _website_pipeline.scan_review_backlog(vault)
+            items = self._scan_backlog_alive(vault)
             if not items:
                 return
             urls = sorted({i['url'] for i in items})
+            table = _website_pipeline.decommission_table_path(vault)
             self.log_message(
                 f"📥 {len(items)} _review placeholder(s) waiting "
-                f"({len(urls)} link(s) — fetch failures: the 403/405 "
-                f"wall pile from before v0.41.0)", "info")
+                f"({len(urls)} link(s) — fetch failures; the master table "
+                f"at _review/{_website_pipeline.DECOMMISSION_TABLE} lists "
+                f"every waiting and retired link)", "info")
             choice = self._show_backlog_notice(
                 "Links waiting in _review",
                 f"{len(urls)} link(s) lie in _review — their fetches were "
-                f"refused (mostly 403/405 bot-defense walls) under the "
-                f"old User-Agent.\n\n"
-                f"v0.41.0 presents as a real browser. Retry them now?\n\n"
-                f"Each link is fetched, analyzed and stored properly; "
-                f"anything still walled keeps waiting in _review.\n\n"
+                f"refused (mostly 403/405 bot-defense walls).\n\n"
+                f"Retry them now? Each link is fetched, analyzed and "
+                f"stored properly; anything still walled keeps waiting.\n\n"
+                f"The MASTER TABLE lists every one of them:\n"
+                f"{table}\n"
+                f"Set a row's Status to ✅ reviewed or 🪦 dead there and "
+                f"it is never fetched again (♻️ revived brings it "
+                f"back).\n\n"
                 f"Some genuinely dead (404 / lost / abandoned)? Choose "
-                f"🪦 Decommission dead — the graveyard table buries them "
-                f"so they are never fetched again."
+                f"🪦 Decommission dead — the picker buries them now."
             )
             if choice == 'retry':
                 self._start_review_retry()
@@ -282,7 +316,7 @@ class ProcessingControlMixin:
                 "Set the Websites vault first (Settings → 📁 Vault).",
                 success=False)
             return
-        items = _website_pipeline.scan_review_backlog(vault)
+        items = self._scan_backlog_alive(vault)
         if not items:
             self._show_custom_message_box(
                 "_review backlog is empty",
@@ -326,7 +360,7 @@ class ProcessingControlMixin:
                 "Set the Websites vault first (Settings → 📁 Vault).",
                 success=False)
             return
-        items = _website_pipeline.scan_review_backlog(vault)
+        items = self._scan_backlog_alive(vault)
         table = _website_pipeline.decommission_table_path(vault)
         if not items:
             self._show_custom_message_box(
@@ -384,7 +418,7 @@ class ProcessingControlMixin:
                 f"{e}", "warning")
         buried = (report or {}).get('dead', 0)
         swept = (report or {}).get('placeholders_swept', 0)
-        remaining = len(_website_pipeline.scan_review_backlog(vault))
+        remaining = len(self._scan_backlog_alive(vault))
         self.log_message(
             f"🪦 Graveyard: {buried} link(s) decommissioned"
             + (f", {swept} placeholder(s) swept" if swept else "")
