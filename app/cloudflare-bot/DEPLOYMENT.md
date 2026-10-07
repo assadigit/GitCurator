@@ -5,6 +5,42 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.52.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-09** (worker version ID
+> `9639f0fb-b5c4-4640-a801-ce14d78cdda5`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.52.0 is a DESKTOP-ONLY release (the icon column speaks; the hand
+> is Chrome's own: the master table's verdict emojis are read from the
+> # cell OR the Status cell — a four-column table with 🖐/💀 in the
+> first cell is no longer invisible — and a 🖐/✋ hand row is now
+> scraped by the app itself in the owner's real Chrome, automatically
+> at end-of-run and in the caught-up sync, no Ctrl+S demanded);
+> the Worker's code is unchanged since v0.30.0 (it never touches the
+> vault), so the deploy is the release ritual's health-and-parity
+> check, not a code change.
+>
+> **Deploy ritual** (~2 minutes): `wrangler whoami` → the owner's
+> account resolved with the `CLOUDFLARE_API_TOKEN` secret ✓ →
+> `npx wrangler deploy` → version `9639f0fb…`, both queue consumers +
+> producers attached (curator-ingest, curator-ingest-dlq), D1 (DB:
+> curator-bot) and KV (CACHE: 4a0ad411…) bindings carried over
+> untouched. The 0.30.0 worker suite (node --test, 50/50) was green
+> on this tree at the v0.48/v0.51 deploys — the code is byte-identical
+> (nothing under `src/` changed since).
+>
+> **Verified live after the deploy**: `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0",...}`
+> ✓ · root → `200` ✓ · both queue consumers attached ✓ · secrets
+> persisted (BOT_TOKEN, GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET —
+> a deploy never touches them) ✓. Desktop release v0.52.0
+> (GitCurator-v0.52.0-windows.zip, 129 files, 1,018,394 bytes, sha256
+> `e320f4d0…c5624a9e`, download round-trip byte-identical) + CI green
+> on main AND the v0.52.0 tag (runs 37682137978 / 37682137742 —
+> 1437 tests, 85-module compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.51.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-09** (worker version ID
