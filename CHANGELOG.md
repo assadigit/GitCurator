@@ -1,3 +1,87 @@
+## [0.54.0] — The door keeps its grip; the profile remembers — 2026-10-08
+
+Owner ask (session): "this time the links which I defined by 'hand'
+emoji opened their tabs in a new google chrome session, but app
+didn't actually wait and use those tabs to gather information to
+feed LLM and store them properly and obsidian, as soon as they
+loaded, app false-positive success, but actually openning was not
+the success criteria, openning is just start for LLM to fetch and
+gather data and write their information and store into obsidian.
+also use chrominum and selenium or some headless browser, so sites
+cannto see you as bot." Desktop release v0.54.0, Worker unchanged at
+**0.30.0** (it never touches the vault). Suite grows **1468 → 1512**
+(44 cases join tests/test_persistentdoor.py — pure stdlib at the
+unit level, a loopback /json/version server stands in for the
+DevTools endpoint, no browser ever launches under test).
+
+**The diagnosis — three tells, all in the owner's own screenshots.**
+(1) The Batch Complete scorecard fired "✓ All links processed
+cleanly · 0 saved" WHILE the hand links' tabs were still loading in
+Chrome (his screenshot shows them behind the celebrating modal) —
+opening a tab was being counted as the success, when the success is
+the NOTE IN THE VAULT: OPENING IS NOT THE SUCCESS. (2) The failure modal then named "[WinError
+10053] connection aborted" and "the Chrome session died mid-run" for
+tabs that were STILL OPEN AND LOADED (his other screenshot shows
+oldmapsonline fully rendered behind the failure modal) — the DevTools
+connection was fragile, not the tabs. (3) The throwaway
+``--user-data-dir`` made every delivery a FIRST-VISIT identity: no
+cookies, no history, no clearances — the exact bot signature the
+walls key on (his flightradar24 tab sat on the challenge).
+
+**The fix — the scorecard waits.** ``processing_finished`` now HOLDS
+the Batch Complete scorecard back while a Chrome delivery is
+gathering pages (``_chrome_delivery_pending``): a log line says so
+("the scorecard waits — N link(s) are being gathered…"), the modal
+only appears when the delivery (and, for delivered pages, their
+re-run through the full LLM → note → vault pipeline) finishes —
+flushed by ``_flush_stashed_batch_summary`` with the delivery's own
+numbers riding in: a "Chrome pages: N taken · M not taken (they keep
+waiting)" row, a "⏳ N gathering" row while in flight (no party
+emoji, no success chime — the chime agrees with the scorecard), and
+the clean "✓ All links processed cleanly" is only ever said when
+nothing failed AND nothing is still gathering. A delivered pages'
+re-run MERGES into the stashed scorecard (one scorecard tells the
+whole story: batch + Chrome pages + stored notes); a stale stash
+(its chain died) is dropped with an honest line, never shown stale.
+
+**The fix — the door keeps its grip.** A DevTools WebSocket that
+drops mid-watch (WinError 10053 — an aborted local connection; a
+reset; Chrome recycling the connection) is a BLIP, not a verdict:
+``_fetch_opened_tab`` re-connects (two re-connects per tab) and the
+load watch RESUMES with the remaining budget (a wall-clock deadline,
+not a per-connection one). A tab that is really GONE refuses its own
+WebSocket on the re-connect — that, and only that, is "the tab closed
+itself". Session liveness is the ENDPOINT's answer
+(``GET /json/version``), never the launcher process's poll alone —
+on Windows chrome.exe delegates to the browser process and exits
+with the endpoint perfectly live, which the old ``alive()`` read as
+"the Chrome session died mid-run" while the owner's tabs kept
+loading.
+
+**The fix — the profile remembers.** The owner asked for
+"chromium and selenium or some headless browser so sites cannot see
+you as bot" — headless and Selenium would be MORE visible, not less
+(headless Chrome's fingerprints, chromedriver's
+``navigator.webdriver``); the app already drives the owner's REAL
+Chrome. The fix is the IDENTITY: the fifth door now owns a
+persistent dedicated profile (``<app>/chrome-profile`` — a second
+Chrome identity, the owner's own running window and profile still
+never touched) whose cookies SURVIVE every delivery: the graceful
+``Browser.close`` (over the browser's own WebSocket) lets Chrome
+flush its cookie store, a Windows zombie is tree-killed
+(``taskkill /T`` — a plain terminate() kills only the launcher and
+leaves the browser holding the profile), a Chrome left running by a
+crashed app is ADOPTED through its ``DevToolsActivePort`` file
+(never fought, never duplicated), the automation blink feature is
+disabled (``--disable-blink-features=AutomationControlled``) and
+``navigator.webdriver`` is patched undefined on every new document
+(the one tell Selenium can never remove). A challenge the owner's
+real Chrome passes once leaves its clearance cookie behind for the
+next run — a RETURNING visitor is the strongest anti-bot signal
+there is. Two config knobs: ``web_browser_profile_persist`` (default
+ON — the law) and ``web_browser_profile_dir`` (override; default
+next to cache.db).
+
 ## [0.53.0] — The door waits for the page; a crash is never a delivery — 2026-10-10
 
 Owner ask (session): "The problem is that it tried to open a chrome

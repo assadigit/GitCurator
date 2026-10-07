@@ -353,10 +353,10 @@ class TestSourceContracts(unittest.TestCase):
         # again).
         with open(os.path.join(_REPO_ROOT, '..', 'VERSION'),
                   encoding='utf-8') as fh:
-            self.assertEqual(fh.read().strip(), '0.53.0')
+            self.assertEqual(fh.read().strip(), '0.54.0')
         with open(os.path.join(_REPO_ROOT, '..', 'CHANGELOG.md'),
                   encoding='utf-8', errors='replace') as fh:
-            head = fh.read(64000)
+            head = fh.read(72000)
         self.assertIn('[0.47.0]', head)
         self.assertIn('[0.46.0]', head)
         self.assertIn('[0.45.0]', head)

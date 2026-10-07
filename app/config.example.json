@@ -69,6 +69,8 @@
   "web_browser_retry": true,
   "web_browser_retry_timeout_s": 45,
   "web_browser_retry_wave": 8,
+  "web_browser_profile_persist": true,
+  "web_browser_profile_dir": "",
   "web_blocked_domains": [
     "x.com",
     "twitter.com",

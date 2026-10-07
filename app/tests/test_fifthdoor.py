@@ -552,7 +552,12 @@ class TestLoadWatch(unittest.TestCase):
         ws = ct.CDPSocket('127.0.0.1', 9222, '/devtools/page/T1',
                           sock=sock)
         session, tab = self._session()
+        # v0.54 — the anti-bot document patch is off for these scripts
+        # (its Page.enable/addScript acks would shift every id; the
+        # patch's own laws live in tests/test_persistentdoor.py)
         with mock.patch.object(ct, 'PAGE_SETTLE_S', settle), \
+                mock.patch.object(ct, '_ANTI_BOT_PATCH', False), \
+                mock.patch.object(ct, '_RECONNECT_PAUSE_S', 0.01), \
                 mock.patch.object(ct, 'CDPSocket', return_value=ws):
             page = ct._fetch_opened_tab(session, _URL, tab, timeout,
                                         lambda *a, **k: None)
@@ -785,7 +790,8 @@ class TestChromeSession(unittest.TestCase):
             ['DevTools listening on ws://127.0.0.1:59999/devtools/'
              'browser/abc-123'])
         logs = []
-        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m))
+        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m),
+                                   persist=False)
         try:
             self.assertEqual(session.port, 59999)
             self.assertTrue(session.alive())
@@ -800,14 +806,15 @@ class TestChromeSession(unittest.TestCase):
     def test_dead_exe_raises_honestly(self):
         exe = self._fake_exe([], then='exit 0')
         with self.assertRaises(ct.CDPError):
-            session = ct.ChromeSession(exe, log=lambda *a: None)
+            session = ct.ChromeSession(exe, log=lambda *a: None,
+                                       persist=False)
             session.close()
 
     def test_silent_exe_raises_honestly(self):
         exe = self._fake_exe(['nothing useful'], then='exit 1')
         with self.assertRaises(ct.CDPError):
             session = ct.ChromeSession(
-                exe, log=lambda *a: None)
+                exe, log=lambda *a: None, persist=False)
             session.close()
         # the session that failed to start still cleaned its profile
         leftovers = [d for d in os.listdir(tempfile.gettempdir())
@@ -824,7 +831,8 @@ class TestChromeSession(unittest.TestCase):
         exe = self._fake_exe(
             ['DevTools listening on ws://127.0.0.1:59998/devtools/'
              'browser/tier-2'], require='--no-sandbox')
-        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m))
+        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m),
+                                   persist=False)
         try:
             self.assertEqual(session.port, 59998)
             joined = '\n'.join(logs)
@@ -841,7 +849,8 @@ class TestChromeSession(unittest.TestCase):
         exe = self._fake_exe(
             ['DevTools listening on ws://127.0.0.1:59997/devtools/'
              'browser/tier-3'], require='--headless=new')
-        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m))
+        session = ct.ChromeSession(exe, log=lambda m, l: logs.append(m),
+                                   persist=False)
         try:
             self.assertEqual(session.port, 59997)
             joined = '\n'.join(logs)
@@ -1347,7 +1356,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0500(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.53.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.54.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

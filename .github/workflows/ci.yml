@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1468-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1512-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -11,7 +11,36 @@
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
-# 30 masterretry).
+# 30 masterretry + 44 persistentdoor).
+# v0.54.0 — THE DOOR KEEPS ITS GRIP; THE PROFILE REMEMBERS: the
+# owner's report — "the links which I defined by 'hand' emoji opened
+# their tabs in a new google chrome session, but app didn't actually
+# wait and use those tabs to gather information to feed LLM and
+# store them properly in obsidian, as soon as they loaded, app
+# false-positive success … also use chrominum and selenium or some
+# headless browser, so sites cannto see you as bot" — three tells in
+# his own screenshots: (1) the Batch Complete scorecard said "✓ All
+# links processed cleanly · 0 saved" while the hand tabs were still
+# loading (opening is not the success — the note in the vault is);
+# now the scorecard WAITS while Chrome gathers (stashed, a log line
+# says so) and the one that finally shows carries the delivery's own
+# numbers ("Chrome pages: N taken · M not taken"), the delivered
+# pages' re-run MERGES into it, and the clean verdict is only said
+# when nothing failed AND nothing is gathering. (2) WinError 10053
+# and "the Chrome session died mid-run" named tabs that were STILL
+# OPEN AND LOADED — a DevTools socket that drops mid-watch is now a
+# BLIP (re-connect, the watch resumes with the remaining wall-clock
+# budget) and liveness is the /json/version endpoint's answer, never
+# the launcher's poll (the Windows chrome.exe handoff). (3) The
+# throwaway profile was the bot tell: the door now owns a persistent
+# dedicated profile (<app>/chrome-profile — cookies survive the
+# graceful Browser.close, a Windows zombie is tree-killed, a crashed
+# app's leftover Chrome is ADOPTED via DevToolsActivePort), the
+# automation blink feature is off and navigator.webdriver is patched
+# undefined — a challenge passed once leaves its clearance cookie
+# for the next run (a returning visitor, the strongest anti-bot
+# signal there is; headless/Selenium would be MORE visible, not
+# less). 44 cases join in tests/test_persistentdoor.py (1512).
 # v0.53.0 — THE DOOR WAITS FOR THE PAGE; A CRASH IS NEVER A
 # DELIVERY: the owner's report — "it tried to open a chrome tabs, but
 # crashed and closed, and app shown false positive of success, in
@@ -406,7 +435,7 @@ jobs:
           gitcurator/core/netctx.py
 
       - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn -v
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -417,4 +446,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1468 tests + worker 50 + offline golden run (v0.53.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1512 tests + worker 50 + offline golden run (v0.54.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
