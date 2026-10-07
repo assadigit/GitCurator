@@ -38,6 +38,26 @@ First time here instead? Follow the from-scratch guide below.
 
 ---
 
+## 📦 v0.48.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-09** (worker version ID
+> `aba752b4-a7a2-4947-abe5-507efb4c25f9`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.48.0 is a DESKTOP-ONLY release (the fourth door: walled links
+> can be opened in the owner's REAL Chrome and the saved pages are
+> consumed as real fetches by the next batch — the strictest bot
+> defenses answer exactly what the three machine doors are not: a
+> real Chrome driven by the owner's own hand); the Worker's code is
+> unchanged since v0.30.0 (it never fetches websites), so the deploy
+> is the release ritual's health-and-parity re-verification: schema
+> re-applied idempotently (10 tables, no writes), health `ok` with
+> version 0.30.0, root 200, both queue consumers attached
+> (curator-ingest + curator-ingest-dlq), secrets persisted. The
+> deploy ran from the v0.48.0 release tree (`0fba81c`) right after
+> the push and BEFORE the desktop tag's zip went out.
+
+---
+
 ## 📦 v0.40.0 deploy record — the 0.30.0 worker, cutover retired (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-06** (worker version ID
