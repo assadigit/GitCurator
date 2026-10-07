@@ -1,10 +1,69 @@
 #!/usr/bin/env python3
 """
-chrome_tabs.py — v0.53.0, THE FIFTH DOOR: Chrome fetches the pages itself.
+chrome_tabs.py — v0.54.0, THE FIFTH DOOR: Chrome fetches the pages itself.
 
-The owner's report (this session): "it tried to open a chrome tabs,
-but crashed and closed, and app shown false positive of success, in
-other words it didn't wait for sites to load and gather their data."
+The owner's report (this session): "this time the links which I defined
+by 'hand' emoji opened their tabs in a new google chrome session, but
+app didn't actually wait and use those tabs to gather information to
+feed LLM and store them properly and obsidian, as soon as they loaded,
+app false-positive success, but actually openning was not the success
+criteria, openning is just start for LLM to fetch and gather data and
+write their information and store into obsidian. also use chrominum
+and selenium or some headless browser, so sites cannto see you as
+bot."
+
+The diagnosis — THREE separate tells, all in the owner's own evidence:
+
+    1. THE BATCH SCORECARD FIRED EARLY — "Batch Complete! ✓ All links
+       processed cleanly, 0 saved" while the hand links' tabs were
+       still loading in the fresh Chrome session (the owner's
+       screenshot: the tabs visible behind the celebrating modal).
+       OPENING A TAB IS NOT THE SUCCESS — the success is the NOTE IN
+       THE VAULT. The GUI (processing_control) now HOLDS the scorecard
+       back while pages are being gathered and celebrates only the
+       full story (the delivered pages re-processed as real fetches:
+       LLM → note → vault) — the v0.54 scorecard-waits law.
+    2. THE DEVTOOLS GRIP WAS FRAGILE — the owner's failure modal named
+       "[WinError 10053] connection aborted" and "the Chrome session
+       died mid-run" for tabs that were STILL OPEN AND LOADED (his
+       screenshot shows oldmapsonline fully rendered behind the
+       failure modal). A DevTools WebSocket that drops mid-watch (an
+       aborted local connection, Chrome recycling the socket) is a
+       BLIP, not a verdict; and a session whose LAUNCHER process
+       exited (Windows chrome.exe delegates to the browser process
+       and exits) is not a dead session while the endpoint still
+       answers. v0.54: the socket RECONNECTS (two re-connects per
+       tab, the watch resumes with the remaining budget), and
+       liveness is the ENDPOINT's answer (``/json/version``), never
+       the launcher's poll alone.
+    3. THE THROWAWAY PROFILE WAS THE BOT TELL — a brand-new
+       ``--user-data-dir`` every delivery is a visitor with no
+       cookies, no history, no clearances: exactly the signature the
+       bot walls key on (the owner's flightradar24 tab sat on the
+       challenge). The owner asked for "chromium and selenium or some
+       headless browser so sites cannot see you as bot" — headless
+       and Selenium would be MORE visible, not less (headless
+       Chrome's fingerprints, chromedriver's ``navigator.webdriver``);
+       the app already drives the owner's REAL Chrome — the fix is
+       the IDENTITY: a persistent dedicated profile (``<app>/
+       chrome-profile``) whose cookies survive every delivery — a
+       challenge the owner's Chrome passes once leaves its clearance
+       cookie behind for the next run; the automation blink feature
+       is disabled (``--disable-blink-features=AutomationControlled``)
+       and ``navigator.webdriver`` is patched undefined on every new
+       document (the one tell Selenium can never remove, removed
+       here). The owner's own running window and profile are STILL
+       never touched — the dedicated profile is a second, separate
+       Chrome identity the app owns; a session left running by a
+       crashed app is ADOPTED (its DevToolsActivePort answers), not
+       fought.
+
+The v0.53 law — the door WAITS for the page, and a crash is never a
+delivery (kept, unchanged):
+
+The owner's report (the previous session): "it tried to open a chrome
+tabs, but crashed and closed, and app shown false positive of success,
+in other words it didn't wait for sites to load and gather their data."
 
 The diagnosis. The v0.50 take step judged a tab with two weak tests:
 ``document.readyState == 'complete'`` and an outerHTML longer than
@@ -167,21 +226,41 @@ CONFIG_GATE = 'web_browser_retry'
 DEFAULT_PAGE_TIMEOUT_S = 45.0
 DEFAULT_WAVE = 8
 
+#: v0.54.0 — the persistent dedicated profile (the anti-bot identity).
+#: ON by default: the door's Chrome session uses ONE dedicated profile
+#: directory (``<app>/chrome-profile``) whose cookies survive every
+#: delivery — the sites see a RETURNING visitor, and a challenge the
+#: owner's real Chrome passed once leaves its clearance cookie for the
+#: next run (the throwaway profile was a first-visit bot signature:
+#: no cookies, no history, a fresh Cloudflare challenge every time).
+#: The owner's own running window and default profile are still never
+#: touched — this is a second Chrome identity the app owns.
+CONFIG_PROFILE_PERSIST = 'web_browser_profile_persist'
+
+#: v0.54.0 — where the dedicated profile lives (optional override;
+#: empty = the default ``<app>/chrome-profile`` next to cache.db).
+CONFIG_PROFILE_DIR = 'web_browser_profile_dir'
+
 #: How long to wait for Chrome to print its DevTools endpoint (stderr).
 CHROME_STARTUP_TIMEOUT_S = 25.0
 
 #: One DevTools message may never exceed this (a runaway page guard).
 MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 
-#: Chrome flags for the throwaway session: a fresh profile that never
-#: fights the owner's running window, first-run noise off, and the
-#: background-throttling off so occluded tabs still load at full speed.
+#: Chrome flags for the door's session: the dedicated profile that
+#: never fights the owner's running window, first-run noise off, the
+#: background-throttling off so occluded tabs still load at full speed,
+#: and (v0.54.0) the automation blink feature DISABLED — the one
+#: renderer hint a DevTools-driven Chrome still carries
+#: (``navigator.webdriver`` stays false without chromedriver, but the
+#: blink feature leaks the automation in the fingerprint; off it goes).
 _CHROME_FLAGS = (
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     '--disable-background-timer-throttling',
+    '--disable-blink-features=AutomationControlled',
 )
 
 #: The stderr line Chrome prints when the DevTools endpoint is live:
@@ -200,6 +279,35 @@ PAGE_SETTLE_S = 2.0
 
 #: The load-watch poll cadence (seconds) — also the settle's tick.
 _POLL_CADENCE_S = 0.4
+
+#: v0.54.0 — the anti-bot document patch, applied to every tab the
+#: door connects to (``Page.enable`` + ``Page.addScriptToEvaluateOnNew
+#: Document``): ``navigator.webdriver`` is patched undefined on every
+#: new document — the one tell chromedriver can never remove (the
+#: owner's Selenium instinct was right, the tell is real — it just
+#: isn't set by DevTools; patched anyway, belt and braces: a page that
+#: re-navigates after a challenge carries the patched navigator into
+#: the content document). A module law, not a config knob; patchable
+#: in tests so the scripted-socket scripts stay honest.
+_ANTI_BOT_PATCH = True
+
+#: The patch source itself — pure JavaScript, best-effort (a page that
+#: refuses it is still fetched; the verdict, not the patch, is the law).
+_ANTI_BOT_SCRIPT = (
+    "Object.defineProperty(navigator, 'webdriver', "
+    "{get: function () { return undefined; }});"
+)
+
+#: v0.54.0 — how many times a dropped DevTools socket is re-connected
+#: per tab before the failure is named. A socket that drops mid-watch
+#: (WinError 10053 — an aborted local connection; a reset; Chrome
+#: recycling the DevTools connection) is a BLIP, not a verdict: the tab
+#: is still open, the watch resumes with the remaining budget.
+_SOCKET_RECONNECTS = 2
+
+#: v0.54.0 — the pause before a re-connect attempt (the endpoint needs
+#: a beat to recycle the socket).
+_RECONNECT_PAUSE_S = 0.5
 
 #: v0.53.0 — Chrome's own error pages carry an ERR_* code in the DOM
 #: (locale-independent: the code, not the prose, is printed for every
@@ -489,7 +597,7 @@ class CDPSocket:
 
 
 # ---------------------------------------------------------------------------
-# The Chrome process (the owner's own binary, a throwaway session)
+# The Chrome process (the owner's own binary, the door's own identity)
 # ---------------------------------------------------------------------------
 
 
@@ -511,6 +619,37 @@ def _pick_free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def default_profile_dir() -> str:
+    """v0.54.0 — where the door's dedicated Chrome identity lives:
+    ``<APP_DIR>/chrome-profile`` (the app's own folder, next to
+    cache.db — the profile travels with the app, the cookies persist
+    between deliveries, and the owner's own profile is never touched).
+    Pure-stdlib import; any failure falls back next to this module."""
+    try:
+        from gitcurator.constants import APP_DIR
+        return os.path.join(APP_DIR, 'chrome-profile')
+    except Exception:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'chrome-profile')
+
+
+def _apply_anti_bot(ws: 'CDPSocket') -> None:
+    """v0.54.0 — the de-automation patch on one tab's socket:
+    ``Page.enable`` + ``Page.addScriptToEvaluateOnNewDocument`` with
+    the ``navigator.webdriver`` erasure. Best-effort by law (a page
+    that refuses the patch is still fetched — the verdict, not the
+    patch, is the door's law); skipped when ``_ANTI_BOT_PATCH`` is
+    off (the scripted-socket tests keep their honest scripts)."""
+    if not _ANTI_BOT_PATCH:
+        return
+    try:
+        ws.call('Page.enable', timeout=5.0)
+        ws.call('Page.addScriptToEvaluateOnNewDocument',
+                {'source': _ANTI_BOT_SCRIPT}, timeout=5.0)
+    except CDPError:
+        pass  # a page that refuses the patch is still a fetchable page
+
+
 #: The container/hardened-OS fallback: a Chromium that cannot use its
 #: SUID sandbox (containers, some hardened Linux boxes) exits before
 #: the DevTools endpoint — the session relaunches ONCE with these.
@@ -527,6 +666,26 @@ _CONTAINER_FLAGS = (
 _HEADLESS_FLAGS = ('--headless=new',)
 
 
+def _probe_version_endpoint(port: int, timeout: float = 3.0) -> bool:
+    """v0.54.0 — the one honest liveness test: does the DevTools HTTP
+    endpoint on ``port`` answer ``GET /json/version`` with 200? A
+    port file can be stale, a launcher process can exit after
+    handing off (Windows chrome.exe delegates) — an ANSWER cannot
+    lie. Pure stdlib, loopback only."""
+    try:
+        conn = http.client.HTTPConnection('127.0.0.1', int(port),
+                                          timeout=timeout)
+        try:
+            conn.request('GET', '/json/version')
+            resp = conn.getresponse()
+            resp.read()
+            return resp.status == 200
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
 class ChromeSession:
     """The owner's real Chrome as a fetch engine: launched with a
     throwaway ``--user-data-dir`` (a FRESH session of the owner's own
@@ -537,10 +696,24 @@ class ChromeSession:
     the container flags (no SUID sandbox), then headless (a machine
     with no display at all). ``exe`` may be injected (tests pass a
     script that prints the endpoint line). Termination is the
-    caller's ``close()``."""
+    caller's ``close()``.
+
+    v0.54.0 — the door's own IDENTITY: by default (``persist=True``)
+    the session uses a PERSISTENT dedicated profile directory (the
+    caller's ``profile_dir``, or ``<app>/chrome-profile``) whose
+    cookies survive every delivery — the anti-bot law (a returning
+    visitor, a challenge passed once stays passed). A Chrome still
+    running with that profile (a crashed app's leftover, or a
+    still-loading previous delivery) is ADOPTED through its
+    ``DevToolsActivePort`` file — never fought, never duplicated;
+    the owner's own running window and profile are untouched either
+    way. ``persist=False`` is the old throwaway law (a temp profile,
+    erased on close) — the explicit opt-out. """
 
     def __init__(self, exe: str, log: Optional[Callable] = None,
-                 page_timeout_s: float = DEFAULT_PAGE_TIMEOUT_S):
+                 page_timeout_s: float = DEFAULT_PAGE_TIMEOUT_S,
+                 profile_dir: Optional[str] = None,
+                 persist: bool = True):
         log = log or (lambda *a, **k: None)
         self._log = log
         self._page_timeout_s = float(page_timeout_s)
@@ -548,6 +721,26 @@ class ChromeSession:
         self._stderr_thread: Optional[threading.Thread] = None
         self.profile = ''
         self.port = 0
+        self._browser_ws_path = ''      # for the graceful Browser.close
+        self._profile_is_throwaway = not bool(persist)
+        if persist:
+            self.profile = os.path.abspath(
+                (profile_dir or '').strip() or default_profile_dir())
+            try:
+                os.makedirs(self.profile, exist_ok=True)
+            except Exception as e:
+                log(f"🤖 The dedicated Chrome profile could not be created "
+                    f"({e}) — falling back to a throwaway session (the "
+                    f"cookies will not persist this time)", "warning")
+                self.profile = ''
+                self._profile_is_throwaway = True
+            else:
+                if self._try_adopt():
+                    log(f"🤖 Adopted the still-running Chrome session of "
+                        f"the dedicated profile (its cookies stay warm; "
+                        f"DevTools on 127.0.0.1:{self.port}) — no new "
+                        f"window was opened", "info")
+                    return
         attempts = (list(_CHROME_FLAGS),
                     list(_CHROME_FLAGS) + list(_CONTAINER_FLAGS),
                     list(_CHROME_FLAGS) + list(_CONTAINER_FLAGS)
@@ -559,7 +752,7 @@ class ChromeSession:
                 break
             except CDPError as e:
                 last_err = e
-                self.close()   # this attempt's process + profile, gone
+                self.close()   # this attempt's process + throwaway profile
                 if attempt == 0:
                     log("🤖 Chrome died before its DevTools endpoint — "
                         "retrying with the container flags "
@@ -576,18 +769,72 @@ class ChromeSession:
             raise last_err or CDPError(
                 'Chrome never announced its DevTools endpoint')
         self._drain_stderr()
-        log(f"🤖 Chrome session live (your own Chrome, a fresh throwaway "
-            f"profile — your running window is untouched; DevTools on "
-            f"127.0.0.1:{self.port})", "info")
+        if self._profile_is_throwaway:
+            log(f"🤖 Chrome session live (your own Chrome, a fresh "
+                f"throwaway profile — your running window is untouched; "
+                f"DevTools on 127.0.0.1:{self.port})", "info")
+        else:
+            log(f"🤖 Chrome session live (your own Chrome, the door's "
+                f"DEDICATED profile — a returning visitor the sites "
+                f"remember, your own window and profile untouched; "
+                f"DevTools on 127.0.0.1:{self.port})", "info")
+
+    # -- v0.54.0 — the adoption: a Chrome already holding the profile --
+
+    def _try_adopt(self) -> bool:
+        """A Chrome still running with the dedicated profile is the
+        door's own leftover (a crashed app, a still-loading delivery) —
+        Chrome writes ``DevToolsActivePort`` into the user-data-dir the
+        moment its endpoint is live (first line: the port; second: the
+        browser WebSocket path). Adoption succeeds only when the port
+        ANSWERS ``/json/version`` — a stale file from a dead Chrome
+        never lies its way in. On success ``self.port`` and the
+        browser WebSocket path are set and no process is launched;
+        ``alive()`` becomes the endpoint's answer and ``close()`` the
+        graceful ``Browser.close``."""
+        port_file = os.path.join(self.profile, 'DevToolsActivePort')
+        try:
+            with open(port_file, 'r', encoding='utf-8',
+                      errors='replace') as fh:
+                lines = [l.strip() for l in fh.read().splitlines()
+                         if l.strip()]
+            port = int(lines[0])
+            ws_path = lines[1] if len(lines) > 1 else ''
+        except Exception:
+            return False
+        if not _probe_version_endpoint(port):
+            return False
+        self.port = port
+        self._browser_ws_path = ws_path or self._lookup_browser_ws() or ''
+        return True
+
+    def _lookup_browser_ws(self) -> str:
+        """``/json/version`` → the browser's ``webSocketDebuggerUrl``
+        path (for the graceful close when the announcement was not
+        parsed). Best-effort; '' on any miss."""
+        try:
+            status, body = self._http('GET', '/json/version', timeout=3.0)
+            if status != 200:
+                return ''
+            ws = str((json.loads(body.decode('utf-8', errors='replace'))
+                      or {}).get('webSocketDebuggerUrl') or '')
+            return urlparse(ws).path or ''
+        except Exception:
+            return ''
 
     def _launch_and_announce(self, exe: str, extra_flags: List[str]
                              ) -> None:
-        """One launch attempt: start the process (a fresh throwaway
-        profile, its own process group on POSIX), then read the
-        DevTools endpoint off its stderr. Raises ``CDPError`` on any
-        miss — the constructor decides whether to retry."""
+        """One launch attempt: start the process (the dedicated profile
+        when persist is on, else a fresh throwaway temp dir; its own
+        process group on POSIX), then read the DevTools endpoint off
+        its stderr. Raises ``CDPError`` on any miss — the constructor
+        decides whether to retry."""
         self.port = _pick_free_port()
-        self.profile = tempfile.mkdtemp(prefix='gitcurator-chrome-')
+        self._browser_ws_path = ''
+        if not self.profile:
+            self.profile = tempfile.mkdtemp(prefix='gitcurator-chrome-')
+        else:
+            os.makedirs(self.profile, exist_ok=True)
         self._stderr_thread = None
         cmd = [exe, f'--remote-debugging-port={self.port}',
                f'--user-data-dir={self.profile}'] \
@@ -624,7 +871,13 @@ class ChromeSession:
             raise CDPError('Chrome never announced its DevTools endpoint')
         try:
             ws_url = endpoint.split()[0]
-            self.port = int(urlparse(ws_url).port or self.port)
+            parsed = urlparse(ws_url)
+            self.port = int(parsed.port or self.port)
+            # v0.54.0 — the browser's own WebSocket path rides the same
+            # announcement (…/devtools/browser/<uuid>): the graceful
+            # Browser.close needs it, and the adopt path reads the same
+            # pair from Chrome's DevToolsActivePort file.
+            self._browser_ws_path = parsed.path or ''
         except Exception:
             pass  # keep the picked port — the announcement had no ws URL
 
@@ -700,16 +953,35 @@ class ChromeSession:
                 continue
 
     def alive(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
+        """v0.54.0 — the honest liveness: the launcher process alive
+        OR the DevTools endpoint ANSWERING. The launcher exiting is
+        NOT session death — on Windows chrome.exe delegates to the
+        browser process and exits with the endpoint perfectly live
+        (the v0.53 'the Chrome session died mid-run' false failure was
+        exactly that, while the owner's tabs were still loading);
+        an adopted session (no proc at all) lives exactly as long as
+        its endpoint answers."""
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        if self.port:
+            return _probe_version_endpoint(self.port)
+        return False
 
     def close(self) -> None:
-        """Terminate the throwaway Chrome (the whole process GROUP on
-        POSIX — Chrome's child tree, or a test's shell child, must not
-        outlive the session holding the pipe) and erase its temp
-        profile. Never raises; safe to call twice. The stderr pipe is
-        the drain thread's to close (see _drain_stderr) — except when
-        the session died before the drain ever started, where close()
-        owns it (no other thread ever touched it)."""
+        """Shut the door's Chrome down and keep its identity. v0.54.0:
+        the GRACEFUL way first — ``Browser.close`` over the browser's
+        own WebSocket lets Chrome flush its cookie store (the whole
+        value of the persistent profile: a clearance cookie must
+        survive the delivery), then any survivor is tree-killed (the
+        whole process GROUP on POSIX; ``taskkill /T`` on Windows — a
+        plain terminate() kills only the launcher and leaves the
+        browser as a zombie holding the profile, the v0.50 note's
+        'zombie Chrome'). The throwaway profile (persist off) is
+        erased; the DEDICATED profile is NEVER erased. Never raises;
+        safe to call twice. The stderr pipe is the drain thread's to
+        close (see _drain_stderr) — except when the session died
+        before the drain ever started, where close() owns it."""
+        self._graceful_browser_close()
         proc, self.proc = self.proc, None
         if proc is not None and proc.poll() is None:
             self._signal_tree(proc)
@@ -722,18 +994,68 @@ class ChromeSession:
                 pass
         self._cleanup()
 
+    def _graceful_browser_close(self) -> None:
+        """v0.54.0 — ``Browser.close`` over the browser's own WebSocket:
+        Chrome shuts down CLEANLY (cookies flushed — the persistent
+        profile's whole value) instead of being killed mid-write.
+        Best-effort by law: any miss (no ws path, a refused socket, a
+        timeout) falls through to the tree kill. An ~8s wait for the
+        process to exit after the command."""
+        ws_path = self._browser_ws_path or ''
+        if not ws_path and self.port:
+            ws_path = self._lookup_browser_ws()
+        if not (ws_path and self.port):
+            return
+        try:
+            ws = CDPSocket('127.0.0.1', self.port, ws_path, timeout=5.0)
+        except Exception:
+            return
+        try:
+            ws.call('Browser.close', timeout=5.0)
+        except Exception:
+            pass  # the tree kill is the fallback
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.wait(timeout=8.0)
+            except Exception:
+                pass  # still alive — the tree kill takes it
+
     def _signal_tree(self, proc: subprocess.Popen) -> None:
         import signal as _signal
+        if os.name == 'nt':
+            # v0.54.0 — Windows: terminate() kills only the LAUNCHER;
+            # Chrome's browser + renderers survive as zombies, and a
+            # zombie holding the DEDICATED profile would break the
+            # next launch (chrome.exe delegates to it and never
+            # announces). taskkill /T kills the tree — the law.
+            for args in (['taskkill', '/PID', str(proc.pid), '/T'],
+                         ['taskkill', '/PID', str(proc.pid), '/T', '/F']):
+                try:
+                    subprocess.run(args, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=10)
+                    try:
+                        proc.wait(timeout=5)
+                        return
+                    except Exception:
+                        continue
+                except Exception:
+                    continue
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                pass  # a zombie Chrome — the endpoint probe tells the truth
+            return
         for sig in ('SIGTERM', 'SIGKILL'):
             try:
-                if os.name == 'posix':
-                    try:
-                        os.killpg(os.getpgid(proc.pid),
-                                  getattr(_signal, sig))
-                    except Exception:
-                        getattr(proc, 'terminate' if sig == 'SIGTERM'
-                                else 'kill')()
-                else:
+                try:
+                    os.killpg(os.getpgid(proc.pid),
+                              getattr(_signal, sig))
+                except Exception:
                     getattr(proc, 'terminate' if sig == 'SIGTERM'
                             else 'kill')()
                 try:
@@ -746,11 +1068,15 @@ class ChromeSession:
         try:
             proc.wait(timeout=3)
         except Exception:
-            pass  # a zombie Chrome — the profile erase still runs
+            pass  # a zombie Chrome — the endpoint probe tells the truth
 
     def _cleanup(self) -> None:
+        """v0.54.0 — a throwaway profile is erased (the persist-off
+        law); the DEDICATED profile is NEVER erased — its cookies are
+        the door's identity, the whole anti-bot point."""
         profile, self.profile = self.profile, ''
-        if profile and os.path.isdir(profile):
+        if self._profile_is_throwaway and profile \
+                and os.path.isdir(profile):
             shutil.rmtree(profile, ignore_errors=True)
 
     def __enter__(self):
@@ -771,11 +1097,14 @@ def fetch_pages_via_chrome(urls: List[str],
                            page_timeout_s: float = DEFAULT_PAGE_TIMEOUT_S,
                            wave: int = DEFAULT_WAVE,
                            should_continue: Optional[Callable] = None,
-                           _session_factory: Optional[Callable] = None
+                           _session_factory: Optional[Callable] = None,
+                           profile_dir: Optional[str] = None,
+                           persist: bool = True
                            ) -> List[Dict]:
     """The fifth door's engine: every URL fetched through the owner's
-    REAL Chrome (a fresh session, one tab per link, in waves so tabs
-    load together), the content read from the live DOM. Returns one
+    REAL Chrome (the door's dedicated persistent identity by default
+    — the anti-bot law; one tab per link, in waves so tabs load
+    together), the content read from the live DOM. Returns one
     ``{'url', 'ok', 'html', 'title', 'error'}`` per URL — never
     raises (no Chrome found, a refused launch and every per-tab miss
     are honest per-URL failures). Dry-run never reaches here (the
@@ -823,7 +1152,9 @@ def fetch_pages_via_chrome(urls: List[str],
             session = _session_factory(chrome, log)
         else:
             session = ChromeSession(chrome, log,
-                                    page_timeout_s=page_timeout_s)
+                                    page_timeout_s=page_timeout_s,
+                                    profile_dir=profile_dir,
+                                    persist=persist)
     except Exception as e:
         for u in work:
             results.append({'url': u, 'ok': False, 'html': '', 'title': '',
@@ -863,7 +1194,9 @@ def fetch_pages_via_chrome(urls: List[str],
                     results.append({'url': u, 'ok': False, 'html': '',
                                     'title': '',
                                     'error': 'the Chrome session died '
-                                             'mid-run'})
+                                             'mid-run (its DevTools '
+                                             'endpoint stopped answering)'
+                                             })
                     continue
                 # fetch this page through its already-open tab
                 page = _fetch_opened_tab(session, u, tabs_info,
@@ -1059,6 +1392,17 @@ def _take_live_page(ws: 'CDPSocket', page_timeout_s: float) -> Dict:
     return page
 
 
+def _socket_failure_sentence(e: Exception) -> str:
+    """The honest sentence for a DevTools socket that could not be
+    re-established: a closed socket names the TAB loss (the target
+    refused its own WebSocket — it is gone); anything else names the
+    socket's own error (WinError 10053, a reset, a timeout)."""
+    text = str(e)
+    if isinstance(e, CDPClosedError) or 'closed' in text.lower():
+        return f'the DevTools socket closed and the tab was gone ({e})'
+    return f'the DevTools socket failed: {e}'
+
+
 def _fetch_opened_tab(session: 'ChromeSession', url: str, tab: Dict,
                       page_timeout_s: float,
                       log: Callable) -> Dict:
@@ -1066,7 +1410,18 @@ def _fetch_opened_tab(session: 'ChromeSession', url: str, tab: Dict,
     opened it): connect its DevTools socket, WAIT for the page (the
     v0.53 load watch — complete at an http(s) URL, still for the
     settle, real by the verdict), read the live DOM, close the tab.
-    Same result shape, never raises."""
+    Same result shape, never raises.
+
+    v0.54.0 — the door KEEPS ITS GRIP: a DevTools socket that drops
+    mid-watch (WinError 10053 — an aborted local connection; a reset;
+    Chrome recycling the connection) is a BLIP, not a verdict: the
+    tab is still open, so the socket is RE-CONNECTED (up to
+    ``_SOCKET_RECONNECTS`` times) and the watch RESUMES with the
+    remaining budget — the owner's marinetraffic failure (a live tab
+    the app gave up on) becomes a half-second pause. A tab that is
+    really GONE refuses its own WebSocket on the re-connect — that,
+    and only that, is 'the tab closed itself'. The anti-bot patch is
+    (re-)applied on every connection."""
     target_id = str(tab.get('id') or '')
     ws_url = str(tab.get('webSocketDebuggerUrl') or '')
     try:
@@ -1074,27 +1429,53 @@ def _fetch_opened_tab(session: 'ChromeSession', url: str, tab: Dict,
             return {'url': url, 'ok': False, 'html': '', 'title': '',
                     'error': 'the tab reported no DevTools socket'}
         parts = urlparse(ws_url)
-        ws = CDPSocket(parts.hostname or '127.0.0.1',
-                       parts.port or session.port, parts.path or '/')
-        try:
-            page = _take_live_page(ws, page_timeout_s)
-        finally:
-            ws.close()
-        if not page.get('ok'):
-            return {'url': url, 'ok': False, 'html': '',
-                    'title': page.get('title') or '',
-                    'error': page.get('error') or 'the page never loaded'}
-        return {'url': url, 'ok': True, 'html': page['html'],
-                'title': page.get('title') or '', 'error': ''}
-    except CDPClosedError as e:
+        host = parts.hostname or '127.0.0.1'
+        port = parts.port or session.port
+        path = parts.path or '/'
+        deadline = time.monotonic() + float(page_timeout_s)
+        reconnects = int(_SOCKET_RECONNECTS)
+        page = None
+        reason = ''
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                reason = (f'the page never finished loading in '
+                          f'{float(page_timeout_s):.0f}s')
+                break
+            try:
+                ws = CDPSocket(host, port, path)
+            except Exception as e:
+                # the tab's own WebSocket refused — the TARGET is gone
+                reason = f'the tab closed itself ({e})'
+                break
+            try:
+                _apply_anti_bot(ws)
+                page = _take_live_page(ws, remaining)
+                break
+            except Exception as e:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                if reconnects > 0:
+                    reconnects -= 1
+                    log(f"🤖 {url}: the DevTools socket dropped mid-watch "
+                        f"({e}) — re-connecting to the still-open tab "
+                        f"(the watch resumes; the page budget keeps "
+                        f"running)", "info")
+                    time.sleep(_RECONNECT_PAUSE_S)
+                    continue
+                reason = _socket_failure_sentence(e)
+                break
+        if page is not None:
+            if not page.get('ok'):
+                return {'url': url, 'ok': False, 'html': '',
+                        'title': page.get('title') or '',
+                        'error': page.get('error') or 'the page never loaded'}
+            return {'url': url, 'ok': True, 'html': page['html'],
+                    'title': page.get('title') or '', 'error': ''}
         return {'url': url, 'ok': False, 'html': '', 'title': '',
-                'error': f'the tab closed itself ({e})'}
-    except CDPError as e:
-        return {'url': url, 'ok': False, 'html': '', 'title': '',
-                'error': str(e)}
-    except socket.timeout:
-        return {'url': url, 'ok': False, 'html': '', 'title': '',
-                'error': 'the DevTools socket timed out'}
+                'error': reason or 'the page never loaded'}
     except Exception as e:
         return {'url': url, 'ok': False, 'html': '', 'title': '',
                 'error': f'unexpected: {e}'}
@@ -1203,6 +1584,12 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
                            or DEFAULT_PAGE_TIMEOUT_S)
     wave = int(config.get('web_browser_retry_wave', DEFAULT_WAVE)
                or DEFAULT_WAVE)
+    # v0.54.0 — the door's identity knobs: the persistent dedicated
+    # profile is ON by default (the anti-bot law — a returning visitor
+    # the sites remember); the explicit dir override is honored when set.
+    persist = config.get(CONFIG_PROFILE_PERSIST, True)
+    persist = True if persist is None else bool(persist)
+    profile_dir = str(config.get(CONFIG_PROFILE_DIR) or '').strip() or None
     urls = [l['url'] for l in candidates]
     walls = {l['url']: l.get('error') or '' for l in candidates}
     try:
@@ -1223,7 +1610,8 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
             pages = fetch_pages_via_chrome(
                 urls, log=log, chrome_exe=chrome_exe,
                 page_timeout_s=page_timeout_s, wave=wave,
-                should_continue=should_continue)
+                should_continue=should_continue,
+                profile_dir=profile_dir, persist=persist)
         except Exception as e:  # belt and braces — the promise is absolute
             log(f"⚠️ The Chrome tab fetch failed outright: {e}", "warning")
             pages = [{'url': u, 'ok': False, 'html': '', 'title': '',
@@ -1290,10 +1678,12 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
 
 
 __all__ = [
-    'CONFIG_GATE', 'DEFAULT_PAGE_TIMEOUT_S', 'DEFAULT_WAVE',
+    'CONFIG_GATE', 'CONFIG_PROFILE_DIR', 'CONFIG_PROFILE_PERSIST',
+    'DEFAULT_PAGE_TIMEOUT_S', 'DEFAULT_WAVE',
     'MAX_MESSAGE_BYTES', 'PAGE_SETTLE_S', 'CDPError', 'CDPTimeoutError',
     'CDPClosedError', 'encode_client_frame', 'decode_frames', 'CDPSocket',
-    'is_loopback_url', 'ChromeSession', 'fetch_pages_via_chrome',
+    'is_loopback_url', 'default_profile_dir', 'ChromeSession',
+    'fetch_pages_via_chrome',
     'page_is_real', 'collect_failed_fetch_links',
     'deliver_pages_via_chrome',
 ]

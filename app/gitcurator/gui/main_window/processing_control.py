@@ -1128,7 +1128,17 @@ class ProcessingControlMixin:
         not be gathered fires ``delivery_failed`` — the honest modal
         the owner asked for ("xx links didn't generate content or
         wasn't successful or got error xxx"), never a silent false
-        positive of success after a Chrome that crashed and closed."""
+        positive of success after a Chrome that crashed and closed.
+
+        v0.54.0 — OPENING IS NOT THE SUCCESS: the pending count
+        (``_chrome_delivery_pending``) is what holds the batch
+        scorecard back (see processing_finished) — a tab that opened
+        is a tab still being waited on, and the scorecard may only
+        celebrate notes that landed in the vault. The worker keeps
+        its full report so the finish handlers can tell the whole
+        story, and the failure detail is emitted BEFORE the delivered
+        list (the failure modal shows first; the delivered handler
+        then decides what the scorecard waits for)."""
         cfg = self.config or {}
         vault = (cfg.get('website_vault_path') or '').strip()
         if not vault or not links:
@@ -1138,6 +1148,8 @@ class ProcessingControlMixin:
             if backlog is None:
                 backlog = self._chrome_delivery_backlog = []
             backlog.extend(links)
+            self._chrome_delivery_pending = \
+                getattr(self, '_chrome_delivery_pending', 0) + len(links)
             self.log_message(
                 f"🖐 A Chrome delivery is already running — "
                 f"{len(links)} link(s) queued behind it (they open "
@@ -1154,6 +1166,8 @@ class ProcessingControlMixin:
                 self._vault = vault
                 self._links = links
                 self._config = config
+                self._report = {}          # v0.54 — the finish handlers'
+                                            # whole story (kept reference)
 
             def run(self):
                 try:
@@ -1163,26 +1177,35 @@ class ProcessingControlMixin:
                 except Exception as e:  # the door never breaks anything
                     self.log_message.emit(
                         f"⚠️ Chrome tab retry failed: {e}", "warning")
+                    self._report = {'delivered': 0, 'failed': 1,
+                                    'urls': [],
+                                    'failed_links': [
+                                        {'url': '',
+                                         'error': f'Chrome tab retry '
+                                                  f'failed: {e}'}]}
+                    self.delivery_failed.emit(list(
+                        self._report['failed_links']))
                     self.delivered.emit([])
-                    self.delivery_failed.emit(
-                        [{'url': '', 'error': f'Chrome tab retry failed: '
-                                             f'{e}'}])
                     return
-                self.delivered.emit(list(report.get('urls') or []))
-                # v0.53.0 — the failure detail rides back too: the
-                # modal words the owner's own ask ("didn't generate
-                # content … got error xxx") instead of silence
+                self._report = report
+                # v0.54 — the failure detail FIRST (its modal shows,
+                # the owner reads it, then the delivered handler
+                # decides what the scorecard still waits for)
                 failed_links = list(report.get('failed_links') or [])
                 if failed_links:
                     self.delivery_failed.emit(failed_links)
+                self.delivered.emit(list(report.get('urls') or []))
 
         worker = ChromeTabRetryWorker(vault, links, dict(cfg))
         self._chrome_retry_worker = worker  # a kept reference (Qt GC law)
         self._chrome_delivery_busy = True
+        self._chrome_delivery_pending = \
+            getattr(self, '_chrome_delivery_pending', 0) + len(links)
         worker.log_message.connect(self.log_message)
 
         def _on_delivered(urls):
             self._chrome_delivery_busy = False
+            self._chrome_delivery_pending = 0
             if urls:
                 if getattr(self, '_batch_running', False):
                     self.log_message(
@@ -1195,13 +1218,25 @@ class ProcessingControlMixin:
                         f"🤖 {len(urls)} page(s) delivered from your "
                         f"Chrome — re-processing them now as real "
                         f"fetches…", "success")
+                    # v0.54 — the re-run is part of THIS delivery's
+                    # story: its finish merges into the stashed
+                    # scorecard (the batch that waited) instead of
+                    # celebrating a second, partial story on its own
+                    self._delivery_rerun_pending = True
                     try:
                         self._start_worker_with_urls(list(urls))
                     except Exception as e:
+                        self._delivery_rerun_pending = False
                         self.log_message(
                             f"⚠️ The delivered-page re-run could not "
                             f"start ({e}) — the next SYNC batch takes "
                             f"them automatically", "warning")
+                        self._flush_stashed_batch_summary()
+            else:
+                # nothing delivered (all failed, or nothing to fetch):
+                # the failure modal (if any) already told its story —
+                # the stashed scorecard follows it with the full truth
+                self._flush_stashed_batch_summary()
             # drain the backlog — the deliveries that arrived while
             # this one ran get their own Chrome pass now
             backlog = getattr(self, '_chrome_delivery_backlog', None) \
@@ -1215,8 +1250,10 @@ class ProcessingControlMixin:
         worker.start()
         self.log_message(
             f"🤖 Chrome tab retry: opening {len(links)} link(s) in your "
-            f"real Chrome (a fresh window, one tab per link — watch the "
-            f"tabs load; GitCurator takes each page when it is ready)",
+            f"real Chrome (the door's dedicated identity — one tab per "
+            f"link; watch the tabs load; GitCurator takes each page "
+            f"when it is ready and processes it into the vault — the "
+            f"scorecard waits for the notes to land)",
             "info")
 
     def _on_delivery_failed(self, failed):
@@ -1228,7 +1265,14 @@ class ProcessingControlMixin:
         named — the links keep waiting in the retry queue, the next
         run offers them again. Tolerated everywhere (a modal that
         cannot be shown never breaks the finish path); the log already
-        carries the per-link warnings."""
+        carries the per-link warnings.
+
+        v0.54.0 — this modal is emitted BEFORE the delivered list, so
+        it is the FIRST thing the owner reads at a delivery's end;
+        the stashed batch scorecard (if the batch is waiting on these
+        very pages) follows it — flushed by the delivered handler with
+        the delivery's numbers riding in (see
+        _flush_stashed_batch_summary)."""
         try:
             failed = [f for f in (failed or []) if isinstance(f, dict)]
             if not failed:
@@ -1258,6 +1302,39 @@ class ProcessingControlMixin:
                 success=False)
         except Exception:
             pass  # the log already told the honest story
+
+    def _flush_stashed_batch_summary(self):
+        """v0.54.0 — the scorecard that WAITED gets its turn: the
+        batch summary stashed while Chrome was gathering pages is
+        brought out with the delivery's own numbers riding in
+        (``chrome_delivered`` / ``chrome_failed`` from the delivery
+        worker's kept report) so the score the owner finally reads is
+        the WHOLE story — what the batch did + what Chrome took. The
+        stash is cleared first (idempotent; a second call is a no-op);
+        a missing or empty stash is a quiet no-op (a delivery that
+        ended without a waiting batch — the manual More ▸ paths)."""
+        try:
+            stashed = getattr(self, '_stashed_batch_summary', None)
+            self._stashed_batch_summary = None
+            if not stashed:
+                return
+            summary, elapsed_str = stashed
+            try:
+                rep = getattr(self._chrome_retry_worker, '_report',
+                              None) or {}
+                summary['chrome_delivered'] = int(rep.get('delivered') or 0)
+                summary['chrome_failed'] = int(rep.get('failed') or 0)
+            except Exception:
+                pass  # the report is an optional grace, never a gate
+            self._celebrate_batch(summary, elapsed_str)
+        except Exception as e:
+            try:
+                self.log_message(
+                    f"⚠️ The held-back scorecard could not be shown "
+                    f"({e}) — the batch's story is in the log and the "
+                    f"final report", "warning")
+            except Exception:
+                pass
 
     def chrome_tab_retry_now(self):
         """More ▸ 🤖 Chrome tab-retry failed links… — v0.50.0, the
@@ -1750,7 +1827,84 @@ class ProcessingControlMixin:
                     self.log_message(
                         f"⚠️ Chrome tab-retry offer skipped: "
                         f"{_chrome_err}", "warning")
-                self._celebrate_batch(_summary, elapsed_str)
+                # v0.54.0 — OPENING IS NOT THE SUCCESS: while a Chrome
+                # delivery is gathering pages (the hand pass above, or
+                # the offer the owner just accepted), the scorecard
+                # WAITS — a tab that opened is a tab still being
+                # waited on, and "✓ All links processed cleanly" may
+                # only be said after the notes land in the vault. The
+                # stash is flushed when the delivery (and, for the
+                # delivered pages, their re-run) finishes — with the
+                # delivery's own numbers riding in.
+                _pending_chrome = int(
+                    getattr(self, '_chrome_delivery_pending', 0) or 0)
+                if _pending_chrome > 0:
+                    self._stashed_batch_summary = (_summary, elapsed_str)
+                    self.log_message(
+                        f"⏳ The batch's scorecard waits — "
+                        f"{_pending_chrome} link(s) are being gathered "
+                        f"in your Chrome right now (their notes land "
+                        f"in the vault when the pages are taken and "
+                        f"processed; the scorecard follows)",
+                        "info")
+                elif getattr(self, '_delivery_rerun_pending', False):
+                    # v0.54.0 — this IS the delivered pages' re-run: its
+                    # numbers MERGE into the stashed scorecard (the
+                    # batch that waited) and ONE scorecard celebrates
+                    # the whole story — batch + Chrome pages + notes.
+                    self._delivery_rerun_pending = False
+                    _stashed = getattr(self, '_stashed_batch_summary',
+                                       None)
+                    if _stashed:
+                        _base, _base_elapsed = _stashed
+                        self._stashed_batch_summary = None
+                        try:
+                            _rep = getattr(self._chrome_retry_worker,
+                                           '_report', None) or {}
+                            _base['chrome_delivered'] = int(
+                                _rep.get('delivered') or 0)
+                            _base['chrome_failed'] = int(
+                                _rep.get('failed') or 0)
+                        except Exception:
+                            pass
+                        try:
+                            _ws = dict(_base.get('websites') or {})
+                            _rs = _summary.get('websites') or {}
+                            if _rs:
+                                for _k in ('processed', 'review',
+                                           'skipped', 'failed'):
+                                    _ws[_k] = int(_ws.get(_k, 0) or 0) \
+                                        + int(_rs.get(_k, 0) or 0)
+                                _base['websites'] = _ws
+                            _base['failed_links'] = int(
+                                _base.get('failed_links', 0) or 0) \
+                                + int(_summary.get('failed_links', 0) or 0)
+                            _base['new_notes'] = int(
+                                _base.get('new_notes', 0) or 0) \
+                                + int(_summary.get('new_notes', 0) or 0)
+                        except Exception:
+                            pass  # the merge is a grace — never a gate
+                        self._celebrate_batch(
+                            _base, _base_elapsed or elapsed_str)
+                    else:
+                        # no stash survived (the waiting batch's story
+                        # was already told) — this re-run celebrates on
+                        # its own, the honest fallback
+                        self._celebrate_batch(_summary, elapsed_str)
+                else:
+                    # nothing is being gathered and this is not a
+                    # re-run — a stale stash (its delivery chain died
+                    # without flushing) is dropped with an honest line
+                    # rather than shown stale on top of the new batch
+                    if getattr(self, '_stashed_batch_summary', None):
+                        self._stashed_batch_summary = None
+                        self.log_message(
+                            "ℹ️ The previous batch's held-back scorecard "
+                            "was released without showing (its Chrome "
+                            "delivery's story was told in the log and "
+                            "its failure modal, if any)",
+                            "info")
+                    self._celebrate_batch(_summary, elapsed_str)
             else:
                 self._show_custom_message_box(
                     "Processing Complete", f"{message}{elapsed_str}",
@@ -1776,14 +1930,23 @@ class ProcessingControlMixin:
         WITH failed links gets the softer descending needs-retry tone
         (retry.wav) instead of the success arpeggio — the chime says
         what the scorecard's amber row says. The modal opens either
-        way (the routing keys on natural completion, not cleanliness)."""
+        way (the routing keys on natural completion, not cleanliness).
+
+        v0.54.0 — a Chrome page that was not taken is the same
+        non-celebration (the scorecard that waited says so; the chime
+        must agree with it)."""
         _failed = 0
+        _chrome_failed = 0
         if summary:
             try:
                 _failed = int(summary.get('failed_links', 0) or 0)
             except (TypeError, ValueError):
                 _failed = 0
-        self._play_batch_sound(needs_retry=_failed > 0)
+            try:
+                _chrome_failed = int(summary.get('chrome_failed', 0) or 0)
+            except (TypeError, ValueError):
+                _chrome_failed = 0
+        self._play_batch_sound(needs_retry=bool(_failed or _chrome_failed))
         self._show_batch_success_modal(summary, elapsed_str)
 
     def _play_batch_sound(self, needs_retry: bool = False):
@@ -1874,19 +2037,38 @@ class ProcessingControlMixin:
         # (no party), the heading rides the warning tone — the amber
         # "Needs retry" row and the softer retry.wav chime complete the
         # "done, but look at me" triad.
+        # v0.54.0 — a Chrome page that was not taken is the SAME
+        # honesty (the scorecard that waited may not party while its
+        # links keep waiting): the party needs the failed links AND
+        # the Chrome failures to be zero.
         _failed = 0
         try:
             _failed = int(summary.get('failed_links', 0) or 0)
         except (TypeError, ValueError):
             _failed = 0
+        _chrome_failed = 0
+        try:
+            _chrome_failed = int(summary.get('chrome_failed', 0) or 0)
+        except (TypeError, ValueError):
+            _chrome_failed = 0
+        _gathering_now = 0
+        try:
+            _gathering_now = int(getattr(self, '_chrome_delivery_pending',
+                                         0) or 0)
+        except (TypeError, ValueError):
+            _gathering_now = 0
+        _not_clean = bool(_failed or _chrome_failed or _gathering_now)
         header = QHBoxLayout()
-        glyph = QLabel("🏁" if _failed else "🎉")
+        glyph = QLabel("⏳" if _gathering_now else ("🏁" if _not_clean
+                                                    else "🎉"))
         glyph.setObjectName("msg_glyph")
         header.addWidget(glyph)
-        title = QLabel(" Batch Complete!" if not _failed
-                       else " Batch Complete")
+        title = QLabel(" Batch Complete!" if not _not_clean
+                       else (" Batch Complete — still gathering"
+                             if _gathering_now else " Batch Complete"))
         title.setObjectName("msg_heading")
-        title.setProperty("tone", "warning" if _failed else "success")
+        title.setProperty("tone",
+                          "warning" if _not_clean else "success")
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
@@ -1923,9 +2105,44 @@ class ProcessingControlMixin:
             if _ws.get('failed', 0):
                 _ws_bits.append(f"{_ws['failed']} failed")
             _row("Websites", " · ".join(_ws_bits))
+        # v0.54.0 — the Chrome pages row: the delivery's own numbers
+        # (set at the flush/merge) tell the fifth door's part of the
+        # story — never a silent "0 saved" while the tabs load.
+        _cd = 0
+        _cf = 0
+        try:
+            _cd = int(summary.get('chrome_delivered', 0) or 0)
+            _cf = int(summary.get('chrome_failed', 0) or 0)
+        except (TypeError, ValueError):
+            _cd, _cf = 0, 0
+        if _cd or _cf:
+            _row("Chrome pages",
+                 f"{_cd} taken from your Chrome · "
+                 + (f"{_cf} not taken (they keep waiting)"
+                    if _cf else "all taken"),
+                 tone=("warning" if _cf else "success"))
         _failed = int(summary.get('failed_links', 0) or 0)
+        _gathering = 0
+        try:
+            _gathering = int(getattr(self, '_chrome_delivery_pending', 0)
+                             or 0)
+        except (TypeError, ValueError):
+            _gathering = 0
         if _failed:
             _row("Needs retry", f"{_failed} link(s) — next run",
+                 tone="warning")
+        elif _gathering > 0:
+            # v0.54.0 — pages are being gathered RIGHT NOW: opening a
+            # tab is not the success, so the clean verdict stays unsaid
+            # until the notes land (the stash/flush law)
+            _row("Status",
+                 f"⏳ {_gathering} link(s) gathering via your Chrome — "
+                 f"stored when their pages are taken",
+                 tone="warning")
+        elif _cf:
+            _row("Status",
+                 f"⚠️ {_cf} Chrome link(s) didn't generate content — "
+                 f"they keep waiting",
                  tone="warning")
         else:
             _row("Status", "✓ All links processed cleanly", tone="success")
