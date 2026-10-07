@@ -1,3 +1,66 @@
+## [0.49.0] — The table that lists them all — 2026-10-09
+
+Owner ask (session): "When app supposed to add tables so i can set
+emojies for removed, dead etc or to decomission it? it currently only
+adds links like before in _review." Desktop release v0.49.0, Worker
+unchanged at **0.30.0** (it never touches the vault). Suite grows
+**1287 → 1314** (27 cases in tests/test_reviewtable.py — pure stdlib
+at the unit level).
+
+**The diagnosis.** The Review Master Table (v0.47.0) does refresh
+after every batch — but only two populations ever became rows: the
+fetch-failed pile (the retry queue) and the auto-verdict retirements.
+The OTHER links that land in ``_review`` — low classification
+confidence, analysis failures, archived rescues, the classes that
+wait for HUMAN eyes, not retries — were written as notes and never as
+rows: no Status cell, no emoji to set, no retirement door. The folder
+kept filling "like before" — exactly the owner's report: links in
+_review, and a table that never mentions them.
+
+**The fix.** ``scan_review_notes`` is the table's eyes for the WHOLE
+folder: every app-owned ``_review`` note (``managed_by: gitcurator``,
+ANY fetch_status). The refresh's third population: every such note
+becomes a row — source 'review', Status 'unreviewed', and the note's
+own reason read back out of its warning callout into the Notes column
+("in _review (full): classification confidence was low", "in _review
+(partial): an archived copy of a dead page") — so the owner reads WHY
+it waits right where he sets the emoji. The same Status grammar
+answers every row now: 🪦 dead / ❌ / ☠️ / 💀 retire AND sweep, ✅
+reviewed retires AND sweeps, ♻️ revived re-fetches, 🖐 hand queues for
+the fourth door. The consume sweep widened to match: ANY app-owned
+placeholder is swept on retirement, not just fetch-failed ones — a
+low-confidence note or an archived rescue waits in _review for the
+owner's move, and the row's emoji IS that move; the row is the
+record.
+
+**The law, kept tight.** A hand-written note (no managed_by
+frontmatter) is never tabled, never swept — a human's, whatever its
+status; existing rows are never duplicated or clobbered (the
+writer's law, unchanged); failed placeholders still come from the
+backlog path — the new population is deduped against the retry queue
+and canonicalized, so one link is one row, never two; retired links'
+notes are not waiting (their row exists); the reason reader is
+tolerant (a missing callout, an unreadable file, a note without a
+reason line all degrade to a plain "waiting for the owner's move" —
+a broken note never breaks the refresh); the header documents the
+whole grammar where the owner reads it; bookkeeping never kills a
+batch; dry-run aware through the house writer.
+
+**Gates.** 27 cases in tests/test_reviewtable.py (the scan — every
+app-owned note with its status, hand notes and the table itself never
+ours, non-http sources skipped; the reason reader — the callout line,
+the missing-callout and unreadable-file tolerances; the refresh — the
+low-confidence and archived-rescue rows with their reasons, the
+no-double-row law for failed placeholders, idempotency, owner-set
+Status cells never clobbered, retired notes not waiting, hand notes
+never tabled, nothing pending → no table; the consume sweep — ✅
+sweeps a low-confidence placeholder, 🪦 sweeps an archived rescue, a
+hand note for the same URL is kept, the failed-class sweep unchanged,
+♻️ tolerated; the full circle — a low-confidence run leaves the note
+AND the row, the owner's tick closes it and the next run never
+fetches the link again). Full suite **1314/1314**, 84-module compile
+gate OK, offline golden 30/30.
+
 ## [0.48.0] — The fourth door: the owner's own Chrome — 2026-10-09
 
 Owner ask (session): "I've noticed that for some links, the fetcher

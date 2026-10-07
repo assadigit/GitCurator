@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 84 audited
-# Python modules and runs the full 1287-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1314-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -10,7 +10,20 @@
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
-# mastertable + 43 handdelivery).
+# mastertable + 43 handdelivery + 27 reviewtable).
+# v0.49.0 — THE TABLE THAT LISTS THEM ALL: the owner's report — "When
+# app supposed to add tables so i can set emojies for removed, dead
+# etc or to decomission it? it currently only adds links like before
+# in _review" — the master table listed the fetch-failed pile and the
+# auto-verdict retirements, but the human-eye classes (low
+# classification confidence, analysis failures, archived rescues)
+# landed as _review notes and never as rows. scan_review_notes makes
+# the table the ledger for the WHOLE folder: every app-owned note is
+# a row (Status 'unreviewed', the note's reason in Notes), the same
+# emoji grammar answers them (🪦/✅ retire AND sweep, ♻️ re-fetches,
+# 🖐 hand queues), and the consume sweep takes any app-owned
+# placeholder. A hand-written note is never tabled, never swept. 27
+# cases join in tests/test_reviewtable.py (1314).
 # v0.48.0 — THE FOURTH DOOR: the owner's report — "for some links, the
 # fetcher got 403 error, but when I enter them manually on my browser
 # they work flawlessly… add another layer (as one of the final
@@ -316,8 +329,8 @@ jobs:
           gitcurator/core/mirror_keys.py
           gitcurator/core/netctx.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -328,4 +341,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 84 compiles + 1287 tests + worker 50 + offline golden run (v0.48.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 84 compiles + 1314 tests + worker 50 + offline golden run (v0.49.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

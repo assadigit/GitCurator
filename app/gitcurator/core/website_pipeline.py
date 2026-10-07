@@ -356,6 +356,76 @@ def scan_review_backlog(vault_path: str,
     return items
 
 
+def scan_review_notes(vault_path: str,
+                      log: Optional[Callable] = None) -> List[Dict]:
+    """v0.49.0 — EVERY app-owned note waiting in ``_review``.
+
+    The owner's report: "it currently only adds links like before in
+    _review" — links land in the folder as notes (low classification
+    confidence, analysis failures, archived rescues — the classes that
+    wait for HUMAN eyes, not retries), but the master table only ever
+    listed the fetch-failed ones, so these had no row, no Status cell,
+    no emoji to set. This scan is the table's eyes for the whole
+    folder: every ``managed_by: gitcurator`` note (ANY fetch_status),
+    each ``{'url', 'path', 'fetch_status'}``. A hand-written note (no
+    frontmatter / no managed_by key) is a human's — never our call.
+    Sorted by filename for a deterministic order; pure file reads; no
+    state DB, no network (the same law as
+    :func:`scan_review_backlog`)."""
+    review_dir = os.path.join(vault_path or '', REVIEW_FOLDER)
+    if not vault_path or not os.path.isdir(review_dir):
+        return []
+    try:
+        names = sorted(os.listdir(review_dir))
+    except Exception as e:
+        if log:
+            log(f"⚠️ Could not list {review_dir}: {e}", "warning")
+        return []
+    items: List[Dict] = []
+    for name in names:
+        if not name.lower().endswith('.md') or name == DECOMMISSION_TABLE:
+            continue
+        path = os.path.join(review_dir, name)
+        if not os.path.isfile(path):
+            continue
+        fm = _parse_review_frontmatter(path)
+        if not fm or fm.get('managed_by', '').lower() != MANAGED_BY_GITCURATOR:
+            continue  # a human's note — never our call
+        url = (fm.get('source') or '').strip()
+        if not url.lower().startswith(('http://', 'https://')):
+            continue
+        items.append({'url': url, 'path': path,
+                      'fetch_status': (fm.get('fetch_status') or '').strip()})
+    return items
+
+
+def _review_note_reason(path: str) -> str:
+    """v0.49.0 — the reason line out of a ``_review`` note's warning
+    callout. :func:`build_review_note` writes exactly one callout
+    (``> [!warning] Needs review — <status>``) followed by one
+    ``> <reason>`` line; this reads that line back so the master
+    table's Notes column can tell the owner WHY a link waits. Tolerant
+    pure read: anything unexpected returns '' (a missing reason never
+    breaks the refresh)."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return ''
+    for i, line in enumerate(lines):
+        if '[!warning]' not in line:
+            continue
+        for j in range(i + 1, min(i + 4, len(lines))):
+            s = lines[j].strip()
+            if s.startswith('>'):
+                reason = s.lstrip('>').strip()
+                if reason:
+                    return reason
+            elif s:
+                break
+    return ''
+
+
 # ===========================================================================
 # v0.44.0 — the graveyard: dead links get a burial, not a haunting
 # ===========================================================================
@@ -480,8 +550,11 @@ def scan_decommission_table(vault_path: str) -> Dict[str, str]:
 
 _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 
-> The master note for links waiting in _review. One row per link;
-> edit ONLY the Status column — do not delete rows.
+> The master note for EVERY link waiting in _review — fetch failures
+> waiting for retries AND the human-eye classes (low classification
+> confidence, analysis failures, archived rescues): one row per link,
+> every link with a Status cell you can set. Edit ONLY the Status
+> column — do not delete rows.
 > ✅ reviewed — you handled this link: never fetched, never retried
 >   again, its _review placeholder is swept.
 > 🪦 dead / ❌ dead / ☠️ dead — the link is dead: same never-fetch
@@ -680,6 +753,11 @@ def consume_decommission_table(state, vault_path: str,
     re-stamps); death and reviewed still win when a hand-edited cell
     says both.
 
+    v0.49.0 — the sweep (pass 3) takes ANY app-owned ``_review``
+    placeholder, not just fetch-failed ones: a ✅/🪦 on a
+    low-confidence or archived-rescue row sweeps that note too (the
+    row is the record).
+
     For every ♻️-revived row: the dismissal is removed — the link is
     fetched like new the next time it appears.
 
@@ -817,6 +895,12 @@ def consume_decommission_table(state, vault_path: str,
     # tracked placeholder (processed row knew it) and a LOST-row one.
     # v0.47.0 — a ✅-reviewed link's placeholder is swept too (the
     # owner handled this link's fate; the table row is the record).
+    # v0.49.0 — ANY app-owned placeholder, not just fetch-failed ones:
+    # a low-confidence classification note or an archived rescue
+    # waits in _review for the owner's move, and the row's ✅/🪦 IS
+    # that move — the note's job is done, the row is the record.
+    # managed_by stays the ownership proof: a note without it is a
+    # human's, kept whatever its status.
     if retired_canonicals:
         retired_set = set(retired_canonicals)
         review_dir = os.path.join(vault_path, REVIEW_FOLDER)
@@ -832,8 +916,7 @@ def consume_decommission_table(state, vault_path: str,
                 continue
             fm = _parse_review_frontmatter(p)
             if not fm or fm.get('managed_by', '').lower() \
-                    != MANAGED_BY_GITCURATOR \
-                    or fm.get('fetch_status', '').lower() != 'failed':
+                    != MANAGED_BY_GITCURATOR:
                 continue  # a human's note — never our call
             src = normalize_website_url((fm.get('source') or '').strip())
             if src not in retired_set:
@@ -893,6 +976,16 @@ def refresh_master_table(state, vault_path: str,
       / refused verdicts) as a '🪦 auto — <category>' row — visible,
       revivable (♻️), and consumed by the next batch like any burial.
 
+    v0.49.0 — the third population, the owner's report: "it currently
+    only adds links like before in _review" — the links that wait for
+    HUMAN eyes, not retries (low classification confidence, analysis
+    failures, archived rescues) landed as notes but never as ROWS, so
+    the folder filled with links nobody could retire from a table.
+    Every app-owned ``_review`` note (any fetch_status) is a row now:
+    source 'review', Status 'unreviewed', the note's own reason in the
+    Notes column — the same Status grammar answers them (🪦 dead /
+    ✅ reviewed retire AND sweep the note; ♻️ revived re-fetches).
+
     Existing rows are never duplicated or clobbered (the writer's law);
     a vault with nothing waiting and nothing retired stays table-less
     (a cheap no-op). Tolerated everywhere — the master table is
@@ -930,6 +1023,30 @@ def refresh_master_table(state, vault_path: str,
             waiting_notes[u] = ('placeholder in _review (state row was '
                                 'lost)')
             report['waiting'] += 1
+        # v0.49.0 — the human-eye classes: every OTHER app-owned note in
+        # _review (low classification confidence, analysis failures,
+        # archived rescues). Fetch-failed placeholders are the backlog
+        # scan's jurisdiction (above); a RETIRED link's row already
+        # exists (auto-verdict or the owner's own emoji).
+        for it in scan_review_notes(vault_path):
+            u = it.get('url') or ''
+            if not u or u in waiting_notes:
+                continue
+            if (it.get('fetch_status') or '').strip().lower() == 'failed':
+                continue  # a failed placeholder is a retry row or a
+                # lost-row backlog item — both counted above
+            cu = normalize_website_url(u)
+            if cu in waiting_notes:
+                continue  # canonical twin already waiting
+            if _is_retired(cu):
+                continue
+            reason = _review_note_reason(it.get('path') or '')
+            fs = (it.get('fetch_status') or '').strip() or 'review'
+            waiting_urls.append(cu)
+            waiting_notes[cu] = (f"in _review ({fs}): "
+                                 + (reason or
+                                    'waiting for the owner\u2019s move'))
+            report['waiting'] += 1
 
         retired_urls: List[str] = []
         retired_notes: Dict[str, str] = {}
@@ -958,7 +1075,8 @@ def refresh_master_table(state, vault_path: str,
                     log=None, notes=retired_notes, status=status)
         report['written'] = n1 + n2
         if report['written']:
-            log(f"📋 Master table refreshed: {report['waiting']} waiting, "
+            log(f"📋 Master table refreshed: {report['waiting']} waiting "
+                f"(fetch failures + links parked in _review), "
                 f"{report['retired']} auto-retired link(s) — "
                 f"{report['written']} new row(s) in "
                 f"{DECOMMISSION_TABLE} (🪦 dead / ✅ reviewed retire; ♻️ "

@@ -436,7 +436,7 @@ class TestSourceContracts(unittest.TestCase):
             return f.read()
 
     def test_version_is_0450(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.48.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.49.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -460,7 +460,7 @@ class TestSourceContracts(unittest.TestCase):
 
     def test_bothdoors_pin_follows_the_release(self):
         src = self._read('app', 'tests', 'test_bothdoors.py')
-        self.assertIn("'0.48.0'", src)
+        self.assertIn("'0.49.0'", src)
 
 
 # ---------------------------------------------------------------------------
