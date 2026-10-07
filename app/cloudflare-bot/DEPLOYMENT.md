@@ -5,6 +5,27 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.50.0 deploy record — re-deploy of the unchanged 0.30.0 worker (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-09** (worker version ID
+> `5ad435f7-9c3e-40e3-8f08-f4e803e8b335`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.50.0 is a DESKTOP-ONLY release (the fifth door: when a run ends
+> with links that generated no content, the end-of-run modal offers
+> the retry — one yes and the app itself opens the owner's own
+> Google Chrome in a fresh throwaway session, starts one tab per
+> failed link, and takes the content from the live DOM over a
+> raw-socket DevTools WebSocket — pure stdlib, no new dependency);
+> the Worker's code is unchanged since v0.30.0 (it never fetches
+> websites), so the deploy is the release ritual's
+> health-and-parity re-verification: health `ok` with version
+> 0.30.0, root 200, both queue consumers attached (curator-ingest +
+> curator-ingest-dlq), secrets persisted. The deploy ran from the
+> v0.50.0 release tree (`563e98c`) right after the push and BEFORE
+> the desktop tag's zip went out.
+
+---
+
 ## ⚡ Quick path — update an EXISTING deployment (2 minutes)
 
 Already deployed before? Your D1 database, KV namespace, Queues, R2 bucket
