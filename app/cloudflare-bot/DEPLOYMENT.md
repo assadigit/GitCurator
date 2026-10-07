@@ -5,10 +5,10 @@ Estimated time: 30-45 minutes.
 
 ---
 
-## 📦 v0.53.0 deploy record — the unchanged 0.30.0 worker, verified LIVE (✅)
+## 📦 v0.53.0 deploy record — the re-deploy ritual COMPLETED with the token in hand (DEPLOYED ✅)
 
-> **Verified in production on 2026-10-10** (the live worker version ID
-> `9639f0fb-b5c4-4640-a801-ce14d78cdda5` — the v0.52.0 deploy — at
+> **Deployed to production on 2026-10-07** (worker version ID
+> `ca259efe-ceb6-443f-8b0a-f188cc13d5de`, URL
 > `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
 > v0.53.0 is a DESKTOP-ONLY release (the door waits for the page; a
 > crash is never a delivery — the fifth door's Chrome tab retry now
@@ -17,18 +17,26 @@ Estimated time: 30-45 minutes.
 > `gitcurator/core/chrome_tabs.py`, `hand_delivery.py` and the GUI).
 > The Worker's code is unchanged since v0.30.0 —
 > `git diff v0.48.0..v0.53.0 -- app/cloudflare-bot/src/` is EMPTY, so
-> the v0.52.0 deployment already serves byte-identical code: this
-> round's ritual is the live health-and-parity check.
+> this deploy is the release ritual's health-and-parity check, not a
+> code change.
 >
-> **Verified live (no token needed):** `/health` →
+> **Deploy ritual (~2 minutes, token in hand):** `wrangler whoami` →
+> the owner's account resolved (aliassadi.plus@gmail.com) with the
+> `CLOUDFLARE_API_TOKEN` secret ✓ → `npx wrangler deploy` → version
+> `ca259efe…` (137.45 KiB / 32.52 KiB gzip), both queue consumers +
+> producers attached (curator-ingest, curator-ingest-dlq), D1 (DB:
+> curator-bot) + KV (CACHE) bindings carried, and all four secrets
+> persisted across the deploy (`wrangler secret list`: BOT_TOKEN,
+> GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET) ✓.
+>
+> **Verified live:** `/health` →
 > `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
-> ✓ · root → `200` ✓. The ritual re-deploy itself (wrangler) needs
-> the owner's `CLOUDFLARE_API_TOKEN`, a chat-provided secret this
-> sandbox no longer holds — since the release changes NOTHING under
-> `src/`, the live 9639f0fb deployment IS the v0.53.0 worker; a
-> re-deploy would mint a functionally identical version ID. Next
-> time the token is in hand, `npx wrangler deploy` from this folder
-> is the whole ritual (secrets and bindings persist across deploys).
+> ✓ · root → `200` in 0.28 s ✓ · `queues info curator-ingest` →
+> 1 producer + 1 consumer, both `worker:github-to-obsidian-bot` ✓.
+> The previous live deployment (9639f0fb, the v0.52.0 ritual) already
+> served byte-identical code — this re-deploy minted the functionally
+> identical version ID exactly as the last record predicted, closing
+> the one follow-up it left open.
 >
 > Desktop release v0.53.0 (GitCurator-v0.53.0-windows.zip, 129 files,
 > 1,024,689 bytes, sha256
