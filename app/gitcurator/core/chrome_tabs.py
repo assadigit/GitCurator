@@ -1,25 +1,78 @@
 #!/usr/bin/env python3
 """
-chrome_tabs.py — v0.50.0, THE FIFTH DOOR: Chrome fetches the pages itself.
+chrome_tabs.py — v0.53.0, THE FIFTH DOOR: Chrome fetches the pages itself.
 
-The owner's report (session): "before finishing the run and fetch, app
+The owner's report (this session): "it tried to open a chrome tabs,
+but crashed and closed, and app shown false positive of success, in
+other words it didn't wait for sites to load and gather their data."
+
+The diagnosis. The v0.50 take step judged a tab with two weak tests:
+``document.readyState == 'complete'`` and an outerHTML longer than
+200 bytes. Both are TRUE on Chrome's OWN failure pages — a tab that
+shows "This site can't be reached" (any ERR_* code) is complete with
+10 KB of error-page DOM; an "Aw, Snap" crash page passes the same;
+a bot-challenge interstitial ("Just a moment…") loads complete and
+STAYS — and the DOM read fired the instant readyState flipped, so a
+challenge that would resolve (or redirect) two seconds later was
+taken as the page. A Chrome that crashed, a site that was down, or
+a challenge that hadn't resolved all became "✅ took the page from
+your Chrome" — a delivered file, a consumed queue row, a note built
+off an error page. A false positive of success, exactly as reported.
+
+The v0.53 law — the door WAITS for the page, and a crash is never a
+delivery:
+
+    - the load watch polls ``document.readyState`` AND the tab's own
+      ``location.href`` together: a tab that ends on ``about:blank``
+      or ``chrome-error://`` never loaded the site, whatever its
+      readyState says;
+    - a page must stay COMPLETE at ONE http(s) URL for
+      ``PAGE_SETTLE_S`` (2.0 s) before the DOM is read — the settle
+      restarts on every href change (the challenge→content redirect,
+      the late swap), so "waited for the site to load" means the page
+      was STILL, not merely finished;
+    - the DOM read must pass :func:`page_is_real` — the tab's own
+      URL (http/https only, never Chrome's), an ``ERR_*`` code in the
+      DOM (locale-independent — Chrome prints the code, not prose),
+      the crash phrases, the challenge grammar (title phrases the
+      interstitials use + the markers only a challenge page carries);
+    - a page that reads as a challenge KEEPS the whole budget — the
+      owner's real Chrome may still pass it (that is the door's whole
+      point) — and a page that never passes is named honestly
+      ("stayed on a bot challenge"), never delivered;
+    - a Chrome error page or a crash page is a failure NOW, with the
+      page's own name in the error ("the tab showed Chrome's error
+      page (ERR_CONNECTION_RESET)"), never a delivered page;
+    - the delivery report carries the failures (``failed_links``:
+      url + error each) so the GUI's end-of-delivery modal can say
+      what the owner asked to be told: "xx number of links didn't
+      generate content or wasn't successful or got error xxx" —
+      they keep waiting in the retry queue;
+    - the consume side (:mod:`gitcurator.core.hand_delivery`)
+      re-verifies every page the APP delivered (queue rows stamped
+      ``door: 'auto'``): one that fails the same verdict is
+      discarded (the app's own file, removed) and the link keeps
+      waiting — the owner's Ctrl+S pages stay the owner's verdict.
+
+The original report (v0.50): "before finishing the run and fetch, app
 must show a modal, 'xx' number of links didn't generate content or
 wasn't successful or got error xxx … want to retry them in real
 browser? if user said this, app automatically opens them in a new
 session of user's own google chrome and start tabs and fetches the
 data that way."
 
-The diagnosis. The fourth door (v0.48.0) hands a walled page back to
-the OWNER's hand: open in Chrome, Ctrl+S, save into the folder — three
-manual moves per link. The owner's new ask removes the hand: when the
-run ends with links that generated no content, the app itself opens
-the owner's REAL Google Chrome in a fresh session, starts one tab per
-failed link, waits for each page to load, and takes the content from
-the live page — the machine doors never touch it, the owner's Chrome
-does the fetching. The delivery still lands in the SAME folder the
-fourth door consumes (``<vault>/_review/hand-delivered/``), so the
-rest of the pipeline is unchanged: a delivered page IS a real fetch,
-the note is written, the retry row resolves.
+The diagnosis (v0.50). The fourth door (v0.48.0) hands a walled page
+back to the OWNER's hand: open in Chrome, Ctrl+S, save into the
+folder — three manual moves per link. The owner's ask removes the
+hand: when the run ends with links that generated no content, the app
+itself opens the owner's REAL Google Chrome in a fresh session,
+starts one tab per failed link, waits for each page to load, and
+takes the content from the live page — the machine doors never touch
+it, the owner's Chrome does the fetching. The delivery still lands
+in the SAME folder the fourth door consumes
+(``<vault>/_review/hand-delivered/``), so the rest of the pipeline is
+unchanged: a delivered page IS a real fetch, the note is written, the
+retry row resolves.
 
 The mechanics (no new dependency — pure stdlib, like the whole core):
 
@@ -39,9 +92,13 @@ The mechanics (no new dependency — pure stdlib, like the whole core):
     4. TAKE — over each tab's DevTools WebSocket (a ~200-line raw
        socket client: masked client frames, unmasked server frames,
        fragmentation, ping/pong) the app waits for
-       ``document.readyState`` to reach 'complete', then reads
-       ``document.documentElement.outerHTML`` — the live DOM, after
-       every script and challenge has done its work.
+       ``document.readyState`` to reach 'complete' AT an http(s)
+       ``location.href``, holds that state through the settle window
+       (a challenge's post-load redirect restarts it), and only then
+       reads ``document.documentElement.outerHTML`` — the live DOM,
+       after every script and challenge has done its work — and the
+       DOM must pass :func:`page_is_real` (a Chrome error page, a
+       crash page, a stuck challenge are failures, never pages).
     5. DELIVER — the HTML lands as the link's suggested filename in
        the hand-delivered folder (the queue row was enqueued with the
        'auto' door marker first, so the consume path finds it), the
@@ -57,10 +114,18 @@ The law, kept as tight as the other four doors:
     - dry-run NEVER launches (the rehearsed delivery reports what it
       would have fetched and writes nothing);
     - a failed tab is honest ('Chrome would not open a tab', 'the
-      page never finished loading', 'the page rendered empty') and
-      never raises — the fifth door must never break a batch;
-    - delivered pages are OURS (the app wrote them), owner-saved
-      pages stay the owner's — the folder's README law is unchanged;
+      page never finished loading', 'the tab showed Chrome's error
+      page (ERR_…)', 'the page stayed on a bot challenge', 'the page
+      rendered empty') and never raises — the fifth door must never
+      break a batch;
+    - THE PAGE IS WAITED FOR (v0.53): complete at an http(s) URL,
+      still for the settle window, real by the verdict — anything
+      less is a named failure, never a delivered page and never a
+      false positive of success;
+    - delivered pages are OURS (the app wrote them — and the consume
+      side re-verifies them, discarding an app-delivered page that
+      turns out to be an error page), owner-saved pages stay the
+      owner's — the folder's README law is unchanged;
     - the config ``web_browser_retry`` (default ON) opts the modal
       out; ``web_browser_retry_timeout_s`` (45) and
       ``web_browser_retry_wave`` (8) tune the door.
@@ -78,6 +143,7 @@ import base64
 import http.client
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -123,6 +189,47 @@ _CHROME_FLAGS = (
 #: (split WITHOUT the ws:// — the endpoint keeps its scheme so the
 #: URL parser can read the port; a lesson the tests taught the door.)
 _DEVTOOLS_LINE = 'DevTools listening on '
+
+#: v0.53.0 — the settle window: how long a page must stay COMPLETE
+#: at ONE http(s) URL before the DOM is read. The settle restarts on
+#: every href change, so a challenge's post-load redirect (the very
+#: moment the real content takes over) is never mistaken for the
+#: finished page. Patchable in tests (the poll cadence keeps the wait
+#: honest; a small settle makes each scripted check fast).
+PAGE_SETTLE_S = 2.0
+
+#: The load-watch poll cadence (seconds) — also the settle's tick.
+_POLL_CADENCE_S = 0.4
+
+#: v0.53.0 — Chrome's own error pages carry an ERR_* code in the DOM
+#: (locale-independent: the code, not the prose, is printed for every
+#: locale). A page whose DOM shows one is a TAB THAT FAILED, never a
+#: delivered page — the exact false positive the owner reported.
+_ERR_CODE_RE = re.compile(r'ERR_[A-Z0-9_]{2,}')
+
+#: Chrome's crash phrases (the renderer's own sad-tab pages).
+_CRASH_MARKERS = ('aw, snap', "he's dead, jim", 'err_crashed')
+
+#: The bot-challenge grammar, two scopes: the TITLE phrases the
+#: interstitials use (a title is a sentence, not prose — safe to
+#: match), and the HTML markers only a challenge page carries (the
+#: Cloudflare challenge machinery's own script names). A page that
+#: reads as a challenge is NOT content: the door keeps waiting (the
+#: owner's real Chrome may still pass it) and names it honestly if it
+#: never does — but it is never delivered as the site's data.
+_CHALLENGE_TITLE_MARKERS = (
+    'just a moment', 'checking your browser', 'verify you are human',
+    'attention required', 'security check', 'ddos protection',
+    'enable javascript and cookies', 'access denied', 'blocked',
+)
+_CHALLENGE_HTML_MARKERS = (
+    'challenge-platform', 'cf-chl', '__cf_chl', 'cf_chl_opt',
+    'turnstile', 'cdn-cgi/challenge', 'cf-browser-verification',
+)
+
+#: v0.53.0 — the smallest DOM that can be a real page (the floor the
+#: v0.50 door already kept; the verdict does the heavy lifting now).
+_MIN_REAL_HTML_BYTES = 200
 
 
 # ---------------------------------------------------------------------------
@@ -774,12 +881,192 @@ def fetch_pages_via_chrome(urls: List[str],
     return results
 
 
+# ---------------------------------------------------------------------------
+# v0.53.0 — the page verdict: is this tab the SITE, or Chrome's own
+# answer to a failure? (pure — the testable heart of the fix)
+# ---------------------------------------------------------------------------
+
+
+def page_is_real(html: str, href: str, title: str = '') -> (bool, str):
+    """True when the tab is showing the SITE's page. The four laws, in
+    order (the strongest sentence wins): the tab's own URL must be
+    http(s) — a tab that ended on ``chrome-error://`` or ``about:`` is
+    Chrome's page, not the site's; the DOM must not carry an ``ERR_``
+    code (Chrome prints the code, not prose, in every locale — a
+    network-error page's own signature); it must not read as a crash
+    page ('Aw, Snap'); it must not read as a bot challenge (the title
+    phrases the interstitials use + the markers only a challenge page
+    carries). Returns ``(ok, reason)`` — ``reason`` is the honest
+    sentence the log, the report and the modal all carry; '' when ok.
+    Pure — no socket, no browser."""
+    href = (href or '').strip()
+    html = html or ''
+    lowered = html.lower()
+    t = (title or '').strip().lower()
+    try:
+        proto = (urlparse(href).scheme or '').lower()
+    except Exception:
+        proto = ''
+    if proto not in ('http', 'https'):
+        shown = href or 'an empty URL'
+        return False, (f"the tab ended on {shown!r} — Chrome's own "
+                       f"page, not the site's")
+    m = _ERR_CODE_RE.search(html)
+    if m:
+        return False, (f"the tab showed Chrome's error page "
+                       f"({m.group(0)}) — the site never loaded")
+    for marker in _CRASH_MARKERS:
+        if marker in lowered or marker in t:
+            return False, ("the tab crashed ('Aw, Snap' — the renderer "
+                           "died)")
+    for marker in _CHALLENGE_TITLE_MARKERS:
+        if marker in t:
+            return False, (f"the page stayed on a bot challenge "
+                           f"(title: {marker!r})")
+    for marker in _CHALLENGE_HTML_MARKERS:
+        if marker in lowered:
+            return False, (f"the page stayed on a bot challenge "
+                           f"({marker})")
+    return True, ''
+
+
+def _is_site_url(href: str) -> bool:
+    """True for an http(s) URL with a host — the load watch's own
+    cheap check (a tab on ``about:blank`` or ``chrome-error://`` is
+    still LOADING as far as the door is concerned)."""
+    try:
+        u = urlparse(href or '')
+        return (u.scheme or '').lower() in ('http', 'https') \
+            and bool(u.netloc)
+    except Exception:
+        return False
+
+
+def _split_probe(probe: str) -> (str, str):
+    """``'complete|https://…'`` → ``('complete', 'https://…')`` — the
+    load watch reads readyState and the tab's URL in ONE DevTools
+    call (one round trip, one atomic observation)."""
+    if '|' in (probe or ''):
+        state, href = probe.split('|', 1)
+        return state.strip(), href.strip()
+    return (probe or '').strip(), ''
+
+
+def _read_dom(ws: 'CDPSocket') -> (str, str):
+    """The live DOM + the title, with the one context-swap retry the
+    v0.50 door learned (a navigation landing exactly on the final read
+    gets a second chance). Returns ('', '') when both reads fail —
+    the caller's verdict names the page honestly."""
+    html = ''
+    for retry in (0, 1):
+        try:
+            html = ws.evaluate('document.documentElement.outerHTML',
+                               timeout=10.0)
+            break
+        except CDPError:
+            if retry:
+                break
+            time.sleep(1.0)
+    title = ''
+    try:
+        title = ws.evaluate('document.title', timeout=5.0)
+    except CDPError:
+        pass  # a titleless page is still a delivered page
+    return html or '', title or ''
+
+
+def _read_and_verdict(ws: 'CDPSocket', href: str) -> Dict:
+    """One DOM read judged by :func:`page_is_real` — the take step's
+    own gate. Returns ``{'ok', 'html', 'title', 'href', 'error'}``;
+    ``error`` carries the verdict's honest sentence on failure."""
+    html, title = _read_dom(ws)
+    ok, reason = page_is_real(html, href, title)
+    if not ok:
+        return {'ok': False, 'html': '', 'title': '', 'href': href,
+                'error': reason}
+    if not html or len(html.strip()) < _MIN_REAL_HTML_BYTES:
+        return {'ok': False, 'html': '', 'title': title, 'href': href,
+                'error': 'the page rendered empty'}
+    return {'ok': True, 'html': html, 'title': title, 'href': href,
+            'error': ''}
+
+
+def _take_live_page(ws: 'CDPSocket', page_timeout_s: float) -> Dict:
+    """v0.53.0 — the load watch. The door WAITS for the page: the poll
+    observes ``document.readyState`` and the tab's ``location.href``
+    together (one DevTools call); a page counts as loaded only when it
+    is 'complete' AT an http(s) URL AND has stayed there for
+    ``PAGE_SETTLE_S`` (every href change or readyState drop restarts
+    the settle — the challenge→content redirect, the late swap); only
+    then is the DOM read — and the DOM must pass
+    :func:`page_is_real`. A page that reads as a CHALLENGE keeps the
+    whole remaining budget (the owner's real Chrome may still pass it
+    — that is the door's whole point); a page that reads as a Chrome
+    error page or a crash is a named failure immediately. At the
+    deadline the last observation is told honestly. Returns
+    ``{'ok', 'html', 'title', 'href', 'error'}``; raises only
+    ``CDPClosedError`` (the tab is GONE — the caller names it)."""
+    deadline = time.monotonic() + float(page_timeout_s)
+    probe = ''
+    complete_at = None      # when (complete + site URL) first held
+    settled_href = ''
+    last_reason = ''        # the last challenge verdict (told at deadline)
+    while time.monotonic() < deadline:
+        try:
+            probe = ws.evaluate(
+                'document.readyState + "|" + location.href',
+                timeout=5.0)
+        except CDPTimeoutError:
+            pass            # a busy page — the last observation stands
+        except CDPClosedError:
+            raise           # the tab is GONE — fail fast
+        except CDPError:
+            probe = ''      # mid-navigation context swap — loading
+        state, href = _split_probe(probe)
+        if state == 'complete' and _is_site_url(href):
+            if complete_at is None or href != settled_href:
+                complete_at = time.monotonic()
+                settled_href = href
+            if time.monotonic() - complete_at >= PAGE_SETTLE_S:
+                # the page has been STILL — read it and judge it
+                page = _read_and_verdict(ws, settled_href)
+                if page['ok'] or 'challenge' not in page['error']:
+                    return page
+                # a challenge: the owner's Chrome may still pass it —
+                # restart the settle and keep the remaining budget
+                last_reason = page['error']
+                complete_at = None
+                settled_href = ''
+                probe = ''
+        else:
+            complete_at = None
+            settled_href = ''
+        time.sleep(_POLL_CADENCE_S)
+    # the budget ran out — tell what the tab was LAST showing
+    if last_reason and 'challenge' in last_reason:
+        return {'ok': False, 'html': '', 'title': '', 'href': '',
+                'error': last_reason.replace(
+                    'stayed on a bot challenge',
+                    'never got past the bot challenge')}
+    state, href = _split_probe(probe)
+    if state != 'complete':
+        return {'ok': False, 'html': '', 'title': '', 'href': href,
+                'error': f'the page never finished loading in '
+                         f'{float(page_timeout_s):.0f}s'}
+    page = _read_and_verdict(ws, href or settled_href)
+    if page['ok']:
+        return page     # a real page that settled but missed its window
+    return page
+
+
 def _fetch_opened_tab(session: 'ChromeSession', url: str, tab: Dict,
                       page_timeout_s: float,
                       log: Callable) -> Dict:
     """Take one page through a tab that is ALREADY open (the wave
-    opened it): connect its DevTools socket, wait for the load, read
-    the live DOM, close the tab. Same result shape, never raises."""
+    opened it): connect its DevTools socket, WAIT for the page (the
+    v0.53 load watch — complete at an http(s) URL, still for the
+    settle, real by the verdict), read the live DOM, close the tab.
+    Same result shape, never raises."""
     target_id = str(tab.get('id') or '')
     ws_url = str(tab.get('webSocketDebuggerUrl') or '')
     try:
@@ -790,51 +1077,15 @@ def _fetch_opened_tab(session: 'ChromeSession', url: str, tab: Dict,
         ws = CDPSocket(parts.hostname or '127.0.0.1',
                        parts.port or session.port, parts.path or '/')
         try:
-            deadline = time.monotonic() + page_timeout_s
-            ready = False
-            while time.monotonic() < deadline:
-                try:
-                    state = ws.evaluate('document.readyState',
-                                        timeout=5.0)
-                except CDPTimeoutError:
-                    state = ''
-                except CDPClosedError:
-                    raise   # the tab is GONE — fail fast, don't poll
-                except CDPError:
-                    # mid-navigation ("Execution context was destroyed",
-                    # a redirect swapping the document) — the page is
-                    # STILL LOADING, not failed: keep polling
-                    state = ''
-                if state == 'complete':
-                    ready = True
-                    break
-                time.sleep(0.4)
-            remaining = max(8.0, deadline - time.monotonic())
-            html = ''
-            for retry in (0, 1):     # one retry — a context swap can
-                try:                 # land exactly on the final read
-                    html = ws.evaluate(
-                        'document.documentElement.outerHTML',
-                        timeout=remaining)
-                    break
-                except CDPError:
-                    if retry:
-                        raise
-                    time.sleep(1.0)
-            title = ''
-            try:
-                title = ws.evaluate('document.title', timeout=5.0)
-            except CDPError:
-                pass  # a titleless page is still a delivered page
+            page = _take_live_page(ws, page_timeout_s)
         finally:
             ws.close()
-        if not html or len(html.strip()) < 200:
-            return {'url': url, 'ok': False, 'html': '', 'title': title,
-                    'error': ('the page never finished loading in '
-                              f'{page_timeout_s:.0f}s' if not ready else
-                              'the page rendered empty')}
-        return {'url': url, 'ok': True, 'html': html, 'title': title,
-                'error': ''}
+        if not page.get('ok'):
+            return {'url': url, 'ok': False, 'html': '',
+                    'title': page.get('title') or '',
+                    'error': page.get('error') or 'the page never loaded'}
+        return {'url': url, 'ok': True, 'html': page['html'],
+                'title': page.get('title') or '', 'error': ''}
     except CDPClosedError as e:
         return {'url': url, 'ok': False, 'html': '', 'title': '',
                 'error': f'the tab closed itself ({e})'}
@@ -915,16 +1166,23 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
                              ) -> Dict:
     """The fifth door, end to end: queue the failed links (the same
     queue.json the fourth door reads, stamped ``door: 'auto'``), fetch
-    every page through the owner's real Chrome, and write each one as
-    its suggested filename into ``<vault>/_review/hand-delivered/`` —
-    so the next pipeline pass (or the caller's immediate re-run)
-    consumes it as a REAL fetch with the auto-delivery story in the
-    reason. Dry-run launches nothing and writes nothing (the offer is
-    rehearsed, honestly counted). Returns
-    ``{'delivered', 'failed', 'urls', 'folder'}`` — never raises."""
+    every page through the owner's real Chrome — WAITING for each page
+    (the v0.53 load watch: complete at an http(s) URL, still for the
+    settle, real by the verdict — an error page or a crash page is a
+    named failure, never a delivered page) — and write each one as its
+    suggested filename into ``<vault>/_review/hand-delivered/``, so the
+    next pipeline pass (or the caller's immediate re-run) consumes it
+    as a REAL fetch with the auto-delivery story in the reason.
+    Dry-run launches nothing and writes nothing (the offer is
+    rehearsed, honestly counted). Returns ``{'delivered', 'failed',
+    'urls', 'failed_links', 'folder'}`` — ``failed_links`` is
+    ``[{'url', 'error'}]`` for every page that could not be gathered
+    (the GUI's end-of-delivery modal words the owner's own ask:
+    "xx links didn't generate content or wasn't successful or got
+    error xxx"). Never raises."""
     from gitcurator.core import hand_delivery as _hd
     log = log or (lambda *a, **k: None)
-    report = {'delivered': 0, 'failed': 0, 'urls': [],
+    report = {'delivered': 0, 'failed': 0, 'urls': [], 'failed_links': [],
               'folder': _hd.hand_delivery_dir(vault_path)}
     if not vault_path or not links:
         return report
@@ -979,6 +1237,21 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
         url = page.get('url') or ''
         if not page.get('ok') or not page.get('html'):
             report['failed'] += 1
+            report['failed_links'].append(
+                {'url': url,
+                 'error': str(page.get('error') or 'no content').strip()})
+            continue
+        # v0.53.0 — the verdict is the DELIVERY's law too (the fetch
+        # driver already judges its own tabs; this guard keeps the
+        # delivered count honest whatever the fetch path): a page that
+        # reads as a Chrome error page, a crash or a challenge is a
+        # named failure here, never a written file
+        ok, reason = page_is_real(page['html'], url,
+                                  page.get('title') or '')
+        if not ok:
+            report['failed'] += 1
+            report['failed_links'].append({'url': url, 'error': reason})
+            log(f"⚠️ {url}: {reason}", "warning")
             continue
         suggested = _hd.suggested_filename(url)
         path = os.path.join(folder, suggested)
@@ -995,6 +1268,8 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
                 "success")
         except Exception as e:
             report['failed'] += 1
+            report['failed_links'].append(
+                {'url': url, 'error': f'could not write the page: {e}'})
             log(f"⚠️ Could not write the delivered page for {url}: {e}",
                 "warning")
     if report['delivered']:
@@ -1005,13 +1280,20 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
     elif report['failed']:
         log(f"🤖 Fifth door: every tab failed ({report['failed']}) — the "
             f"links keep waiting in the retry queue", "warning")
+    if report['failed_links'] and 0 < report['delivered']:
+        # v0.53.0 — a PARTIAL delivery is told too: the owner asked for
+        # "xx number of links didn't generate content or wasn't
+        # successful or got error xxx", not silence after the fanfare
+        for fl in report['failed_links'][:5]:
+            log(f"⚠️ {fl['url']}: {fl['error']}", "warning")
     return report
 
 
 __all__ = [
     'CONFIG_GATE', 'DEFAULT_PAGE_TIMEOUT_S', 'DEFAULT_WAVE',
-    'MAX_MESSAGE_BYTES', 'CDPError', 'CDPTimeoutError', 'CDPClosedError',
-    'encode_client_frame', 'decode_frames', 'CDPSocket',
+    'MAX_MESSAGE_BYTES', 'PAGE_SETTLE_S', 'CDPError', 'CDPTimeoutError',
+    'CDPClosedError', 'encode_client_frame', 'decode_frames', 'CDPSocket',
     'is_loopback_url', 'ChromeSession', 'fetch_pages_via_chrome',
-    'collect_failed_fetch_links', 'deliver_pages_via_chrome',
+    'page_is_real', 'collect_failed_fetch_links',
+    'deliver_pages_via_chrome',
 ]

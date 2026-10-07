@@ -1,3 +1,94 @@
+## [0.53.0] — The door waits for the page; a crash is never a delivery — 2026-10-10
+
+Owner ask (session): "The problem is that it tried to open a chrome
+tabs, but crashed and closed, and app shown false positive of
+success, in other words it didn't wait for sites to load and gather
+their data." Desktop release v0.53.0, Worker unchanged at **0.30.0**
+(it never touches the vault). Suite grows **1437 → 1468** (31 cases
+join tests/test_fifthdoor.py — pure stdlib at the unit level, no
+browser ever launches under test).
+
+**The diagnosis — two weak tests were the whole take step.** The
+fifth door (v0.50) judged a tab "successful" with exactly two checks:
+``document.readyState == 'complete'`` and an ``outerHTML`` longer
+than 200 bytes. Both are TRUE on Chrome's OWN failure pages. A tab
+that shows "This site can't be reached" (any ``ERR_*`` code — the
+site was down, the connection reset) is complete with ten kilobytes
+of error-page DOM. An "Aw, Snap" crash page passes the same. A
+bot-challenge interstitial ("Just a moment…") loads complete and
+STAYS — and the DOM read fired the very instant readyState flipped,
+so a challenge that would resolve — or redirect — two seconds later
+was taken as the page. A Chrome that crashed, a site that was down,
+a challenge that hadn't resolved: all became "✅ took the page from
+your Chrome", a delivered file, a consumed queue row, a note built
+off an error page. A false positive of success, exactly as reported.
+
+**The fix — the load watch.** The take step now WAITS for the page:
+the poll observes ``document.readyState`` AND the tab's own
+``location.href`` together (one DevTools call — a tab that ends on
+``about:blank`` or ``chrome-error://`` never loaded the site,
+whatever its readyState says); a page counts as loaded only when it
+is complete AT an http(s) URL AND has stayed there for
+``PAGE_SETTLE_S`` (2.0 s — every href change or readyState drop
+RESTARTS the settle, so the challenge→content redirect, the late
+swap, is never mistaken for the finished page); only then is the DOM
+read — "waited for the site to load" means the page was STILL, not
+merely finished.
+
+**The fix — the verdict.** The DOM must now pass ``page_is_real``:
+the tab's own URL must be http(s) (never Chrome's), the DOM must not
+carry an ``ERR_*`` code (Chrome prints the code, not prose, in every
+locale — a network-error page's own signature), must not read as a
+crash page, must not read as a bot challenge (the title phrases the
+interstitials use + the markers only a challenge page carries). A
+page that reads as a challenge KEEPS the whole remaining budget —
+the owner's real Chrome may still pass it, that is the door's whole
+point — and one that never passes is named honestly ("never got
+past the bot challenge"). A Chrome error page or a crash page is a
+failure NOW, with the page's own name in the error ("the tab showed
+Chrome's error page (ERR_CONNECTION_RESET) — the site never
+loaded") — never a delivered page, never a note.
+
+**The fix — the honesty is told, not logged away.** The delivery
+report carries every failure (``failed_links``: url + error each),
+and the GUI's end-of-run delivery now ends with the modal the owner
+asked for in his own words: "N link(s) didn't generate content from
+your Chrome (the tabs crashed, showed an error page, or never
+finished loading) — they keep waiting in the retry queue", with the
+first errors named. A partial delivery is told too. The CLI
+``--chrome-retry`` carries the same names. No more silence after the
+fanfare.
+
+**The fix — the consume side re-verifies the app's own pages.** The
+pages the APP delivered (queue rows stamped ``door: 'auto'``) are
+re-verified at consume time through the same verdict: a file that
+turns out to be a Chrome error page, a crash page or a stuck
+challenge — what a crashed Chrome session leaves behind, including
+one from BEFORE this fix — is DISCARDED (the app's own file,
+removed; the owner's saves are never touched, they stay the owner's
+verdict, trusted as always) and the link keeps waiting for its
+doors. The false positives already sitting in a vault clean
+themselves up on the next batch.
+
+**Also:** ``stamp_stored_rows`` and the master-table grammar are
+untouched (the table's laws are stable); the fifth door's config
+knobs are unchanged (``web_browser_retry``, default ON;
+``web_browser_retry_timeout_s`` 45; ``web_browser_retry_wave`` 8);
+the settle is a module constant (``PAGE_SETTLE_S``), not a new knob
+— the door's wait is a law, not a preference. 31 cases in
+PLACEHOLDER (URL law, ERR_ codes,
+crash phrases, challenge grammar), the load watch through the
+scripted DevTools sockets (a waited real page, the error page never
+delivered, the crash page never delivered, a challenge that passes
+is waited for, a challenge that never passes is named, never-finish
+and about:blank named, the settle restarts on the href swap), the
+report's failed_links detail, the consume-side re-verification (an
+auto error page discarded, an owner save trusted, the discard
+re-asks the fifth door), and the end-of-delivery modal's bare-mixin
+routing. The one pre-existing test adjusted to the new grammar is
+the mid-navigation context-destruction case (its scripted probes now
+answer the combined readyState|href call).
+
 ## [0.52.0] — The icon column speaks; the hand is Chrome's own — 2026-10-09
 
 Owner ask (session): "Please pay attention, see I set hand emoji, but
@@ -114,7 +205,7 @@ those that dont have skeleton or red cross or such emojies and have
 this state ' - ' … so before declaring everything is uptodate it must
 check 'decomissioned' note and find those that should be retried."
 Desktop release v0.51.0, Worker unchanged at **0.30.0** (it never
-touches the vault). Suite grows **1366 → 1396** (30 cases in
+touches the vault). Suite grows **1366 → 1396** (31 cases in
 tests/test_masterretry.py — pure stdlib at the unit level).
 
 **The diagnosis.** The caught-up path answered only ONE question —
