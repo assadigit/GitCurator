@@ -5,6 +5,41 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.54.0 deploy record — the unchanged 0.30.0 worker, re-deployed and verified (DEPLOYED ✅)
+
+> **Deployed to production on 2026-10-08** (worker version ID
+> `217d4ad9-80df-470c-aba1-dcac8cc7b03d`, URL
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`).
+> v0.54.0 is a DESKTOP-ONLY release (the door keeps its grip; the
+> profile remembers — the scorecard waits for the notes to land, the
+> DevTools socket re-connects, the dedicated Chrome profile persists
+> its cookies: all desktop code in `gitcurator/core/chrome_tabs.py`
+> and the GUI's `processing_control.py`). The Worker's code is
+> unchanged since v0.30.0, so this deploy is the release ritual's
+> health-and-parity check, not a code change.
+>
+> **Deploy ritual (~2 minutes, token in hand):** `wrangler whoami` →
+> the owner's account resolved (aliassadi.plus@gmail.com) with the
+> `CLOUDFLARE_API_TOKEN` secret ✓ → `npx wrangler deploy` → version
+> `217d4ad9…`, both queue consumers + producers attached
+> (curator-ingest, curator-ingest-dlq), D1 (DB: curator-bot) + KV
+> (CACHE) bindings carried, and all four secrets persisted across the
+> deploy (`wrangler secret list`: BOT_TOKEN, GITHUB_PAT,
+> ALLOWED_USER_IDS, HMAC_SECRET) ✓.
+>
+> **Verified live:** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` in 0.27 s ✓.
+>
+> Desktop release v0.54.0 (GitCurator-v0.54.0-windows.zip, 129 files,
+> 1,033,146 bytes, sha256
+> `ac8cdd62e7308cb4fcebd3cb6d7c68a20ca749ccf7e891d9409659e37e3069e8`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.54.0 tag (runs 37699534989 / 37699534509 — 1512 tests, 85-module
+> compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.53.0 deploy record — the re-deploy ritual COMPLETED with the token in hand (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-07** (worker version ID
