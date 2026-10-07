@@ -926,6 +926,65 @@ def cmd_reset_dead(args) -> int:
     return 0
 
 
+def cmd_hand_delivery(args) -> int:
+    """v0.48.0 — the fourth door on the CLI: list every retry-queued
+    link whose last failure was a WALL (403 / bot defense / TLS
+    fingerprint — the class the three machine doors could not open),
+    queue them all for hand-delivery, and open each in the owner's
+    REAL Chrome. The saved pages (Ctrl+S, 'Webpage, HTML Only', the
+    suggested filename — see the README in the hand-delivered folder)
+    are consumed as REAL fetches by the next --auto / --retry-failed
+    run. Nothing is retired; the links keep waiting."""
+    banner()
+    path = _config_path(args.config)
+    cfg = load_config(path) or {}
+    vault = (cfg.get("website_vault_path") or "").strip()
+    if not vault:
+        cli_print("website_vault_path is not set — run --cli --init first.",
+                  "warning")
+        return 1
+    from gitcurator.core import hand_delivery as _hd
+    from gitcurator.core import website_pipeline as _wp
+    from gitcurator.constants import APP_DIR as _APP_DIR
+    _db_file = os.path.join(_APP_DIR, "cache.db")
+    if not os.path.exists(_db_file):
+        cli_print("No cache.db yet — nothing has failed (nothing is "
+                  "walled).", "success")
+        return 0
+    state = _wp.WebsiteStateDB(_db_file)
+    try:
+        rows = _hd.walled_retry_rows(state)
+    finally:
+        state.close()
+    print(paint("Walled links (the fourth door — your real Chrome)", C.BOLD))
+    print(rule())
+    if not rows:
+        print(paint("  ✓ empty — no retry-queued link ends in a wall.",
+                    C.GREEN))
+        return 0
+    for r in rows:
+        wall = (r.get("wall") or "")[:100]
+        att = r.get("attempts", 0)
+        line = f"attempt {att} · the wall: {wall}"
+        print(f"  {paint('•', C.YELLOW)} {r['url']}")
+        print(f"      {paint(line, C.DIM)}")
+    print()
+    urls = [r["url"] for r in rows]
+    walls = {r["url"]: r.get("wall") or "" for r in rows}
+    report = _hd.enqueue_hand_delivery(
+        vault, urls, walls=walls, log=lambda *_a, **_k: None,
+        open_chrome=True)
+    cli_print(f"🖐 {report['added']} link(s) queued for hand-delivery, "
+              f"{report['opened']} opened in your browser.", "success")
+    folder = _hd.hand_delivery_dir(vault)
+    print(paint("Next: in Chrome, Ctrl+S → 'Webpage, HTML Only' → the "
+                "suggested filename → this folder:", C.DIM))
+    print(paint(f"  {folder}", C.CYAN))
+    print(paint("The next --auto / --retry-failed run consumes every "
+                "delivered page as a REAL fetch.", C.DIM))
+    return 0
+
+
 # ----------------------------------------------------------------------------
 # --auto : fully automatic run (bot SYNC → process → seal → publish)
 # ----------------------------------------------------------------------------
@@ -1329,6 +1388,11 @@ def build_parser():
                    help="list the 404 quarantine (confirmed-dead + attempts)")
     p.add_argument("--reset-dead", action="store_true",
                    help="clear the 404 quarantine (every link gets fresh attempts)")
+    p.add_argument("--hand-delivery", action="store_true",
+                   help="v0.48.0 — the fourth door: list every walled link "
+                        "(403/bot-defense/TLS), queue it for hand-delivery "
+                        "and open it in your real Chrome; the saved page "
+                        "becomes a real fetch on the next run")
     p.add_argument("--status", action="store_true",
                    help="show config summary + cache/retry/404-quarantine stats")
     p.add_argument("--test-connection", action="store_true",
@@ -1393,6 +1457,8 @@ def cli_main(argv=None) -> int:
         return cmd_list_dead(args)
     if args.reset_dead:
         return cmd_reset_dead(args)
+    if getattr(args, "hand_delivery", None):
+        return cmd_hand_delivery(args)
     if args.mark_read:
         return cmd_mark_read(args)
 
@@ -1417,6 +1483,7 @@ def cli_main(argv=None) -> int:
     print(f"  {paint('--detect-llm X', C.CYAN):24} Detect & Set a local engine (ollama | llamacpp) — probe, pick, save")
     print(f"  {paint('--list-dead', C.CYAN):24} list the 404 quarantine (dead links)")
     print(f"  {paint('--reset-dead', C.CYAN):24} clear the 404 quarantine")
+    print(f"  {paint('--hand-delivery', C.CYAN):24} the fourth door — open walled links in your real Chrome")
     print(f"  {paint('--retry-failed', C.CYAN):24} reprocess the retry queue")
     print(f"  {paint('--import-file F', C.CYAN):24} curate URLs from a text file")
     print(f"  {paint('--from-id A --to-id B', C.CYAN):24} curate a Telegram ID range")

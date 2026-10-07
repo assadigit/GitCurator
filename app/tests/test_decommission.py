@@ -407,7 +407,11 @@ class TestConsume(_GraveyardCase):
     def test_missing_table_is_a_no_op(self):
         report = wp.consume_decommission_table(self.db, self.vault,
                                                log=lambda *a, **k: None)
+        # v0.48.0 — the report gained 'handed' (the fourth door's
+        # queue gesture count); still all zeros when the table is
+        # missing.
         self.assertEqual(report, {'dead': 0, 'reviewed': 0, 'revived': 0,
+                                  'handed': 0,
                                   'placeholders_swept': 0,
                                   'rows_confirmed': 0})
 
@@ -520,7 +524,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0440(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.47.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.48.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

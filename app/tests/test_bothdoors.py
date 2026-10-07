@@ -347,15 +347,16 @@ class TestSourceContracts(unittest.TestCase):
         self.assertIn("proxy_config.get('enabled')", src)
 
     def test_release_bookkeeping(self):
-        # v0.46.0 — the version pin follows the release (the ladder owns
-        # the headline now; the both-doors beat stays in the log
-        # below the new head).
+        # v0.48.0 — the version pin follows the release (the fourth
+        # door owns the headline now; the both-doors beat stays in the
+        # log below the new heads — the window grew with them).
         with open(os.path.join(_REPO_ROOT, '..', 'VERSION'),
                   encoding='utf-8') as fh:
-            self.assertEqual(fh.read().strip(), '0.47.0')
+            self.assertEqual(fh.read().strip(), '0.48.0')
         with open(os.path.join(_REPO_ROOT, '..', 'CHANGELOG.md'),
                   encoding='utf-8', errors='replace') as fh:
-            head = fh.read(24000)
+            head = fh.read(32000)
+        self.assertIn('[0.47.0]', head)
         self.assertIn('[0.46.0]', head)
         self.assertIn('[0.45.0]', head)
         self.assertIn('[0.44.0]', head)

@@ -1,3 +1,74 @@
+## [0.48.0] — The fourth door: the owner's own Chrome — 2026-10-09
+
+Owner ask (session): "I've noticed that for some links, the fetcher
+got 403 error, but when I enter them manually on my browser they work
+flawlessly, so I think it's about anti-crawling and fetching that
+some sites might use. What if we add another layer (as one of the
+final procedures) of fetching, which app permits me to open in a real
+instance of chrome." Desktop release v0.48.0, Worker unchanged at
+**0.30.0** (it never fetches websites). Suite grows **1244 → 1287**
+(43 cases in tests/test_handdelivery.py — pure stdlib at the unit
+level, no browser ever launches under test).
+
+**The diagnosis.** The ladder's three machine doors (stdlib
+both-routes, the route-aimed refusal alternate, curl_cffi's Chrome
+TLS handshake) still share one thing the strictest bot defenses CAN
+see: none of them is a real Chrome driven by the owner's own hand.
+A challenge that survives the impersonated handshake is, by the
+fetcher's own verdict, "needs a live browser" — and the owner's
+browser IS a live browser, on the owner's residential line, with the
+owner's cookies. The last rung of the ladder is the owner themself.
+
+**The fourth door.** A walled link (refusal family / bot defense /
+challenge / TLS-fingerprint class) can be queued for HAND-DELIVERY
+three ways: More ▸ "🖐 Hand-deliver walled links…" (the picker —
+every retry-queued walled link offered, walls shown, the
+hand-delivered folder revealed), the Review Master Table's Status
+gesture (set a row to "🖐 hand" — queued on the next table consume,
+never a retirement), or the CLI (`--hand-delivery`). The queue is a
+plain JSON file inside the vault
+(``<vault>/_review/hand-delivered/queue.json`` — owner visible,
+owner editable, never a second source of truth), and the README.txt
+written beside it carries the per-link suggested filenames. OPEN
+launches the URL in a REAL Chrome (chrome.exe found by its
+well-known paths; the system browser is the honest fallback, named
+in the log; loopback never opens a browser — the v0.15.1 rule); the
+owner saves the page into the folder (Ctrl+S, "Webpage, HTML Only",
+the suggested filename). CONSUME: the next batch checks the folder
+FIRST for every link it processes — a delivered page IS the fetch (a
+REAL full FetchResult whose reason tells the story: "hand-delivered
+via the owner's real Chrome — the machine doors were walled: …"),
+the queue is stamped, the retry row resolves, and delivered pages
+WAITING in the folder join the batch uninvited (the owner's gesture
+— saving the page — says "process me now").
+
+**The law, kept as tight as the rest of the ladder.** The folder is
+ASKED, never WRITTEN for the link (the app writes only queue.json +
+README.txt; the delivered .html is the owner's hand, untouched,
+consumed in place); hand-delivery is NOT a retirement (a walled link
+keeps waiting while queued — the queue is a memo, not a gate; "🖐
+hand" in the master table never buries anything, and death/reviewed
+still outrank it in a hand-edited cell); a walled failure's reason,
+_review note, and the table's Notes column all gain the fourth-door
+hint (the door that CAN answer it, named where the owner reads);
+resource truths (404, paywall, DNS, redirect) never ask the owner's
+hand — they have their own doors; everything is tolerated (a missing
+folder, a corrupt queue, an unreadable page — the fourth door must
+never break a batch); config "web_hand_delivery" (default ON, now in
+config.example.json) opts the whole door out.
+
+**Gates.** 43 cases in tests/test_handdelivery.py (the wall
+predicate — exactly the refusal/bot-defense/TLS/challenge classes
+earn it; the suggested filename's determinism; the queue — merge,
+re-enqueue reset, corrupt-tolerated, dry-run; the real-Chrome finder
+ladder and loopback's never-open law; the consume side — full
+FetchResult with the story, empty pages keep waiting, queue stamped
+in one movement; the master-table gesture — 🖐 queues never retires,
+idempotent, precedence; the pipeline — delivered answers BEFORE any
+machine door, run() pulls waiting pages in, the walled hint, the
+opt-out). Full suite **1287/1287**, 84-module compile gate OK,
+offline golden 30/30.
+
 ## [0.47.0] — The door that ships itself, and the master table — 2026-10-08
 
 Owner ask (session): "This errors still remained, find a workaround

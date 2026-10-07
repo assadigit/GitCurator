@@ -42,6 +42,7 @@ from gitcurator.constants import (
     APP_DIR, MANAGED_BY_GITCURATOR, NOTE_SCHEMA_VERSION, OWNERSHIP_BANNER,
 )
 from gitcurator.core import dryrun as _dryrun
+from gitcurator.core import hand_delivery as _hand_delivery
 from gitcurator.core import prompts as _prompts
 from gitcurator.core import web_extract as _web_extract
 from gitcurator.core import web_fetch as _web_fetch
@@ -388,6 +389,17 @@ REVIVE_MARKERS = ("♻️", "revived", "restored", "un-decommissioned")
 #: counts either.
 REVIEWED_MARKERS = ("✅", "✔", "☑", "reviewed", "kept", "done")
 
+#: v0.48.0 — the fourth door's suffix: a failure whose class the three
+#: machine doors could not open (refusal family / bot defense / TLS
+#: fingerprint) gains this line, so the _review note, the master table's
+#: Notes, and the log all name the door that CAN answer it — the owner's
+#: own Chrome (More ▸ 🖐 Hand-deliver walled links, the table's 🖐 hand
+#: Status, or --hand-delivery on the CLI).
+HAND_DOOR_HINT = (" — the fourth door: 🖐 hand-deliver it (More ▸ "
+                   "Hand-deliver walled links opens the link in your "
+                   "real Chrome; save the page into the hand-delivered "
+                   "folder and the next batch takes it from there)")
+
 
 def decommission_table_path(vault_path: str) -> str:
     """The graveyard file for one vault (``<vault>/_review/DECOMMISSIONED.md``)."""
@@ -416,6 +428,7 @@ def _parse_decommission_rows(path: str) -> List[Dict]:
         if not url.lower().startswith(('http://', 'https://')):
             continue
         rows.append({'url': url, 'status': parts[6].strip(),
+                     'notes': parts[7].strip() if len(parts) > 7 else '',
                      'line': idx, 'raw': line})
     return rows
 
@@ -475,6 +488,11 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   retirement, same placeholder sweep.
 > ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
 >   like new again.
+> 🖐 hand — the fourth door: queue this link for hand-delivery via
+>   your real Chrome (More ▸ 🖐 Hand-deliver walled links opens it;
+>   save the page into _review/hand-delivered/ and the next batch
+>   consumes it as a real fetch). NOT a retirement — the link keeps
+>   waiting until the page is delivered.
 > blank / unreviewed — still waiting: the automatic retries continue.
 > Rows marked "auto" were retired by the fetcher's own verdict
 > (dead / paywalled / refused) — set ♻️ revived to disagree.
@@ -654,6 +672,14 @@ def consume_decommission_table(state, vault_path: str,
     are the never-fetch-again gate (that is what the owner asked for:
     "tick emoji as reviewed so it never fetches again").
 
+    v0.48.0 — every 🖐-hand row (``_hand_delivery._status_is_hand``,
+    the fourth door's gesture) is QUEUED for hand-delivery — never
+    retired: the link joins queue.json, the row is stamped
+    ``🖐 hand — queued <date>``, and it keeps waiting until the owner
+    delivers the page. Idempotent (a queued-stamped row never
+    re-stamps); death and reviewed still win when a hand-edited cell
+    says both.
+
     For every ♻️-revived row: the dismissal is removed — the link is
     fetched like new the next time it appears.
 
@@ -663,9 +689,9 @@ def consume_decommission_table(state, vault_path: str,
     reviewed when a hand-edited cell says both (the burial is the
     stronger sentence). Tolerated everywhere (the table is bookkeeping,
     never a batch killer). Returns ``{'dead', 'reviewed', 'revived',
-    'placeholders_swept', 'rows_confirmed'}``."""
+    'handed', 'placeholders_swept', 'rows_confirmed'}``."""
     log = log or (lambda *a, **k: None)
-    report = {'dead': 0, 'reviewed': 0, 'revived': 0,
+    report = {'dead': 0, 'reviewed': 0, 'revived': 0, 'handed': 0,
               'placeholders_swept': 0, 'rows_confirmed': 0}
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
@@ -721,6 +747,54 @@ def consume_decommission_table(state, vault_path: str,
             if lines and row['line'] < len(lines):
                 lines[row['line']] = '|'.join(parts)
                 report['rows_confirmed'] += 1
+
+    # ---- pass 1.5 (v0.48.0): the fourth door's gestures -----------------
+    # A 🖐 hand Status is NOT a retirement: the link is queued for
+    # hand-delivery (queue.json + README in the hand-delivered folder),
+    # the row is stamped, and the link keeps waiting. Death, reviewed
+    # and revived all outrank it; a queued-stamped row never re-stamps
+    # (idempotency — the second batch sees 'queued' and moves on).
+    hand_urls: List[str] = []
+    for row in rows:
+        s = row['status']
+        if (_status_is_dead(s) or _status_is_revived(s)
+                or _status_is_reviewed(s)):
+            continue
+        if not _hand_delivery._status_is_hand(s):
+            continue
+        if 'queued' in s.lower():
+            continue  # already stamped by a previous pass
+        canonical = normalize_website_url(row['url'])
+        if not canonical:
+            continue
+        hand_urls.append(canonical)
+        report['handed'] += 1
+        parts = row['raw'].split('|')
+        if len(parts) >= 8:
+            parts[6] = f" 🖐 hand — queued {date_str} "
+            if lines is None:
+                try:
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as f:
+                        lines = f.read().splitlines()
+                except Exception as e:
+                    log(f"⚠️ Could not re-read the master table: {e}",
+                        "warning")
+                    lines = []
+            if lines and row['line'] < len(lines):
+                lines[row['line']] = '|'.join(parts)
+    if hand_urls:
+        try:
+            _hand_delivery.enqueue_hand_delivery(
+                vault_path, hand_urls, log=log)
+        except Exception as e:
+            log(f"⚠️ Hand-delivery queue write skipped: {e}", "warning")
+        else:
+            log(f"🖐 {report['handed']} link(s) queued for hand-delivery "
+                f"— open each in your real Chrome (the README in the "
+                f"hand-delivered folder has the suggested filenames), "
+                f"save the pages there, and the next batch consumes "
+                f"them as real fetches", "info")
 
     # ---- pass 2: the revivals -------------------------------------------
     for row in rows:
@@ -888,7 +962,8 @@ def refresh_master_table(state, vault_path: str,
                 f"{report['retired']} auto-retired link(s) — "
                 f"{report['written']} new row(s) in "
                 f"{DECOMMISSION_TABLE} (🪦 dead / ✅ reviewed retire; ♻️ "
-                f"revived re-fetches)", "info")
+                f"revived re-fetches; 🖐 hand queues for the fourth "
+                f"door — your real Chrome)", "info")
     except Exception as e:  # bookkeeping never kills a batch
         log(f"⚠️ Master table refresh skipped: {e}", "warning")
     return report
@@ -1112,6 +1187,14 @@ class WebsitePipeline:
             self.log("🪜 v0.46.0 ladder armed: " + '; '.join(_rungs)
                      + "; 429/503 pay Retry-After into the domain limiter",
                      "info")
+        # v0.48.0 — the fourth door (the owner's real Chrome): a
+        # hand-delivered page in <vault>/_review/hand-delivered/ answers
+        # the fetch BEFORE any machine door is asked, walled failures
+        # gain the door's hint, and the master table's 🖐 hand gesture
+        # queues links for it. Config "web_hand_delivery": false opts
+        # the whole door out (default ON — the check is one file stat
+        # per link, and the queue never exists unless the owner asked).
+        self.hand_delivery = self.config.get('web_hand_delivery') is not False
         self.rate_limiter = rate_limiter or _web_fetch.DomainRateLimiter(
             float(self.config.get('web_domain_delay_s', DOMAIN_DELAY_S)
                   or DOMAIN_DELAY_S))
@@ -1566,14 +1649,31 @@ class WebsitePipeline:
                 locked_row = None
 
         # ---- 3. fetch ------------------------------------------------------
-        fetch = self.fetch_fn(
-            url, timeout_s=self.fetch_timeout_s,
-            max_bytes=self.fetch_max_bytes,
-            rate_limiter=self.rate_limiter,
-            impersonate_fallback=self.impersonate_fallback,
-            archive_fallback=self.archive_fallback,
-            doh_probe=self.doh_probe,
-            impersonate_autopip=self.impersonate_autopip)
+        # v0.48.0 — the fourth door answers FIRST: a page the owner
+        # delivered by hand (their real Chrome saved it into
+        # <vault>/_review/hand-delivered/) IS the fetch — the machine
+        # doors are never asked, the story rides in the reason, the
+        # queued file is consumed (kept in place — it is the record).
+        fetch = None
+        if self.hand_delivery:
+            try:
+                fetch = _hand_delivery.take_hand_delivered(
+                    self.vault_path, canonical, log=self.log)
+            except Exception as e:
+                self.log(f"⚠️ Hand-delivery check skipped: {e}", "warning")
+        if fetch is None:
+            fetch = self.fetch_fn(
+                url, timeout_s=self.fetch_timeout_s,
+                max_bytes=self.fetch_max_bytes,
+                rate_limiter=self.rate_limiter,
+                impersonate_fallback=self.impersonate_fallback,
+                archive_fallback=self.archive_fallback,
+                doh_probe=self.doh_probe,
+                impersonate_autopip=self.impersonate_autopip)
+        else:
+            self.log(f"🖐 [{self._vault_name}] {url}: {fetch.reason} — "
+                     "the hand-delivered page is the fetch answer",
+                     "success")
         result['fetch_status'] = fetch.status
 
         if not fetch.ok:
@@ -1588,6 +1688,13 @@ class WebsitePipeline:
             # owner can revive (♻️) or decommission (🪦) as usual.
             _no_heal = (getattr(fetch, 'category', '') or '') in (
                 'dead', 'paywalled', 'refused', 'bad_url')
+            # v0.48.0 — a WALL the three machine doors could not open
+            # names the fourth door in the reason itself: the line rides
+            # into the _review note, the master table's Notes column,
+            # and the retry queue's last_error (the picker's data).
+            if self.hand_delivery and _hand_delivery.is_walled_reason(
+                    fetch.reason):
+                fetch.reason = (fetch.reason or '') + HAND_DOOR_HINT
             if _no_heal:
                 if retry:
                     self.state.resolve_retry(canonical)
@@ -1790,6 +1897,24 @@ class WebsitePipeline:
         for every link it handed us, mirroring the GitHub loop."""
         results = []
         seen = set()
+        # v0.48.0 — the fourth door's pull: links whose hand-delivered
+        # page is WAITING in the folder join the batch uninvited (the
+        # owner's gesture — saving the page — says "process me now";
+        # the batch must never sit on it waiting for a retry backoff).
+        if self.hand_delivery and self.vault_path:
+            try:
+                ready = [d['url'] for d in _hand_delivery.collect_delivered(
+                    self.vault_path)]
+                ready = [u for u in ready
+                         if normalize_website_url(u) not in
+                         {normalize_website_url(x) for x in urls}]
+                if ready:
+                    self.log(f"🖐 Hand-delivery: {len(ready)} delivered "
+                             f"page(s) waiting in the hand-delivered "
+                             f"folder — they join this batch", "info")
+                    urls = list(urls) + ready
+            except Exception:
+                pass  # the pull never breaks the batch
         for url in urls:
             if should_continue is not None and not should_continue():
                 self.log("⏹️ Websites pipeline stopped by user — remaining "

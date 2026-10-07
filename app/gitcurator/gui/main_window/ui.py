@@ -1583,6 +1583,13 @@ class UiMixin:
         # same Status cells in-app.
         more_menu.addAction("🪦 Decommission dead links",
                             self.decommission_dead_links_now)
+        # v0.48.0 — the fourth door: links walled for every machine
+        # door (403 / bot defense / TLS fingerprint) can be opened in
+        # the owner's REAL Chrome; the saved page becomes a real fetch
+        # on the next batch. The master table's 🖐 hand Status is the
+        # same gesture by hand (never a retirement).
+        more_menu.addAction("🖐 Hand-deliver walled links",
+                            self.hand_deliver_walled_links_now)
         self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
         self.backup_export_btn.triggered.connect(self._backup_export_zip)
         more_menu.addSeparator()

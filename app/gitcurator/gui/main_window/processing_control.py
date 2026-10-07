@@ -28,6 +28,7 @@ from gitcurator.core import llm_client as _llm_client
 from gitcurator.core import dryrun as _dryrun
 from gitcurator.core import note_state as _note_state
 from gitcurator.core import website_pipeline as _website_pipeline
+from gitcurator.core import hand_delivery as _hand_delivery
 from gitcurator.core import connection_check as _connection_check
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
@@ -526,6 +527,199 @@ class ProcessingControlMixin:
             item = list_widget.item(i)
             if item.checkState() == Qt.CheckState.Checked:
                 picked.append(item.text())
+        return picked
+
+    def hand_deliver_walled_links_now(self):
+        """More ▸ 🖐 Hand-deliver walled links… — v0.48.0, the fourth
+        door. The links every machine door failed to open (403 / bot
+        defense / TLS fingerprint walls, sitting in the retry queue)
+        are offered to the owner's OWN Chrome: the picker queues the
+        chosen ones (queue.json + README with suggested filenames in
+        <vault>/_review/hand-delivered/), opens each in the real
+        Chrome, and the next batch consumes a saved page as a REAL
+        fetch. The master table's 🖐 hand Status is the same gesture
+        by hand (never a retirement — the link keeps waiting)."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        folder = _hand_delivery.hand_delivery_dir(vault)
+        candidates = []
+        try:
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                candidates = _hand_delivery.walled_retry_rows(state)
+            finally:
+                state.close()
+        except Exception as e:
+            self.log_message(
+                f"⚠️ Walled-links scan skipped: {e}", "warning")
+        # links already queued for hand-delivery are shown too (a
+        # re-open is harmless — the queue merge is a no-op) but kept
+        # out of the "new" count.
+        try:
+            queued = set((_hand_delivery._read_queue(vault)
+                          .get('links') or {}).keys())
+        except Exception:
+            queued = set()
+        if not candidates:
+            self._show_custom_message_box(
+                "No walled links waiting",
+                "No retry-queued link currently ends in a wall the "
+                "machine doors could not open (403 / bot defense / TLS "
+                "fingerprint).\n\n"
+                + (f"{len(queued)} link(s) are already queued for hand "
+                   f"delivery — save their pages into:\n{folder}"
+                   if queued else
+                   "When one appears, its _review note and master-table "
+                   "row will say so (the fourth door hint)."),
+                success=True)
+            return
+        picked = self._pick_hand_links_dialog(
+            [{'url': c['url'], 'wall': c['wall'],
+              'attempts': c.get('attempts', 0)} for c in candidates],
+            folder)
+        if not picked:
+            self.log_message(
+                "⏭️ Hand-delivery cancelled — nothing was queued. More ▸ "
+                "🖐 Hand-deliver walled links anytime (the master table's "
+                "🖐 hand Status queues a single link too).", "info")
+            return
+        walls = {c['url']: c['wall'] for c in candidates}
+        try:
+            report = _hand_delivery.enqueue_hand_delivery(
+                vault, picked, walls=walls, log=self.log_message,
+                open_chrome=True)
+        except Exception as e:
+            self.log_message(
+                f"⚠️ Hand-delivery queue write skipped: {e}", "warning")
+            report = {'added': 0, 'opened': 0}
+        opened = report.get('opened', 0)
+        self._show_custom_message_box(
+            "Queued for hand-delivery",
+            f"{report.get('added', 0)} link(s) queued"
+            + (f", {opened} opened in your Chrome."
+               if opened else " — open them from the README (no browser "
+               "could be launched here).")
+            + "\n\n"
+            "For each link: in Chrome, Ctrl+S → format 'Webpage, HTML "
+            "Only' → filename = the suggested name (the README lists "
+            "them) → folder:\n" + folder
+            + "\n\nThe next SYNC batch consumes every delivered page "
+            "as a REAL fetch — the note is written, the retry clears.",
+            success=True)
+
+    def _pick_hand_links_dialog(self, candidates, folder):
+        """v0.48.0 — the fourth door's picker: a checkable list of the
+        walled links (URL + the wall that stopped the machine doors);
+        the chosen ones are queued and opened in the real Chrome.
+        'Open the folder' reveals the hand-delivered folder in the OS
+        file manager. Returns the chosen URLs (empty = cancelled)."""
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return []
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Hand-deliver walled links")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(680)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        icon_label = QLabel("🖐")
+        icon_label.setObjectName("msg_glyph")
+        header.addWidget(icon_label)
+        title_label = QLabel("Hand-deliver walled links")
+        title_label.setObjectName("msg_heading")
+        title_label.setProperty("tone", "info")
+        header.addWidget(title_label)
+        header.addStretch()
+        layout.addLayout(header)
+
+        msg_label = QLabel(
+            "These links answered every machine door with a wall (403 / "
+            "bot defense / TLS fingerprint — the wall rides under each "
+            "URL). Tick the ones worth saving: each opens in your real "
+            "Chrome, is queued with a suggested filename, and the page "
+            "you save (Ctrl+S, 'Webpage, HTML Only') becomes a REAL "
+            "fetch on the next batch. Nothing is retired — the links "
+            "keep waiting until their page is delivered.")
+        msg_label.setWordWrap(True)
+        layout.addWidget(msg_label)
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        for c in candidates:
+            wall = (c.get('wall') or '')[:110]
+            text = c['url'] + (f"   —   {wall}" if wall else '')
+            item = QListWidgetItem(text)
+            item.setToolTip(text)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            list_widget.addItem(item)
+        list_widget.setMinimumHeight(min(340, 22 * len(candidates) + 24))
+        layout.addWidget(list_widget)
+
+        folder_label = QLabel(
+            f"Deliver into: {folder} (the README regenerates there with "
+            f"every link's suggested filename)")
+        folder_label.setWordWrap(True)
+        layout.addWidget(folder_label)
+
+        btn_row = QHBoxLayout()
+        open_btn = QPushButton("Open the folder")
+        self._style_btn(open_btn, 'secondary')
+        open_btn.setToolTip(
+            "Reveal the hand-delivered folder in your file manager — "
+            "saved pages land there.")
+
+        def _open_folder():
+            try:
+                from PyQt6.QtGui import QDesktopServices
+                from PyQt6.QtCore import QUrl
+                os.makedirs(folder, exist_ok=True)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+            except Exception as e:
+                self.log_message(f"⚠️ Could not open the folder: {e}",
+                                 "warning")
+
+        open_btn.clicked.connect(_open_folder)
+        btn_row.addWidget(open_btn)
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        self._style_btn(cancel_btn, 'secondary')
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(cancel_btn)
+        queue_btn = QPushButton("🖐 Queue & open in Chrome")
+        self._style_btn(queue_btn, 'primary')
+        queue_btn.clicked.connect(dialog.accept)
+        btn_row.addWidget(queue_btn)
+        layout.addLayout(btn_row)
+
+        self._animate_dialog(dialog)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return []
+        picked = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                picked.append(candidates[i]['url'])
         return picked
 
     def _start_review_retry(self):
