@@ -1,3 +1,74 @@
+## [0.51.0] — The caught-up check reads the table — 2026-10-09
+
+Owner ask (session): "Currently app says everything is uptodate, but
+actually app must look at decomissioned note, and try to fetch again
+those that dont have skeleton or red cross or such emojies and have
+this state ' - ' … so before declaring everything is uptodate it must
+check 'decomissioned' note and find those that should be retried."
+Desktop release v0.51.0, Worker unchanged at **0.30.0** (it never
+touches the vault). Suite grows **1366 → 1396** (30 cases in
+tests/test_masterretry.py — pure stdlib at the unit level).
+
+**The diagnosis.** The caught-up path answered only ONE question —
+"is the bot queue empty?" — and when it was, the log card said
+"Everything is up to date." But the master table
+(``_review/DECOMMISSIONED.md``) held rows the queue had already
+given up on: a link whose 3 automatic retries burned out is skipped
+by ``process_link`` FOREVER ("fetch failed 3 times — kept in _review,
+no more retries"), its placeholder stays, its row keeps the " - "
+state (blank / unreviewed — no verdict emoji), and NOTHING ever
+looks at it again. The empty-state claim was true about the queue and
+false about the library.
+
+**The fix — the waiting pass.** A caught-up SYNC now reads the table
+before it speaks. ``scan_master_waiting_rows`` scans every data row
+whose Status cell carries NO decision (``_status_is_waiting``: blank,
+" - ", "—", 'unreviewed' — anything that is not 🪦 ❌ ☠️ 💀 /
+dead / retired / decommissioned, not ✅ reviewed, not ♻️ revived, not
+🖐 hand-queued, not one of the app's own stamps), classifies each by
+what the link itself says (a FAILED placeholder or no note at all →
+the machine's to retry; a NON-failed ``_review`` note → the owner's
+eyes, never fetched), and probes the state ledger so retired and
+already-stored links never appear. Waiting rows found → the app does
+not say "up to date": it says "N ' - ' row(s) are still waiting" and
+auto-starts the master-retry batch (worker mode 'master_retry'). Per
+link: a burned-out counter is reborn ONE row at a time (the new
+``WebsiteStateDB.reset_retry_attempts`` — surgical, unlike the
+queue-wide re-arm), then the FULL pipeline runs (fetch → extract →
+classify → analyze → store, the upgrade path replacing the
+placeholder on success). More ▸ "🔁 Retry the table's ' - ' rows" is
+the anytime trigger; the end-of-run offer and the Chrome doors answer
+whatever still fails.
+
+**The table stops lying.** ``stamp_stored_rows`` (called by the
+refresh after every batch): a row still marked " - " whose link is
+ALREADY STORED (a processed row with a real note outside _review) is
+stamped ``📁 stored — fetched <date>`` — without it, the table said
+"waiting" about links whose retries long succeeded, and the owner
+re-read " - " rows that were done. Owner-set verdicts are never
+touched (every table writer's law); the header now documents the
+grammar where the owner reads it (" - " is retried before "up to
+date" is said; 📁 stored is the record of a succeeded retry).
+
+**The honest verdict.** ``retry_master_waiting`` ends with a re-scan:
+what still waits is said out loud ("N ' - ' row(s) still wait — set
+the Status, queue 🖐 hand, or retry in your real Chrome"), the
+"eyes" rows get their own line (they wait for the owner's ✅/🪦, not
+the machine), and "everything is up to date" is only ever true when
+no " - " fetch row remains — the exact law the owner asked for.
+
+**Gates.** 30 cases in tests/test_masterretry.py (the waiting
+verdict's whole grammar — the owner's named emojis never wait; the
+scan's classification, dedupe, state probes and the broken-probe
+law; the surgical counter rebirth; the driver — the owner's exact
+case from burned-out "no more retries" to a stored note and a
+'📁 stored' row, re-failure keeping the row honest, eyes/skull rows
+never fetched, the empty-table agreement, clean stops and progress;
+the truth stamp and its refresh wiring; the caught-up hero routing —
+waiting rows start the pass, none keep the old law, a bare hero
+without the collaborator is unchanged; release bookkeeping). Full
+suite **1396/1396**, 85-module compile gate OK, offline golden 30/30.
+
 ## [0.50.0] — The fifth door: Chrome fetches the pages itself — 2026-10-09
 
 Owner ask (session): "Okay I've seen a note called decomissioned, I

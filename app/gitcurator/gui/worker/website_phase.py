@@ -293,15 +293,38 @@ class WorkerWebsitePhaseMixin:
                 if _backlog_items:
                     _unique = len({i.get('url') for i in _backlog_items})
                     self.total = _github_done + _unique
-                    self.log_message.emit(
-                        f"🔁 Retrying the _review backlog: {len(_backlog_items)} "
-                        f"app-owned placeholder(s) ({_unique} link(s)) — "
-                        f"v0.41.0 fetches as a browser now; the bot-defense "
-                        f"wall may be down for them", "info")
-                    results = pipeline.retry_review_backlog(
-                        _backlog_items,
-                        should_continue=lambda: self.is_running,
-                        on_progress=_wp_advance)
+                    # v0.51.0 — mode 'master_retry': the items came from
+                    # the DECOMMISSIONED.md " - " scan, not the placeholder
+                    # scan — the phase drives them through the caught-up
+                    # check's own driver (burned-out counters reborn per
+                    # link, the FULL pipeline per link, the honest verdict
+                    # at the end). The same progress/stop contract.
+                    try:
+                        _master_mode = bool(
+                            getattr(self, '_master_retry_mode', False))
+                    except Exception:
+                        _master_mode = False
+                    if _master_mode:
+                        self.log_message.emit(
+                            f"🔁 Master-table waiting pass: {_unique} "
+                            f"' - ' link(s) — valid links whose fetches "
+                            f"failed and no verdict is set; each is "
+                            f"fetched again before 'everything is up to "
+                            f"date' may be said", "info")
+                        results = pipeline.retry_master_waiting(
+                            should_continue=lambda: self.is_running,
+                            on_progress=_wp_advance)
+                    else:
+                        self.log_message.emit(
+                            f"🔁 Retrying the _review backlog: "
+                            f"{len(_backlog_items)} "
+                            f"app-owned placeholder(s) ({_unique} link(s)) — "
+                            f"v0.41.0 fetches as a browser now; the "
+                            f"bot-defense wall may be down for them", "info")
+                        results = pipeline.retry_review_backlog(
+                            _backlog_items,
+                            should_continue=lambda: self.is_running,
+                            on_progress=_wp_advance)
                 else:
                     self.log_message.emit(
                         f"🌐 Websites pipeline: {len(links)} link(s)"

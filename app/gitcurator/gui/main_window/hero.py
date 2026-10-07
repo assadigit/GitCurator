@@ -216,6 +216,29 @@ class HeroMixin:
                 "info"
             )
         elif result.get('success'):
+            # v0.51.0 — the caught-up check reads the table FIRST: the
+            # owner's law ("before declaring everything is uptodate it
+            # must check 'decomissioned' note and find those that should
+            # be retried") — a " - " row with no verdict emoji is a valid
+            # link whose fetch failed, so it is fetched AGAIN instead of
+            # the empty-state claim. Only a table with no waiting fetch
+            # row may say "everything is up to date". (Guarded: the bare
+            # hero-flow stubs carry no processing-control collaborator.)
+            _scan_master = getattr(self, '_scan_master_waiting', None)
+            _waiting = _scan_master() if callable(_scan_master) else []
+            if _waiting:
+                _eyes = getattr(self, '_master_waiting_eyes', 0)
+                self.log_message(
+                    f"📋 Bot queue caught up, but {len(_waiting)} ' - ' "
+                    f"row(s) in the master table "
+                    f"(_review/DECOMMISSIONED.md) are still waiting — "
+                    f"valid links whose fetches failed. Fetching them "
+                    f"again now"
+                    + (f" ({_eyes} row(s) wait for your eyes: set ✅ or "
+                       f"🪦 in the table)" if _eyes else "")
+                    + ".", "info")
+                self._start_master_retry()
+                return
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
             self.log_message("✅ All caught up — nothing undone in the bot queue.", "success")

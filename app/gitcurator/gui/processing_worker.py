@@ -172,6 +172,12 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # scanned items (url + placeholder path) the websites phase drives
         # through retry_review_backlog. Empty for every other mode.
         self._review_backlog_items = []
+        # v0.51.0 — the master-table waiting pass (mode 'master_retry'):
+        # True when the items above came from the DECOMMISSIONED.md
+        # " - " scan, so the websites phase drives them through
+        # retry_master_waiting (the caught-up check's own retry driver)
+        # instead of retry_review_backlog.
+        self._master_retry_mode = False
         # v25 pre-flight: banner download throttle counter — incremented on
         # every _download_banner() call so we can pause periodically and
         # avoid opengraph.githubassets.com 429s during large batches.
@@ -292,6 +298,74 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                 return
             self._review_backlog_items = _scanned
             self._non_github_urls = [i['url'] for i in _scanned]
+        elif self.mode == 'master_retry':
+            # v0.51.0 — the caught-up check's own retry batch (the owner's
+            # report: "before declaring everything is uptodate it must
+            # check 'decomissioned' note and find those that should be
+            # retried"). The scan reads the master table's " - " rows —
+            # the links with NO verdict emoji whose fetch failed — with
+            # the state ledger's own probes (retired and already-stored
+            # links never appear; dry-run reads the SHADOW cache, the
+            # same law every state open in the GUI follows). The items
+            # ride to the websites phase as _review_backlog_items with
+            # _master_retry_mode set, and the phase drives them through
+            # retry_master_waiting — the FULL pipeline per link, burned-
+            # out counters reborn, the honest verdict at the end.
+            urls = []
+            if not _websites_pipeline_on:
+                self.log_message.emit(
+                    "⛔ Websites pipeline is OFF (Settings → 📁 Vault) — "
+                    "the master table's ' - ' rows cannot be retried.",
+                    "warning")
+                self.finished_signal.emit(
+                    True, "Websites pipeline is off — nothing retried.")
+                return
+            _wv = (self.config.get('website_vault_path') or '').strip()
+            if not _wv or not os.path.isdir(_wv):
+                self.log_message.emit(
+                    "⚠️ No Websites vault is set (Settings → 📁 Vault) — "
+                    "the master table was not checked.", "warning")
+                self.finished_signal.emit(
+                    True, "No Websites vault — nothing retried.")
+                return
+            try:
+                if _dryrun.is_enabled():
+                    _state = _website_pipeline.WebsiteStateDB(
+                        db_path=_dryrun.shadow_cache_path(
+                            os.path.join(APP_DIR, 'cache.db')))
+                else:
+                    _state = _website_pipeline.WebsiteStateDB()
+                try:
+                    _scanned = _website_pipeline.scan_master_waiting_rows(
+                        _wv, state=_state, log=self.log_message.emit)
+                finally:
+                    _state.close()
+            except Exception as _e:
+                self.log_message.emit(
+                    f"⚠️ Master-table waiting scan fell back to a pure "
+                    f"file read: {_e}", "warning")
+                _scanned = _website_pipeline.scan_master_waiting_rows(
+                    _wv, log=self.log_message.emit)
+            _waiting = [i for i in _scanned if i.get('kind') == 'fetch']
+            _eyes = [i for i in _scanned if i.get('kind') == 'eyes']
+            if not _waiting:
+                self.log_message.emit(
+                    "✅ The master table has no ' - ' row waiting for a "
+                    "retry — everything is up to date"
+                    + (f" ({len(_eyes)} row(s) wait for your eyes: set "
+                       f"✅ or 🪦 in the table)" if _eyes else ""),
+                    "success")
+                self.finished_signal.emit(
+                    True, "Master table caught up — nothing to retry.")
+                return
+            self.log_message.emit(
+                f"🔁 Retrying the master table's ' - ' rows: "
+                f"{len(_waiting)} link(s) — valid links whose fetches "
+                f"failed, no verdict set; anything still walled keeps "
+                f"waiting", "info")
+            self._master_retry_mode = True
+            self._review_backlog_items = _waiting
+            self._non_github_urls = [i['url'] for i in _waiting]
         else:
             urls = self._fetch_from_telegram()
 

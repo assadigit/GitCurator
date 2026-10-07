@@ -532,6 +532,120 @@ def _status_is_reviewed(status: str) -> bool:
     return any(m in s for m in REVIEWED_MARKERS)
 
 
+def _status_is_waiting(status: str) -> bool:
+    """v0.51.0 — the " - " verdict: a Status cell that carries NO
+    decision at all. The owner's report (session): "app must look at
+    decomissioned note, and try to fetch again those that dont have
+    skeleton or red cross or such emojies and have this state ' - '" —
+    so the waiting state is everything the table's grammar does not
+    read as a verdict: blank, ' - ', '—', 'unreviewed', or any text
+    that is neither dead (🪦 ❌ ☠️ 💀 dead/retired/decommissioned) nor
+    reviewed (✅ …) nor revived (♻️ …) nor the fourth door's queue
+    (🖐 hand / queued), nor one of the app's own stamps ('confirmed',
+    'auto', '📁 stored' — the row a SUCCESSFUL retry leaves behind).
+    A waiting row is the owner saying "this link is valid, its fetch
+    failed, try again" — exactly the rows the caught-up check must
+    fetch again before "everything is up to date" may be said."""
+    s = (status or '').strip()
+    if not s:
+        return True                     # blank — still waiting
+    if _status_is_dead(s) or _status_is_reviewed(s) or _status_is_revived(s):
+        return False
+    if _hand_delivery._status_is_hand(s):
+        return False                    # the fourth door owns it
+    low = s.lower()
+    if 'queued' in low or 'confirmed' in low or 'auto' in low:
+        return False                    # a stamp the app itself wrote
+    if 'stored' in low:
+        return False                    # v0.51.0 — the retry succeeded
+    return True
+
+
+def scan_master_waiting_rows(vault_path: str,
+                             state: Optional[object] = None,
+                             log: Optional[Callable] = None
+                             ) -> List[Dict]:
+    """v0.51.0 — the " - " rows of the master table, classified.
+
+    The owner's law: before declaring everything up to date the app
+    must check the decommissioned note and find the rows that should
+    be retried — the rows WITHOUT a verdict emoji whose state is
+    " - ". This scan is that check's eyes: every data row of
+    ``_review/DECOMMISSIONED.md`` whose Status cell reads as waiting
+    (:func:`_status_is_waiting`), each classified by what the link
+    itself says on disk and (when a state ledger is injected) in
+    cache.db:
+
+      * ``kind: 'fetch'`` — the machine's to retry: the link has a
+        FAILED app-owned ``_review`` placeholder, or sits in the retry
+        queue, or has no note anywhere at all (a hand-added row — the
+        owner wants it fetched like new). This is the set the
+        caught-up check retries.
+      * ``kind: 'eyes'`` — the owner's to decide, never re-fetched:
+        the link's ``_review`` note is a NON-failed one (low
+        classification confidence, analysis failure, archived rescue —
+        the human-eye classes of v0.49.0).
+      * dropped — retired (dead / reviewed / revived / dismissed /
+        auto-verdict) or already stored (a real note in a category
+        folder: the refresh stamps those rows '📁 stored').
+
+    ``state`` is OPTIONAL (the hermetic law): without it the scan is a
+    pure file read and the queue/stored probes are skipped (a
+    hand-added row for an already-stored link then reads 'fetch' —
+    harmless, :meth:`process_link` skips it as "already in the
+    websites vault"). Returns
+    ``[{'url', 'status', 'notes', 'path', 'kind'}, ...]`` — first row
+    wins on a hand-added duplicate URL, sorted by the table's own
+    row order. Never raises on a hand-edited table."""
+    out: List[Dict] = []
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return out
+    # one pass over _review pairs every app-owned note with its source
+    notes: Dict[str, Dict] = {}
+    for it in scan_review_notes(vault_path):
+        cu = normalize_website_url(it.get('url') or '')
+        if cu and cu not in notes:
+            notes[cu] = it
+    seen: set = set()
+    for row in _parse_decommission_rows(path):
+        if not _status_is_waiting(row['status']):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical or canonical in seen:
+            continue
+        note = notes.get(canonical)
+        kind = 'fetch'
+        placeholder = ''
+        if note is not None:
+            placeholder = note.get('path') or ''
+            if (note.get('fetch_status') or '').strip().lower() != 'failed':
+                kind = 'eyes'           # a human-eye note — not ours
+        else:
+            kind = 'fetch'              # no note at all — fetch it
+        if state is not None and kind == 'fetch':
+            try:
+                if state.is_dismissed(canonical):
+                    continue            # retired — ♻️ is its door back
+                prior = state.processed_row(canonical)
+                if prior is not None \
+                        and prior.get('fetch_status') != 'failed' \
+                        and '_review' not in str(
+                            prior.get('note_path') or ''
+                        ).replace('\\', '/'):
+                    continue            # already stored — not waiting
+            except Exception as e:
+                if log:
+                    log(f"⚠️ Master-table state probe skipped for "
+                        f"{row['url']}: {e}", "warning")
+                # a broken probe never hides a waiting link (the law)
+        seen.add(canonical)
+        out.append({'url': row['url'], 'status': row['status'],
+                    'notes': row.get('notes') or '',
+                    'path': placeholder, 'kind': kind})
+    return out
+
+
 def scan_decommission_table(vault_path: str) -> Dict[str, str]:
     """v0.44.0 — read the owner's burial decisions.
 
@@ -566,7 +680,12 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   save the page into _review/hand-delivered/ and the next batch
 >   consumes it as a real fetch). NOT a retirement — the link keeps
 >   waiting until the page is delivered.
-> blank / unreviewed — still waiting: the automatic retries continue.
+> blank / unreviewed / " - " — still waiting: the caught-up check
+>   retries these rows BEFORE "everything is up to date" is said
+>   (the link is valid, its fetch failed — the machine tries it
+>   again; what still fails keeps waiting, its Status decides).
+> 📁 stored — the retry succeeded: the link's note is in the vault
+>   (the row is the record, nothing more to do).
 > Rows marked "auto" were retired by the fetcher's own verdict
 > (dead / paywalled / refused) — set ♻️ revived to disagree.
 > Auto-updated after every batch. Last updated: {now}
@@ -720,6 +839,78 @@ def mark_urls_dead_in_table(vault_path: str, urls: List[str],
         log(f"🪦 {marked} link(s) marked dead in {DECOMMISSION_TABLE}",
             "info")
     return marked
+
+
+def stamp_stored_rows(state, vault_path: str,
+                      log: Optional[Callable] = None) -> int:
+    """v0.51.0 — the truth stamp: a master-table row whose Status still
+    reads as waiting (" - " / blank / unreviewed) while its link is
+    ALREADY STORED (a processed row with a real note outside _review)
+    is rewritten to ``📁 stored — <date>``. The waiting rows are the
+    caught-up check's retry set — without this stamp the table lies
+    "waiting" about links whose retries long succeeded, and the owner
+    re-reads " - " rows that are done. Owner-set verdicts (🪦 ✅ ♻️ 🖐)
+    are NEVER touched (the same law as every table writer); a broken
+    state probe stamps nothing (never crashes a batch). Returns how
+    many rows were stamped."""
+    log = log or (lambda *a, **k: None)
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return 0
+    rows = _parse_decommission_rows(path)
+    if not rows:
+        return 0
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    stamped = 0
+    lines = None
+    for row in rows:
+        if not _status_is_waiting(row['status']):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical:
+            continue
+        try:
+            if state.is_dismissed(canonical):
+                continue        # retired rows are the verdicts' business
+            prior = state.processed_row(canonical)
+        except Exception:
+            continue            # a broken probe stamps nothing
+        if prior is None:
+            continue
+        if prior.get('fetch_status') == 'failed':
+            continue            # the placeholder story — still waiting
+        if '_review' in str(prior.get('note_path') or '').replace('\\', '/'):
+            continue            # a _review note waits for human eyes
+        parts = row['raw'].split('|')
+        if len(parts) < 8:
+            continue
+        parts[6] = f" 📁 stored — fetched {date_str} "
+        if lines is None:
+            try:
+                with open(path, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    lines = f.read().splitlines()
+            except Exception as e:
+                log(f"⚠️ Could not re-read the master table: {e}",
+                    "warning")
+                return stamped
+        if lines and row['line'] < len(lines):
+            lines[row['line']] = '|'.join(parts)
+            stamped += 1
+    if stamped:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        lines = [f"> Last updated: {now}"
+                 if line.startswith('> Last updated:') else line
+                 for line in lines]
+        try:
+            atomic_write_text(path,
+                              '\n'.join(lines).rstrip('\n') + '\n')
+        except Exception as e:
+            log(f"⚠️ Could not write the master table: {e}", "warning")
+            return 0
+        log(f"📁 {stamped} master-table row(s) stamped 'stored' — their "
+            f"retries succeeded, the notes are in the vault", "info")
+    return stamped
 
 
 def consume_decommission_table(state, vault_path: str,
@@ -1074,6 +1265,15 @@ def refresh_master_table(state, vault_path: str,
                     vault_path, urls, source='auto-verdict',
                     log=None, notes=retired_notes, status=status)
         report['written'] = n1 + n2
+        # v0.51.0 — the truth stamp: rows still marked " - " whose
+        # retries have since SUCCEEDED are stamped '📁 stored' — the
+        # waiting set stays honest, so the caught-up check (and the
+        # owner's eyes) never retry links that are already in the vault.
+        # (Report shape unchanged — the stamp is logged, not counted.)
+        try:
+            stamp_stored_rows(state, vault_path, log=log)
+        except Exception as e:  # bookkeeping never kills a batch
+            log(f"⚠️ Master-table stored-stamp skipped: {e}", "warning")
         if report['written']:
             log(f"📋 Master table refreshed: {report['waiting']} waiting "
                 f"(fetch failures + links parked in _review), "
@@ -2189,6 +2389,120 @@ class WebsitePipeline:
                         self._remove_scanned_placeholder(p)
             results.append(r)
         self._refresh_master_table()
+        return results
+
+    # -- v0.51.0: the master-table waiting pass ----------------------------
+
+    def retry_master_waiting(self, should_continue: Optional[Callable] = None,
+                             on_progress: Optional[Callable] = None
+                             ) -> List[Dict]:
+        """v0.51.0 — the caught-up check's own retry pass.
+
+        The owner's report (session, verbatim): "Currently app says
+        everything is uptodate, but actually app must look at
+        decomissioned note, and try to fetch again those that dont
+        have skeleton or red cross or such emojies and have this state
+        ' - ' … so before declaring everything is uptodate it must
+        check 'decomissioned' note and find those that should be
+        retried." This driver IS that check: the " - " rows of the
+        master table (no verdict emoji, no decision — the link is
+        valid, its fetch failed) are fetched AGAIN before any
+        "everything is up to date" may be said.
+
+        Per row (``scan_master_waiting_rows`` with this pipeline's own
+        state — retired and already-stored links never appear):
+
+          * a link whose 3 automatic retries burned out gets its
+            counter reborn (:meth:`WebsiteStateDB.reset_retry_attempts`
+            — ONE row, not the whole queue) so :meth:`process_link`
+            fetches it instead of skipping "no more retries" forever;
+          * :meth:`process_link` does the rest — the full pipeline
+            (fetch → extract → classify → analyze → store), the
+            upgrade path replacing the placeholder on success, the
+            re-failure refreshing it in place;
+          * the "eyes" rows (low-confidence / analysis / archived
+            notes waiting for the OWNER's move) are never fetched —
+            only counted and named.
+
+        Ends with the honest verdict — a re-scan of the table: what
+        still waits is said out loud ("N row(s) still wait — the doors
+        are 🖐 hand / the Chrome tab-retry / the Status cell"), so
+        "everything is up to date" is only ever true when no " - "
+        fetch row remains. Returns the per-link result dicts (the
+        same shape as :meth:`run` — the end-of-run Chrome-tab offer
+        reads them)."""
+        results: List[Dict] = []
+        if not self.vault_path:
+            return results
+        items = scan_master_waiting_rows(self.vault_path, state=self.state,
+                                         log=self.log)
+        fetch_items = [it for it in items if it.get('kind') == 'fetch']
+        eyes = [it for it in items if it.get('kind') == 'eyes']
+        if not fetch_items:
+            if eyes:
+                self.log(
+                    f"📋 Master table: no ' - ' fetch row is waiting — "
+                    f"{len(eyes)} row(s) wait for YOUR eyes (set ✅ "
+                    f"reviewed or 🪦 dead in the table; ♻️ revived "
+                    f"re-fetches)", "info")
+            else:
+                self.log(
+                    "✅ Master table: no ' - ' row is waiting — the "
+                    "table agrees with 'everything is up to date'",
+                    "success")
+            return results
+        self.log(
+            f"🔁 Master table: {len(fetch_items)} ' - ' row(s) waiting "
+            f"(valid link, failed fetch, no verdict) — fetching them "
+            f"again before 'everything is up to date' is said",
+            "info")
+        self.counters['retried'] = self.counters.get('retried', 0) \
+            + len(fetch_items)
+        for it in fetch_items:
+            if should_continue is not None and not should_continue():
+                self.log("⏹️ Master-table waiting pass stopped by user — "
+                         "the remaining rows keep waiting", "warning")
+                break
+            if on_progress is not None:
+                try:
+                    on_progress(it.get('url') or '')
+                except Exception:
+                    pass
+            url = it.get('url') or ''
+            canonical = normalize_website_url(url)
+            # A burned-out retry row would be skipped as "no more
+            # retries" — the owner's " - " says otherwise: reborn.
+            try:
+                if canonical and self.state.retry_row(canonical) is not None:
+                    self.state.reset_retry_attempts(canonical)
+            except Exception as e:
+                self.log(f"⚠️ Retry re-arm skipped for {url}: {e}",
+                         "warning")
+            results.append(self.process_link(url))
+        self._refresh_master_table()
+        # the honest verdict — a re-scan says what still waits
+        try:
+            after = scan_master_waiting_rows(self.vault_path,
+                                             state=self.state)
+            still = [a for a in after if a.get('kind') == 'fetch']
+            eyes_after = [a for a in after if a.get('kind') == 'eyes']
+        except Exception:
+            still, eyes_after = [], []
+        if still:
+            self.log(
+                f"⚠️ Master table: {len(still)} ' - ' row(s) still wait — "
+                f"the machine doors had their say; the rest is yours: "
+                f"set the Status (🪦 dead / ✅ reviewed), queue 🖐 hand, "
+                f"or retry in your real Chrome (the end-of-run offer / "
+                f"More ▸ 🤖 Chrome tab-retry)", "warning")
+        else:
+            self.log(
+                "✅ Master table: every ' - ' fetch row got its retry — "
+                "the table is honest now", "success")
+        if eyes_after:
+            self.log(
+                f"📋 {len(eyes_after)} row(s) wait for YOUR eyes (set ✅ "
+                f"or 🪦 in the table; ♻️ revived re-fetches)", "info")
         return results
 
     def _refresh_master_table(self) -> None:

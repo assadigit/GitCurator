@@ -1576,6 +1576,13 @@ class UiMixin:
         # run once per launch; this is the anytime trigger.
         more_menu.addAction("🔁 Retry _review backlog",
                             self.retry_review_backlog_now)
+        # v0.51.0 — the caught-up check's own pass: the " - " rows of the
+        # master table (valid link, failed fetch, no verdict) are fetched
+        # again BEFORE "everything is up to date" may be said — SYNC runs
+        # this automatically when the bot queue is caught up; this is the
+        # anytime trigger.
+        more_menu.addAction("🔁 Retry the table's ' - ' rows",
+                            self.retry_master_waiting_now)
         # v0.44.0 — the graveyard: the decommissioning procedure for
         # genuinely dead links (real 404s, lost pages, abandoned
         # domains). The graveyard table (set the emoji: 🪦 dead) is the
