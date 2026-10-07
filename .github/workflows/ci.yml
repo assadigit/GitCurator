@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1396-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1437-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -29,6 +29,23 @@
 # analysis / archived notes) are never fetched — they wait for the
 # owner's ✅/🪦. More ▸ 🔁 Retry the table's ' - ' rows is the anytime
 # trigger. 30 cases join in tests/test_masterretry.py (1396).
+# v0.52.0 — THE ICON COLUMN SPEAKS: the owner's report — "see I set
+# hand emoji, but those links didn't refetched using scrapping
+# manually on chrome" — his screenshot showed the master table with
+# FOUR columns and the verdict emojis in the # cell, a shape the
+# parse was blind to (it demanded all seven columns and read the
+# Status cell only). Now a row needs only four cells to exist, the
+# gesture is the # cell + the Status cell combined (a plain '-'
+# # cell adds nothing — app-written rows keep their exact old
+# strings), ✋ U+270B and the bare word 'hand' queue for the fourth
+# door like 🖐, and a trimmed table gets its seven columns restored
+# before any stamp (a stamp into a short table would be invisible —
+# GFM drops cells beyond the header). THE HAND IS CHROME'S OWN now:
+# scan_master_hand_rows is the fifth door's to-do list, the
+# end-of-run pass and the caught-up sync scrape the 🖐 rows in the
+# owner's real Chrome automatically (no Ctrl+S), one delivery at a
+# time with a backlog merge, and the CLI --chrome-retry covers them
+# too. 41 cases join in tests/test_iconcolumn.py (1437).
 # v0.50.0 — THE FIFTH DOOR: the owner's report — "before finishing
 # the run and fetch, app must show a modal, 'xx' number of links
 # didn't generate content or wasn't successful or got error xxx …
@@ -365,7 +382,7 @@ jobs:
           gitcurator/core/netctx.py
 
       - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry -v
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -376,4 +393,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1396 tests + worker 50 + offline golden run (v0.51.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1437 tests + worker 50 + offline golden run (v0.52.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

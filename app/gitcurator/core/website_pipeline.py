@@ -477,11 +477,123 @@ def decommission_table_path(vault_path: str) -> str:
                         DECOMMISSION_TABLE)
 
 
+#: v0.52.0 — the canonical column set every stamping site writes into
+#: (parts index 6 = the Status cell; GFM drops cells beyond the header
+#: count, so a table whose header lost columns would hide the stamps).
+_TABLE_HEADER_CELLS = 7
+_CANONICAL_HEADER = ('| # | Date | URL | Domain | Source | Status | '
+                     'Notes |')
+_CANONICAL_SEPARATOR = '|---|------|-----|--------|--------|--------|-------|'
+
+
+def _is_separator_line(line: str) -> bool:
+    """A markdown table's ``|---|---|`` row (dashes, colons, spaces,
+    pipes — nothing else)."""
+    s = line.strip()
+    if not s.startswith('|'):
+        return False
+    return all(c in '-:| \t' for c in s)
+
+
+def _ensure_table_shape(path: str, log: Optional[Callable] = None) -> bool:
+    """v0.52.0 — restore the table's full grammar when the owner's hand
+    has trimmed it.
+
+    The owner's screenshot: the master table with FOUR columns
+    (``# | Date | URL | Domain``) — the Source/Status/Notes cells gone,
+    the verdict emojis living in the # column. The PARSE reads any
+    shape now (:func:`_parse_decommission_rows`), but the app's own
+    stamps write the Status cell — and GFM drops every cell beyond the
+    header's count, so a stamp into a trimmed table would be INVISIBLE
+    in the rendered note. This pass, run by every table WRITER before
+    it stamps, pads the header + separator back to the canonical seven
+    columns and pads every short data row to the same width — the
+    owner's cells (his # emojis included) are never touched, only
+    empty cells are appended. Idempotent (a full-width table is a
+    no-op read); atomic; never raises. Returns True when the file was
+    rewritten."""
+    log = log or (lambda *a, **k: None)
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        log(f"⚠️ Table shape check skipped — the table could not be "
+            f"read: {e}", "warning")
+        return False
+    changed = False
+    # the header: the first pipe-row that is not a separator
+    header_idx = None
+    for i, line in enumerate(lines):
+        if line.startswith('|') and not _is_separator_line(line):
+            header_idx = i
+            break
+    if header_idx is not None:
+        header_cells = len(
+            [c for c in lines[header_idx].split('|')[1:-1]]) \
+            if lines[header_idx].strip().endswith('|') \
+            else len(lines[header_idx].split('|')) - 1
+        if header_cells < _TABLE_HEADER_CELLS:
+            lines[header_idx] = _CANONICAL_HEADER
+            if header_idx + 1 < len(lines) \
+                    and _is_separator_line(lines[header_idx + 1]):
+                lines[header_idx + 1] = _CANONICAL_SEPARATOR
+            changed = True
+            log(f"📋 Master table: the trimmed header is restored to the "
+                f"full seven columns (the # column is still yours — the "
+                f"emoji there reads exactly like the Status cell)",
+                "info")
+    # the data rows: pad every short pipe-row that carries a link
+    for i, line in enumerate(lines):
+        if not (line.startswith('| ') and 'http' in line):
+            continue
+        parts = line.split('|')
+        if len(parts) < 2 + _TABLE_HEADER_CELLS:
+            parts = parts + [''] * (2 + _TABLE_HEADER_CELLS
+                                    - len(parts))
+            lines[i] = '|'.join(parts)
+            changed = True
+    if not changed:
+        return False
+    try:
+        atomic_write_text(path,
+                          '\n'.join(lines).rstrip('\n') + '\n')
+    except Exception as e:
+        log(f"⚠️ Table shape could not be restored: {e}", "warning")
+        return False
+    return True
+
+
 def _parse_decommission_rows(path: str) -> List[Dict]:
-    """Data rows of the graveyard table: ``[{'url', 'status', 'line',
-    'raw'}, ...]``. Same split-the-pipes parse the _inbox tables use
-    (URL = column 4, Status = column 7). Malformed rows are skipped,
-    never raised — a hand-edited table must never crash a batch."""
+    """Data rows of the graveyard table: ``[{'url', 'status', 'icon',
+    'notes', 'line', 'raw'}, ...]``. Same split-the-pipes parse the
+    _inbox tables use (URL = column 4, Status = column 7). Malformed
+    rows are skipped, never raised — a hand-edited table must never
+    crash a batch.
+
+    v0.52.0 — THE ICON COLUMN SPEAKS. The owner's report (session,
+    verbatim): "see I set hand emoji, but those links didn't refetched
+    using scrapping manually on chrome" — his screenshot showed the
+    master table with FOUR columns (``# | Date | URL | Domain``) and
+    the verdict emojis set in the FIRST cell (the # column), the way
+    the legend's own emoji lines read. The old parse demanded all
+    seven columns (``len(parts) < 8`` → row invisible) and read the
+    verdict only from the Status cell — so every icon gesture was
+    blind: 🖐 rows never queued, 💀 rows never buried, " - " rows the
+    app itself never wrote never retried. Now:
+
+      * a row needs only FOUR cells to exist (``# | Date | URL |
+        Domain`` — the URL stays column 4 in every shape the app
+        writes and the owner trims to, with a scan fallback for
+        hand-made shapes);
+      * ``icon`` is the # cell, ``status`` is the Status cell — and
+        the row's ``status`` value is the COMBINED gesture text
+        (icon + Status), so every verdict predicate
+        (:func:`_status_is_dead` / ``_status_is_reviewed`` /
+        ``_status_is_revived`` / ``_status_is_waiting`` / the fourth
+        door's ``_status_is_hand``) reads the emoji wherever the
+        owner put it. The # column is the owner's column now."""
     rows: List[Dict] = []
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
@@ -492,12 +604,25 @@ def _parse_decommission_rows(path: str) -> List[Dict]:
         if not (line.startswith('| ') and 'http' in line):
             continue
         parts = line.split('|')
-        if len(parts) < 8:      # | # | Date | URL | Domain | Source | Status | Notes |
+        if len(parts) < 5:      # | # | Date | URL | Domain | (the 4-col law)
             continue
         url = parts[3].strip()
         if not url.lower().startswith(('http://', 'https://')):
-            continue
-        rows.append({'url': url, 'status': parts[6].strip(),
+            # a hand-made shape — the URL may sit in any early cell
+            url = ''
+            for cell in parts[1:6]:
+                c = (cell or '').strip()
+                if c.lower().startswith(('http://', 'https://')):
+                    url = c
+                    break
+            if not url:
+                continue
+        icon = parts[1].strip()
+        if icon in ('-', '—', ''):      # the app's own # cell — no gesture
+            icon = ''
+        status_cell = parts[6].strip() if len(parts) >= 8 else ''
+        gesture = ' '.join(x for x in (icon, status_cell) if x).strip()
+        rows.append({'url': url, 'status': gesture, 'icon': icon,
                      'notes': parts[7].strip() if len(parts) > 7 else '',
                      'line': idx, 'raw': line})
     return rows
@@ -523,13 +648,23 @@ def _status_is_reviewed(status: str) -> bool:
     never counts — it CONTAINS 'reviewed' but says the opposite; a
     revived Status never counts (the ♻️ wins); a DEAD status never
     reaches here (the caller checks dead first — death wins when a
-    hand-edited cell says both)."""
+    hand-edited cell says both).
+    v0.52.0 — the combined gesture (icon + Status cells) needs the
+    marker to win over the default: an ✅ in the # column over an
+    'unreviewed' Status cell is a REVIEWED row (the icon column's
+    law), so the tick markers are checked BEFORE the 'unreviewed'
+    exclusion — the word 'reviewed' alone still needs the exclusion
+    (it is a substring of the default)."""
     s = (status or '').strip().lower()
-    if not s or 'unreviewed' in s:
+    if not s:
         return False
     if any(m in s for m in REVIVE_MARKERS):
         return False
-    return any(m in s for m in REVIEWED_MARKERS)
+    if any(m in s for m in ("✅", "✔", "☑", "kept", "done")):
+        return True     # a tick marker beats the other cell's default
+    if 'unreviewed' in s:
+        return False
+    return 'reviewed' in s
 
 
 def _status_is_waiting(status: str) -> bool:
@@ -646,6 +781,81 @@ def scan_master_waiting_rows(vault_path: str,
     return out
 
 
+def scan_master_hand_rows(vault_path: str,
+                          log: Optional[Callable] = None) -> List[Dict]:
+    """v0.52.0 — the master table's 🖐 hand rows, the ones the fifth
+    door owes a Chrome scrape to.
+
+    The owner's report (session, verbatim): "see I set hand emoji, but
+    those links didn't refetched using scrapping manually on chrome"
+    — the 🖐 gesture (in the # column OR the Status cell, the icon
+    column's law) is not a request for the owner to press Ctrl+S
+    anymore; it is a request for the app's own Chrome scraping pass
+    (:func:`gitcurator.core.chrome_tabs.deliver_pages_via_chrome`):
+    launch the owner's real Chrome, one tab per link, take the live
+    DOM, deliver the page into ``_review/hand-delivered/`` — a real
+    fetch the next pipeline pass consumes.
+
+    Which rows qualify:
+
+      * the combined gesture reads HAND
+        (:func:`gitcurator.core.hand_delivery._status_is_hand`), and
+        no stronger verdict outranks it (dead / reviewed / revived —
+        the precedence law);
+      * the page is NOT already delivered — a queue.json entry marked
+        consumed, or whose suggested page file already sits in the
+        hand-delivered folder, is done (the record stays, the link is
+        not re-scraped);
+      * loopback never opens a browser (the v0.15.1 law).
+
+    Returns ``[{'url', 'wall', 'status'}, ...]`` in the table's own
+    row order, deduped by canonical URL (first row wins). Pure file
+    reads (the table + the fourth door's queue) — no state DB, no
+    network; never raises on a hand-edited table."""
+    out: List[Dict] = []
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return out
+    delivered: set = set()
+    queue: Dict = {}
+    try:
+        from gitcurator.core import hand_delivery as _hd
+        queue = _hd._read_queue(vault_path)
+        for url, meta in (queue.get('links') or {}).items():
+            suggested = (meta or {}).get('suggested') \
+                or _hd.suggested_filename(url)
+            page_landed = os.path.isfile(
+                os.path.join(_hd.hand_delivery_dir(vault_path),
+                             suggested))
+            if (meta or {}).get('consumed') or page_landed:
+                delivered.add(normalize_website_url(url))
+    except Exception:
+        delivered = set()   # a broken queue never hides a hand row
+    seen: set = set()
+    for row in _parse_decommission_rows(path):
+        s = row['status']
+        if _status_is_dead(s) or _status_is_reviewed(s) \
+                or _status_is_revived(s):
+            continue
+        if not _hand_delivery._status_is_hand(s):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical or canonical in seen:
+            continue
+        if canonical in delivered:
+            continue        # the page already landed — it is consumed
+        try:
+            from gitcurator.core.chrome_tabs import is_loopback_url
+            if is_loopback_url(canonical):
+                continue    # never opens a browser (v0.15.1)
+        except Exception:
+            pass
+        seen.add(canonical)
+        wall = row.get('notes') or ''
+        out.append({'url': row['url'], 'wall': wall, 'status': s})
+    return out
+
+
 def scan_decommission_table(vault_path: str) -> Dict[str, str]:
     """v0.44.0 — read the owner's burial decisions.
 
@@ -668,17 +878,21 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 > waiting for retries AND the human-eye classes (low classification
 > confidence, analysis failures, archived rescues): one row per link,
 > every link with a Status cell you can set. Edit ONLY the Status
-> column — do not delete rows.
+> column — do not delete rows. The # column is yours too: an emoji in
+> the FIRST cell of a row (🖐 / 💀 / ✅ / ♻️) reads exactly like the
+> same emoji in the Status cell — set it wherever is faster.
 > ✅ reviewed — you handled this link: never fetched, never retried
 >   again, its _review placeholder is swept.
-> 🪦 dead / ❌ dead / ☠️ dead — the link is dead: same never-fetch
->   retirement, same placeholder sweep.
+> 🪦 dead / ❌ dead / ☠️ dead / 💀 dead — the link is dead: same
+>   never-fetch retirement, same placeholder sweep.
 > ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
 >   like new again.
-> 🖐 hand — the fourth door: queue this link for hand-delivery via
->   your real Chrome (More ▸ 🖐 Hand-deliver walled links opens it;
->   save the page into _review/hand-delivered/ and the next batch
->   consumes it as a real fetch). NOT a retirement — the link keeps
+> 🖐 hand — the fourth door's gesture, the fifth door's engine: set
+>   it (the # cell or the Status cell) and GitCurator itself opens
+>   your real Chrome, one tab per hand row, takes the live pages, and
+>   processes them as real fetches — no manual saving (you can still
+>   save a page into _review/hand-delivered/ yourself; a delivered
+>   page is consumed either way). NOT a retirement — the link keeps
 >   waiting until the page is delivered.
 > blank / unreviewed / " - " — still waiting: the caught-up check
 >   retries these rows BEFORE "everything is up to date" is said
@@ -944,6 +1158,16 @@ def consume_decommission_table(state, vault_path: str,
     re-stamps); death and reviewed still win when a hand-edited cell
     says both.
 
+    v0.52.0 — THE ICON COLUMN SPEAKS here too: the gesture is read
+    from the # cell OR the Status cell (the parse's combined text),
+    a table the owner trimmed to four columns is restored to the
+    full seven BEFORE any stamp is written
+    (:func:`_ensure_table_shape` — a stamp into a trimmed table
+    would be invisible in the rendered note), and the hand log line
+    says the fifth door's truth: the app itself scrapes hand rows in
+    the owner's Chrome now (the end-of-run pass and the caught-up
+    check both deliver them automatically).
+
     v0.49.0 — the sweep (pass 3) takes ANY app-owned ``_review``
     placeholder, not just fetch-failed ones: a ✅/🪦 on a
     low-confidence or archived-rescue row sweeps that note too (the
@@ -965,6 +1189,12 @@ def consume_decommission_table(state, vault_path: str,
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
         return report
+    # v0.52.0 — a trimmed table gets its full grammar back first, so
+    # every stamp below lands in a cell the rendered note can show
+    try:
+        _ensure_table_shape(path, log=log)
+    except Exception:
+        pass    # a shape the app cannot restore must not kill the pass
     rows = _parse_decommission_rows(path)
     if not rows:
         return report
@@ -1059,11 +1289,15 @@ def consume_decommission_table(state, vault_path: str,
         except Exception as e:
             log(f"⚠️ Hand-delivery queue write skipped: {e}", "warning")
         else:
-            log(f"🖐 {report['handed']} link(s) queued for hand-delivery "
-                f"— open each in your real Chrome (the README in the "
-                f"hand-delivered folder has the suggested filenames), "
-                f"save the pages there, and the next batch consumes "
-                f"them as real fetches", "info")
+            # v0.52.0 — the fifth door's truth: the app scrapes these
+            # itself now (the end-of-run pass opens the owner's Chrome,
+            # one tab per link, and takes the pages) — Ctrl+S stays as
+            # the owner's own option, not the obligation
+            log(f"🖐 {report['handed']} hand row(s) queued — your real "
+                f"Chrome opens for them at the end of this run (one "
+                f"tab per link, the live pages taken as real fetches; "
+                f"saving a page into the hand-delivered folder yourself "
+                f"still works too)", "info")
 
     # ---- pass 2: the revivals -------------------------------------------
     for row in rows:
@@ -1186,6 +1420,13 @@ def refresh_master_table(state, vault_path: str,
     report = {'waiting': 0, 'retired': 0, 'written': 0}
     if not vault_path:
         return report
+    # v0.52.0 — a trimmed table gets its full grammar back first (the
+    # stamp this pass writes must land in a cell the note can render)
+    try:
+        _ensure_table_shape(decommission_table_path(vault_path),
+                            log=log)
+    except Exception:
+        pass        # the shape never blocks the refresh
     try:
         waiting_urls: List[str] = []
         waiting_notes: Dict[str, str] = {}

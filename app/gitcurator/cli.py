@@ -1016,24 +1016,39 @@ def cmd_chrome_retry(args) -> int:
     from gitcurator.core import website_pipeline as _wp
     from gitcurator.constants import APP_DIR as _APP_DIR
     _db_file = os.path.join(_APP_DIR, "cache.db")
-    if not os.path.exists(_db_file):
-        cli_print("No cache.db yet — nothing has failed (nothing to "
-                  "retry in Chrome).", "success")
-        return 0
-    state = _wp.WebsiteStateDB(_db_file)
     links = []
+    if not os.path.exists(_db_file):
+        # v0.52.0 — no cache.db only means no MACHINE fetch has failed;
+        # the 🖐 hand rows still ask for their Chrome scrape
+        cli_print("No cache.db yet — no machine fetch has failed; the "
+                  "hand rows still get their Chrome pass.", "info")
+    else:
+        state = _wp.WebsiteStateDB(_db_file)
+        try:
+            for row in state.all_retry_rows():
+                url = (row.get("url") or "").strip()
+                if not url.lower().startswith(("http://", "https://")) \
+                        or _ct.is_loopback_url(url):
+                    continue
+                if state.is_dismissed(url):
+                    continue  # the ladder's own verdict answered it
+                links.append({"url": url,
+                              "error": str(row.get("last_error") or "")})
+        finally:
+            state.close()
+    # v0.52.0 — the 🖐 hand rows join the fifth door's list: the
+    # owner's gesture (the # cell or the Status cell) asks for THIS
+    # pass — the app scrapes them in his real Chrome, no Ctrl+S
     try:
-        for row in state.all_retry_rows():
-            url = (row.get("url") or "").strip()
-            if not url.lower().startswith(("http://", "https://")) \
-                    or _ct.is_loopback_url(url):
-                continue
-            if state.is_dismissed(url):
-                continue  # the ladder's own verdict answered it
-            links.append({"url": url,
-                          "error": str(row.get("last_error") or "")})
-    finally:
-        state.close()
+        for hand_row in _wp.scan_master_hand_rows(vault):
+            if not any(l["url"] == hand_row.get("url") for l in links):
+                links.append({
+                    "url": hand_row.get("url") or "",
+                    "error": str(hand_row.get("wall")
+                                 or "the 🖐 hand gesture in the master "
+                                    "table")})
+    except Exception as _e:
+        cli_print(f"⚠️ Hand-row scan skipped: {_e}", "warning")
     print(paint("Failed links waiting for the fifth door "
                 "(your real Chrome, one tab each)", C.BOLD))
     print(rule())

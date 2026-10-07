@@ -1,3 +1,111 @@
+## [0.52.0] — The icon column speaks; the hand is Chrome's own — 2026-10-09
+
+Owner ask (session): "Please pay attention, see I set hand emoji, but
+those links didn't refetched using scrapping manually on chrome." —
+with a screenshot (b.png) of the master note showing FIVE rows in a
+FOUR-column table (``# | Date | URL | Domain``): 🖐️ on tgstat.com,
+dehashed.com, flightradar24.com; 💀 on darkwebdaily.live and
+tor2web.org. Desktop release v0.52.0, Worker unchanged at **0.30.0**
+(it never touches the vault). Suite grows **1396 → 1437** (41 cases
+in tests/test_iconcolumn.py — pure stdlib at the unit level, no
+browser ever launches under test).
+
+**The diagnosis — the parse was blind to the owner's own hand.** The
+master table's parse demanded all SEVEN columns
+(``len(parts) < 8`` → the row does not exist) and read the verdict
+only from the Status cell (column 7). The owner's table — trimmed to
+four columns, the verdict emojis set in the FIRST cell (the # column,
+exactly the way the legend's own emoji lines read) — was invisible
+to every consumer: the 🖐 rows never queued for hand-delivery, the 💀
+rows never buried, the " - " rows the app itself never wrote never
+retried, and a caught-up sync kept saying "everything is up to date"
+about a table full of decisions it could not see. And the 🖐 gesture,
+when the app DID see one (in the Status cell), only queued the link
+for the owner's Ctrl+S — the fifth door (v0.50, the app's own Chrome
+scraping) never fired for it.
+
+**The fix, half one — THE ICON COLUMN SPEAKS.**
+``_parse_decommission_rows`` now needs only FOUR cells to see a row
+(the URL stays column 4 in every shape the app writes and the owner
+trims to, with a scan fallback for hand-made shapes), and the row's
+verdict is the COMBINED gesture text — the # cell plus the Status
+cell — so every predicate (dead / reviewed / revived / waiting /
+hand) reads the emoji wherever the owner put it. A plain "-" in the
+# cell adds nothing (the app's own rows keep their exact old Status
+strings — the minimal-diff law). The guard orders changed for the
+combined text: a tick marker beats the other cell's "unreviewed"
+default (✅ over "unreviewed" is REVIEWED; before, the substring
+guard swallowed it), a hand marker beats it too, and **✋ (U+270B —
+the codepoint the owner's editor actually gave him, rendered
+near-identically to 🖐 U+1F590) and the bare word "hand" join
+HAND_MARKERS**. Death and reviewed still outrank the hand gesture at
+every call site (the old precedence law). And because GFM drops
+cells beyond the header's count, a trimmed table would have made the
+app's own stamps invisible — so ``_ensure_table_shape`` (run by every
+table writer before it stamps) restores the canonical seven columns:
+header and separator rewritten, short rows padded with empty cells,
+the owner's emoji cells untouched, idempotent. The legend itself now
+says it where the owner reads it: "The # column is yours too: an
+emoji in the FIRST cell of a row reads exactly like the same emoji in
+the Status cell — set it wherever is faster."
+
+**The fix, half two — THE HAND IS CHROME'S OWN.** A 🖐 row is no
+longer a request for the owner to press Ctrl+S; it is a request for
+the app's own Chrome scraping pass.
+``scan_master_hand_rows`` reads the table (icon or Status cell) for
+hand-gesture rows whose page has NOT landed yet (a consumed
+queue.json entry, or a suggested file already sitting in
+``_review/hand-delivered/``, never re-asks — the record stays), drops
+the stronger verdicts, drops loopback, dedupes by canonical. The
+delivery is the fifth door's own machinery
+(``deliver_pages_via_chrome`` — the owner's real Chrome, a throwaway
+profile, one tab per link, the live DOM taken after the render,
+pages written as their suggested filenames, consumed as REAL
+fetches), and it fires at THREE doors now: the end-of-run pass
+``_maybe_deliver_hand_queue`` (automatic, before the run-failure
+modal — the gesture WAS the owner's answer, no dialog asks again;
+each hand link tried once per app session so a failed scrape does
+not reopen Chrome every batch), the caught-up sync (before "All
+caught up" may be said, alongside the v0.51 " - " pass), and More ▸
+"🖐 Scrape hand rows via Chrome" (the anytime trigger, with its gates
+surfaced). The CLI ``--chrome-retry`` covers the hand rows too, even
+with no cache.db (no machine failure has ever happened — the hand
+rows still get their pass). One Chrome delivery at a time: a second
+request racing a running one merges into a backlog the finish
+handler drains (two deliveries at once would fight over the worker
+reference and the owner's screen); the delivered pages re-process as
+real fetches exactly as the fifth door always has. The old fourth
+door is untouched — an owner who WANTS to Ctrl+S still can, and a
+delivered page is consumed either way.
+
+**The four-column table, enforced.** The consume pass on the owner's
+own shape: the 💀 icon rows are buried (dismissed, retried rows
+dropped, placeholders swept — the never-fetch gate), the 🖐 rows are
+enqueued into queue.json and stamped ``queued`` (visible — the rows
+were padded first), and the log line tells the fifth door's truth:
+"your real Chrome opens for them at the end of this run — saving a
+page into the hand-delivered folder yourself still works too."
+
+**Gates.** 41 cases in tests/test_iconcolumn.py (the four-column
+parse — existence, URL law, the combined gesture, the '-' no-op, the
+hand-made shape fallback, junk still skipped; the icon verdicts —
+skull/tick/hand/revived over the "unreviewed" default, both hand
+codepoints, the bare word, hand never waits, revived beats hand, the
+dead precedence; the table shape — restore, preserve, idempotence,
+full-table no-op, missing-table quiet; the consume on the owner's
+shape — the burial, the enqueue + visible stamp, idempotent
+re-stamps, an app-shaped row the owner emoji'd; the hand scan — both
+cells, delivered/consumed never re-asked, the stronger verdicts,
+loopback, dedupe; the queue view ``pending_hand_links``; the fifth
+door answering the gesture — the page lands, the scan never re-asks,
+``take_hand_delivered`` returns the real fetch, a failed scrape keeps
+the row honestly waiting; the caught-up hero routing — hand rows
+start the delivery and the claim is never said, waiting and hand
+both fire, no hand rows keep the old law, a bare hero without the
+collaborators is unchanged, a delivery start failure is honest not
+fatal; release bookkeeping). Full suite **1437/1437**, 85-module
+compile gate OK, offline golden 30/30.
+
 ## [0.51.0] — The caught-up check reads the table — 2026-10-09
 
 Owner ask (session): "Currently app says everything is uptodate, but

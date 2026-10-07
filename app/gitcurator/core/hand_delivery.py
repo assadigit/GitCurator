@@ -89,7 +89,13 @@ README_FILENAME = 'README.txt'
 #: Deliberately AFTER the retirement markers in the check order: a
 #: cell that says both "dead" and "hand" is a DEAD cell (death wins,
 #: the same precedence the reviewed/dead pair already uses).
-HAND_MARKERS = ("🖐", "🫱", "hand-deliver", "hand deliver", "chrome")
+#: v0.52.0 — '✋' joins: the owner's screenshot set the hand gesture
+#: with U+270B (the raised hand the legend's own line reads like),
+#: a codepoint the 2026 emoji set renders near-identically to 🖐
+#: (U+1F590) — both must queue. Bare 'hand' joins for the same
+#: reason: the legend's own word, the first thing an owner types.
+HAND_MARKERS = ("🖐", "✋", "🫱", "hand-deliver", "hand deliver",
+                "hand", "chrome")
 
 #: The reason classes that earn the fourth door: the refusal family,
 #: bot-defense markers, the challenge hint, the TLS-handshake walls,
@@ -582,17 +588,51 @@ def take_hand_delivered(vault_path: str, canonical: str,
 
 
 def _status_is_hand(status: str) -> bool:
-    """True when a Status cell reads as the fourth-door gesture (the
-    owner's 🖐 hand). The precedence law: death and reviewed are
-    checked FIRST by the caller (they retire); a revived cell never
-    queues for hand-delivery; a hand cell among the waiting rows is
-    the ONLY non-retiring gesture in the table's grammar."""
+    """True when a gesture reads as the fourth door's (the owner's 🖐
+    hand). The precedence law: revived is checked first (a cell that
+    says both 'hand' and 'revived' is a REVIVED cell — the old law);
+    then ANY hand marker wins — v0.52.0 changed the guard order for
+    the combined gesture (icon + Status cells): a 🖐 icon over an
+    'unreviewed' Status cell is still a HAND row (the owner set the
+    emoji in the # column and left the Status default — the exact
+    shape his screenshot showed); death and reviewed are still the
+    CALLER's first checks (they retire, the stronger sentences)."""
     s = (status or '').strip().lower()
-    if not s or 'unreviewed' in s:
+    if not s:
         return False
     if any(m in s for m in ('♻️', 'revived', 'restored')):
         return False
     return any(m in s for m in HAND_MARKERS)
+
+
+def pending_hand_links(vault_path: str) -> List[Dict]:
+    """v0.52.0 — the queued hand links whose page has NOT landed yet:
+    ``[{'url', 'wall'}]`` for every queue.json entry that is neither
+    consumed nor sitting in the hand-delivered folder as its suggested
+    file. This is the fifth door's to-do list — the Chrome scraping
+    pass (the end-of-run auto-delivery, the caught-up check, the CLI)
+    reads it to know which walled links still owe the owner's browser
+    a tab. Pure file reads; never raises (a broken queue reads as
+    empty — the table's own scan,
+    :func:`gitcurator.core.website_pipeline.scan_master_hand_rows`,
+    is the fuller source that also catches never-enqueued rows)."""
+    out: List[Dict] = []
+    try:
+        queue = _read_queue(vault_path)
+        links = queue.get('links') or {}
+        folder = hand_delivery_dir(vault_path)
+        for url, meta in links.items():
+            if (meta or {}).get('consumed'):
+                continue
+            suggested = (meta or {}).get('suggested') \
+                or suggested_filename(url)
+            if os.path.isfile(os.path.join(folder, suggested)):
+                continue    # the page landed — it is delivered
+            out.append({'url': url,
+                        'wall': str((meta or {}).get('wall') or '')})
+    except Exception:
+        return []
+    return out
 
 
 def stamp_hand_rows(vault_path: str, urls: List[str],
@@ -650,5 +690,6 @@ __all__ = [
     'is_walled_reason', 'walled_retry_rows', 'suggested_filename',
     'enqueue_hand_delivery', 'find_chrome', 'open_in_chrome',
     'collect_delivered', 'consume_delivered', 'hand_fetch_result',
-    'take_hand_delivered', '_status_is_hand', 'stamp_hand_rows',
+    'take_hand_delivered', 'pending_hand_links', '_status_is_hand',
+    'stamp_hand_rows',
 ]

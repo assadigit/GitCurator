@@ -436,6 +436,129 @@ class ProcessingControlMixin:
             return
         self._start_master_retry()
 
+    # -- v0.52.0: the hand rows — the fifth door's own to-do list ----------
+
+    def _scan_master_hand(self):
+        """v0.52.0 — the master table's 🖐 hand rows that still owe a
+        Chrome scrape (the owner's report: "I set hand emoji, but those
+        links didn't refetched using scrapping manually on chrome").
+        A pure file read (the table's gestures + the fourth door's
+        queue), guarded exactly like ``_scan_master_waiting``: no
+        vault, no pipeline, or a running batch means no scan. Returns
+        ``[{'url', 'error'}]`` — the shape the Chrome delivery worker
+        takes; never raises."""
+        try:
+            cfg = self.config or {}
+            vault = (cfg.get('website_vault_path') or '').strip()
+            if not vault or not os.path.isdir(vault):
+                return []
+            if not (cfg.get('pipelines') or {}).get('websites', False):
+                return []
+            if getattr(self, '_batch_running', False):
+                return []      # a running batch owns the table's truth
+            return _website_pipeline.scan_master_hand_rows(vault) or []
+        except Exception:
+            return []
+
+    def _maybe_deliver_hand_queue(self):
+        """v0.52.0 — the end-of-run hand pass: every 🖐 hand row whose
+        page has not landed yet is scraped by the app ITSELF, in the
+        owner's real Chrome, automatically — no dialog (the gesture
+        WAS the owner's answer), no manual saving. The delivered pages
+        are re-processed as real fetches by the delivery worker's own
+        finish path. Each hand link is tried ONCE per app session
+        (``_hand_delivery_tried`` — a link whose Chrome scrape failed
+        keeps waiting for its doors instead of reopening Chrome every
+        batch); opted-out via the ``web_browser_retry`` knob. Quiet
+        no-op whenever the pass cannot run."""
+        cfg = self.config or {}
+        if cfg.get('web_browser_retry') is False:
+            return  # the fifth door's knob (default ON) opts out
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            return
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return
+        links = self._scan_master_hand()
+        if not links:
+            return
+        tried = getattr(self, '_hand_delivery_tried', None)
+        if tried is None:
+            tried = self._hand_delivery_tried = set()
+        links = [l for l in links if l.get('url') not in tried]
+        if not links:
+            return
+        tried.update(l.get('url') for l in links)
+        for l in links:
+            l.setdefault('error', l.get('wall')
+                         or 'the 🖐 hand gesture in the master table')
+        self.log_message(
+            f"🖐 {len(links)} hand row(s) — your real Chrome opens for "
+            f"them now (one tab per link; GitCurator takes each live "
+            f"page and processes it as a real fetch — no manual "
+            f"saving)", "info")
+        try:
+            self._start_chrome_tab_retry(links)
+        except Exception as e:
+            self.log_message(
+                f"⚠️ The hand-row Chrome pass could not start ({e}) — "
+                f"More ▸ 🤖 Chrome tab-retry, or save the pages into "
+                f"the hand-delivered folder yourself", "warning")
+
+    def hand_rows_deliver_now(self):
+        """More ▸ 🖐 Scrape hand rows via Chrome — v0.52.0, the manual
+        trigger: the 🖐 hand rows of the master table (the # cell or
+        the Status cell — wherever the owner set the emoji) are
+        scraped in the owner's real Chrome NOW, the delivered pages
+        processed as real fetches. The same delivery the end-of-run
+        pass runs automatically; the dialogs surface the gates."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        if getattr(self, '_chrome_delivery_busy', False):
+            self._show_custom_message_box(
+                "A Chrome delivery is running",
+                "A delivery is already open in your Chrome — the hand "
+                "rows queued behind it open when the current tabs "
+                "finish.", success=True)
+            return
+        links = self._scan_master_hand()
+        if not links:
+            self._show_custom_message_box(
+                "No hand rows waiting",
+                "The master table (_review/DECOMMISSIONED.md) has no 🖐 "
+                "hand row waiting for a Chrome scrape (a delivered row "
+                "is consumed — set 🖐 anywhere in a row: the # cell or "
+                "the Status cell).", success=True)
+            return
+        if not self._confirm_batch(len(links), "the table's 🖐 hand rows"):
+            self.log_message(
+                "⏹️ Hand-row Chrome scrape cancelled — the rows keep "
+                "waiting (the end-of-run pass offers them again).",
+                "warning")
+            return
+        for l in links:
+            l.setdefault('error', l.get('wall')
+                         or 'the 🖐 hand gesture in the master table')
+        self.log_message(
+            f"🖐 {len(links)} hand row(s) — opening your real Chrome "
+            f"(one tab per link; the live pages become real fetches)",
+            "info")
+        self._start_chrome_tab_retry(links)
+
     # -- v0.44.0: the graveyard — decommissioning dead links ---------------
 
     def decommission_dead_links_now(self):
@@ -989,10 +1112,28 @@ class ProcessingControlMixin:
         re-processed as REAL fetches (a fresh mini-batch — the pipeline
         takes each delivered page before any machine door is asked).
         Same QThread pattern as the vault seals: a kept reference, log
-        lines into the main log, and a queued signal back."""
+        lines into the main log, and a queued signal back.
+
+        v0.52.0 — ONE delivery at a time: a second request while a
+        delivery is running (the end-of-run auto hand pass racing the
+        modal's pick, the caught-up check racing a batch) is MERGED
+        into a backlog the finish handler drains — two Chrome
+        deliveries at once would fight over the worker reference (Qt
+        GC on a running QThread is the crash the kept-reference law
+        exists to prevent) and over the owner's screen."""
         cfg = self.config or {}
         vault = (cfg.get('website_vault_path') or '').strip()
-        if not vault:
+        if not vault or not links:
+            return
+        if getattr(self, '_chrome_delivery_busy', False):
+            backlog = getattr(self, '_chrome_delivery_backlog', None)
+            if backlog is None:
+                backlog = self._chrome_delivery_backlog = []
+            backlog.extend(links)
+            self.log_message(
+                f"🖐 A Chrome delivery is already running — "
+                f"{len(links)} link(s) queued behind it (they open "
+                f"when the current tabs finish)", "info")
             return
 
         class ChromeTabRetryWorker(QThread):
@@ -1019,28 +1160,37 @@ class ProcessingControlMixin:
 
         worker = ChromeTabRetryWorker(vault, links, dict(cfg))
         self._chrome_retry_worker = worker  # a kept reference (Qt GC law)
+        self._chrome_delivery_busy = True
         worker.log_message.connect(self.log_message)
 
         def _on_delivered(urls):
-            if not urls:
-                return
-            if getattr(self, '_batch_running', False):
-                self.log_message(
-                    f"🤖 {len(urls)} page(s) delivered from your Chrome — "
-                    "a batch is running, so they join the NEXT one "
-                    "automatically (delivered pages are never left "
-                    "waiting)", "info")
-                return
-            self.log_message(
-                f"🤖 {len(urls)} page(s) delivered from your Chrome — "
-                "re-processing them now as real fetches…", "success")
-            try:
-                self._start_worker_with_urls(list(urls))
-            except Exception as e:
-                self.log_message(
-                    f"⚠️ The delivered-page re-run could not start "
-                    f"({e}) — the next SYNC batch takes them "
-                    f"automatically", "warning")
+            self._chrome_delivery_busy = False
+            if urls:
+                if getattr(self, '_batch_running', False):
+                    self.log_message(
+                        f"🤖 {len(urls)} page(s) delivered from your "
+                        f"Chrome — a batch is running, so they join the "
+                        f"NEXT one automatically (delivered pages are "
+                        f"never left waiting)", "info")
+                else:
+                    self.log_message(
+                        f"🤖 {len(urls)} page(s) delivered from your "
+                        f"Chrome — re-processing them now as real "
+                        f"fetches…", "success")
+                    try:
+                        self._start_worker_with_urls(list(urls))
+                    except Exception as e:
+                        self.log_message(
+                            f"⚠️ The delivered-page re-run could not "
+                            f"start ({e}) — the next SYNC batch takes "
+                            f"them automatically", "warning")
+            # drain the backlog — the deliveries that arrived while
+            # this one ran get their own Chrome pass now
+            backlog = getattr(self, '_chrome_delivery_backlog', None) \
+                or []
+            self._chrome_delivery_backlog = []
+            if backlog:
+                self._start_chrome_tab_retry(backlog)
 
         worker.delivered.connect(_on_delivered)
         worker.start()
@@ -1518,6 +1668,17 @@ class ProcessingControlMixin:
             _summary = getattr(self.worker, 'batch_summary', None) \
                 if self.worker else None
             if _summary and not _summary.get('stopped'):
+                # v0.52.0 — the hand rows go FIRST: the owner's 🖐
+                # gestures are his answer, so the app scrapes them in
+                # his real Chrome without asking again (the gesture
+                # was the ask). Tolerated everywhere — a pass that
+                # cannot run never costs the owner his scorecard.
+                try:
+                    self._maybe_deliver_hand_queue()
+                except Exception as _hand_err:
+                    self.log_message(
+                        f"⚠️ Hand-row Chrome pass skipped: {_hand_err}",
+                        "warning")
                 # v0.50.0 — the fifth door's offer rides BEFORE the
                 # scorecard: the run's fetch failures are the run's last
                 # question ("want to retry them in your real Chrome?"),

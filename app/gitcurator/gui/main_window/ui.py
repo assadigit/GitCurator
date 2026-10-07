@@ -1597,6 +1597,14 @@ class UiMixin:
         # same gesture by hand (never a retirement).
         more_menu.addAction("🖐 Hand-deliver walled links",
                             self.hand_deliver_walled_links_now)
+        # v0.52.0 — the hand rows, the fifth door's own pass: the 🖐
+        # gestures (the # cell or the Status cell — wherever the owner
+        # set the emoji) are scraped in the owner's real Chrome by the
+        # app itself — one tab per link, the live pages taken as real
+        # fetches. The end-of-run pass and the caught-up sync run this
+        # automatically; this is the anytime trigger.
+        more_menu.addAction("🖐 Scrape hand rows via Chrome",
+                            self.hand_rows_deliver_now)
         # v0.50.0 — the fifth door: the failed links (the fetch pile
         # waiting in the retry queue) can be re-fetched AUTOMATICALLY
         # through the owner's own Chrome — one tab per link, the live

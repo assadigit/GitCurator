@@ -226,6 +226,7 @@ class HeroMixin:
             # hero-flow stubs carry no processing-control collaborator.)
             _scan_master = getattr(self, '_scan_master_waiting', None)
             _waiting = _scan_master() if callable(_scan_master) else []
+            _work_started = False
             if _waiting:
                 _eyes = getattr(self, '_master_waiting_eyes', 0)
                 self.log_message(
@@ -238,6 +239,42 @@ class HeroMixin:
                        f"🪦 in the table)" if _eyes else "")
                     + ".", "info")
                 self._start_master_retry()
+                _work_started = True
+            # v0.52.0 — the 🖐 hand rows get their scrape before the
+            # claim too (the owner's report: "I set hand emoji, but
+            # those links didn't refetched using scrapping manually on
+            # chrome"): a hand row is a request for the app's own
+            # Chrome pass, not a note to self — the caught-up sync
+            # opens the tabs itself, the pages land as real fetches.
+            # (Guarded: the bare hero-flow stubs carry no
+            # processing-control collaborator.)
+            _scan_hand = getattr(self, '_scan_master_hand', None)
+            _hand_rows = _scan_hand() if callable(_scan_hand) else []
+            if _hand_rows:
+                _deliver = getattr(self, '_start_chrome_tab_retry', None)
+                try:
+                    for _l in _hand_rows:
+                        if isinstance(_l, dict):
+                            _l.setdefault(
+                                'error', _l.get('wall')
+                                or 'the 🖐 hand gesture in the master table')
+                except Exception:
+                    pass    # a stub shape never breaks the flow
+                self.log_message(
+                    f"🖐 Bot queue caught up, but {len(_hand_rows)} 🖐 "
+                    f"hand row(s) are waiting for your real Chrome — "
+                    f"scraping them now (one tab per link, the live "
+                    f"pages become real fetches)", "info")
+                if callable(_deliver):
+                    try:
+                        _deliver(_hand_rows)
+                        _work_started = True
+                    except Exception as _e:
+                        self.log_message(
+                            f"⚠️ The hand-row Chrome pass could not "
+                            f"start ({_e}) — More ▸ 🖐 Scrape hand rows "
+                            f"via Chrome runs it anytime", "warning")
+            if _work_started:
                 return
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
