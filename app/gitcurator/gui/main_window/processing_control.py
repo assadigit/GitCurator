@@ -335,6 +335,107 @@ class ProcessingControlMixin:
             return
         self._start_review_retry()
 
+    # -- v0.51.0: the caught-up check's own retry pass ---------------------
+
+    def _scan_master_waiting(self):
+        """v0.51.0 — the master table's " - " rows that are the machine's
+        to retry (the owner's law: before declaring everything up to
+        date the app must check the decommissioned note). Opens the
+        state ledger with the same dry-run-shadow law the backlog scan
+        uses, probes retired/stored links out of the set, and stashes
+        the eyes-count for the caught-up message. Best-effort and
+        guarded throughout (a broken probe never blocks the caught-up
+        path — it falls back to the pure file read, then to [])."""
+        try:
+            self._master_waiting_eyes = 0
+            cfg = self.config or {}
+            vault = (cfg.get('website_vault_path') or '').strip()
+            if not vault or not os.path.isdir(vault):
+                return []
+            if not (cfg.get('pipelines') or {}).get('websites', False):
+                return []
+            if getattr(self, '_batch_running', False):
+                return []      # a running batch owns the table's truth
+            try:
+                if _dryrun.is_enabled():
+                    state = _website_pipeline.WebsiteStateDB(
+                        db_path=_dryrun.shadow_cache_path(
+                            os.path.join(APP_DIR, 'cache.db')))
+                else:
+                    state = _website_pipeline.WebsiteStateDB()
+                try:
+                    scanned = _website_pipeline.scan_master_waiting_rows(
+                        vault, state=state)
+                finally:
+                    state.close()
+            except Exception:
+                scanned = _website_pipeline.scan_master_waiting_rows(vault)
+            waiting = [i for i in scanned if i.get('kind') == 'fetch']
+            self._master_waiting_eyes = len(
+                [i for i in scanned if i.get('kind') == 'eyes'])
+            return waiting
+        except Exception:
+            return []
+
+    def _start_master_retry(self):
+        """v0.51.0 — launch the caught-up check's retry batch (worker mode
+        'master_retry'): the " - " rows of _review/DECOMMISSIONED.md are
+        fetched again through the FULL pipeline, burned-out retry
+        counters reborn one row at a time, the honest verdict said at
+        the end. Called by the caught-up sync (automatic — the owner's
+        "try to fetch again") and More ▸ 🔁 Retry the table's ' - ' rows."""
+        if getattr(self, '_batch_running', False):
+            return      # silent — the caught-up flow only calls when free
+        self.save_config()
+        self._start_worker('master_retry', None, None, None, None, None, None)
+
+    def retry_master_waiting_now(self):
+        """More ▸ 🔁 Retry the table's ' - ' rows — the manual trigger
+        (v0.51.0). Same pass the caught-up sync runs automatically, with
+        the gates surfaced as dialogs instead of silence (the user ASKED
+        for this one). Rows with a verdict (🪦 ❌ ☠️ 💀 / ✅ / ♻️ / 🖐) are
+        never touched — their Status cell already decided."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            self._show_custom_message_box(
+                "Websites pipeline is off",
+                "Turn the Websites pipeline on first (Settings → 📁 Vault).",
+                success=False)
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            self._show_custom_message_box(
+                "No Websites vault",
+                "Set the Websites vault first (Settings → 📁 Vault).",
+                success=False)
+            return
+        if getattr(self, '_batch_running', False):
+            self._show_custom_message_box(
+                "Batch already running",
+                "A batch is already running — finish or stop it first.",
+                success=False)
+            return
+        waiting = self._scan_master_waiting()
+        if not waiting:
+            eyes = getattr(self, '_master_waiting_eyes', 0) or 0
+            self._show_custom_message_box(
+                "No ' - ' rows waiting",
+                "The master table (_review/DECOMMISSIONED.md) has no row "
+                "waiting for a retry — every link is stored, retired or "
+                "verdicted.\n\n"
+                + (f"{eyes} row(s) wait for your eyes: set ✅ reviewed or "
+                   f"🪦 dead in the table.\n\n" if eyes else "")
+                + "\"Everything is up to date\" is true.",
+                success=True)
+            return
+        if not self._confirm_batch(len(waiting), "the master table's ' - ' rows"):
+            self.log_message(
+                "⏹️ Master-table waiting retry cancelled — the ' - ' rows "
+                "keep waiting (their automatic retries continue).",
+                "warning")
+            return
+        self._start_master_retry()
+
     # -- v0.44.0: the graveyard — decommissioning dead links ---------------
 
     def decommission_dead_links_now(self):

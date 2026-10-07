@@ -184,6 +184,25 @@ class WebsiteStateDB:
                 " VALUES (?,?)", (key, str(value)))
             self.conn.commit()
 
+    def reset_retry_attempts(self, url: str) -> bool:
+        """v0.51.0 — ONE link's retry counter reborn: attempts=0, due
+        NOW. The master-table waiting pass calls this for a " - " row
+        whose 3 automatic retries burned out — the owner's table row
+        says the link is valid and the fetch failed, so the link gets a
+        fresh set through the front door instead of being silently
+        skipped as "no more retries" forever. Unlike ``rearm_retries``
+        (v0.19.0, the WHOLE queue) this touches a single row — the
+        other waiting links keep their backoff schedules. Returns True
+        when a row was actually reset."""
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE website_retry_queue"
+                " SET attempts=0, next_attempt_at=? WHERE url=?",
+                (now_iso, url))
+            self.conn.commit()
+            return bool(cur.rowcount)
+
     def rearm_retries(self) -> int:
         """v0.19.0 — reset the ENTIRE retry queue (attempts=0, due NOW).
         Called when the web proxy turns ACTIVE: the queued failures were

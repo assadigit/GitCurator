@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1366-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1396-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -10,7 +10,25 @@
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
-# mastertable + 43 handdelivery + 27 reviewtable + 52 fifthdoor).
+# mastertable + 43 handdelivery + 27 reviewtable + 52 fifthdoor +
+# 30 masterretry).
+# v0.51.0 — THE CAUGHT-UP CHECK READS THE TABLE: the owner's report —
+# "Currently app says everything is uptodate, but actually app must
+# look at decomissioned note, and try to fetch again those that dont
+# have skeleton or red cross or such emojies and have this state
+# ' - ' … so before declaring everything is uptodate it must check
+# 'decomissioned' note and find those that should be retried" — a
+# caught-up SYNC now scans _review/DECOMMISSIONED.md for the " - "
+# rows (no verdict emoji, no decision — valid link, failed fetch) and
+# auto-starts the master-retry batch: burned-out retry counters are
+# reborn ONE row at a time (reset_retry_attempts), each link runs the
+# FULL pipeline, the refresh stamps succeeded rows '📁 stored' so the
+# table never lies "waiting" about stored links, and the honest
+# verdict is said at the end — "everything is up to date" only when no
+# " - " fetch row remains. The "eyes" rows (low-confidence /
+# analysis / archived notes) are never fetched — they wait for the
+# owner's ✅/🪦. More ▸ 🔁 Retry the table's ' - ' rows is the anytime
+# trigger. 30 cases join in tests/test_masterretry.py (1396).
 # v0.50.0 — THE FIFTH DOOR: the owner's report — "before finishing
 # the run and fetch, app must show a modal, 'xx' number of links
 # didn't generate content or wasn't successful or got error xxx …
@@ -346,8 +364,8 @@ jobs:
           gitcurator/core/mirror_keys.py
           gitcurator/core/netctx.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -358,4 +376,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1366 tests + worker 50 + offline golden run (v0.50.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1396 tests + worker 50 + offline golden run (v0.51.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
