@@ -1058,9 +1058,14 @@ class TestBatWriter(unittest.TestCase):
 
     def test_no_chrome_or_no_profile_writes_nothing(self):
         path = os.path.join(self._tmp, 'chrome-attach.bat')
-        self.assertIsNone(ct.write_chrome_attach_bat(
-            path, chrome_exe='', data_dir=self._data,
-            link_dir=self._tmp))
+        # find_chrome mocked empty — the CI runners DO ship a Chrome
+        # (the fallback would find it and write the .bat; the law
+        # under test is the EMPTY-answer, not the machine's luck)
+        with mock.patch('gitcurator.core.hand_delivery.find_chrome',
+                        return_value=None):
+            self.assertIsNone(ct.write_chrome_attach_bat(
+                path, chrome_exe='', data_dir=self._data,
+                link_dir=self._tmp))
         self.assertIsNone(ct.write_chrome_attach_bat(
             path, chrome_exe='/bin/true', data_dir='',
             link_dir=self._tmp))
