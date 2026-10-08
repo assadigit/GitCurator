@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1671-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1702-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -12,7 +12,7 @@
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
 # 30 masterretry + 44 persistentdoor + 67 realdoor + 44 handharvest +
-# 48 noteredo).
+# 48 noteredo + 31 banishment).
 # v0.57.0 — THE NOTE IS THE SUCCESS: the owner's report — "I've
 # noticed that chrome still fetches a new session, moreover it
 # correctly loads the websites, and websites gets loaded on those
@@ -39,7 +39,9 @@
 # the GUI's end-of-run pass, the caught-up check, and the CLI);
 # (4) THE BOUND — each link is redone once per app session (the
 # LLM's low-confidence answer does not change on an immediate
-# re-ask). 48 cases join in tests/test_noteredo.py (1671).
+# re-ask). 48 cases join in tests/test_noteredo.py; v0.58.0 — THE
+# BANISHMENT: the owner asked to "delete and never fetch again"
+# marked notes — 31 cases join tests/test_banishment.py (1702).
 # v0.56.0 — THE HAND'S HARVEST: the owner's report — "New update:
 # when newly fetched website with hand (🖐) are fetched and stored
 # correctly, the system must automatically turn the hand emoji to
@@ -516,8 +518,8 @@ jobs:
           gitcurator/core/mirror_keys.py
           gitcurator/core/netctx.py
 
-      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry + noteredo)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor tests.test_realdoor tests.test_handharvest tests.test_noteredo -v
+      - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry + noteredo + banishment)
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor tests.test_realdoor tests.test_handharvest tests.test_noteredo tests.test_banishment -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -528,4 +530,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1671 tests + worker 50 + offline golden run (v0.57.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1702 tests + worker 50 + offline golden run (v0.58.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

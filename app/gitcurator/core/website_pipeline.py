@@ -205,6 +205,10 @@ prompt_version: "{WEBSITE_PROMPT_VERSION}"
 
 ---
 *Source: [{url}]({url})*
+
+*Not useful anymore? Add the tag 🗑️ (or "delete") to this note — the
+next run removes it from the library and never fetches this site again
+(v0.58.0).*
 """
 
 
@@ -246,6 +250,9 @@ it is never lost; it will be retried automatically.
 
 ---
 *Source: [{url}]({url})*
+
+*Not useful anymore? Add the tag 🗑️ (or "delete") to this note — the
+next run removes it and never fetches this site again (v0.58.0).*
 """
 
 
@@ -471,6 +478,29 @@ HAND_DOOR_HINT = (" — the fourth door: 🖐 hand-deliver it (More ▸ "
                    "folder and the next batch takes it from there)")
 
 
+#: v0.58.0 — THE BANISHMENT: what reads as DELETE-ME on a note's OWN
+#: body (the owner's ask, verbatim: "I decide to remove and never fetch
+#: that URL again … in tags of websites, we can have a meta-data for
+#: this case, for example I choose 'delete' or a specific emoji").
+#: 🗑️ is the emoji; the plain words are the keyboard door. A tag reads
+#: as a banish mark when it CONTAINS the emoji (🗑️ / "🗑️ delete") or
+#: IS one of the words exactly (the tag "deleted-files" on a human's
+#: note must never fire) — tags are single words, so the tight match is
+#: the honest one. The same verdict rides a boolean frontmatter key
+#: (``decommission: true``) for owners who type YAML faster than emoji.
+BANISH_EMOJI = "🗑️"
+BANISH_WORDS = ("delete", "banish", "blacklist", "purge")
+BANISH_KEYS = ("decommission", "banish", "blacklist")
+#: Where banished notes go — inside Obsidian's hidden .trash (the
+#: banned-domain sweep's precedent: out of the library, invisible to
+#: VaultIndex/mirror/directory/the Website Directory, recoverable by
+#: hand; ♻️ revived + a hand move brings a mistaken burial back).
+BANISH_QUARANTINE_RELPATH = os.path.join(".trash", "banished")
+#: The dismissal reason prefix the skip gate reads (process_link names
+#: the door so the log tells a banishment from a graveyard burial).
+BANISH_REASON_PREFIX = "banished by owner"
+
+
 def decommission_table_path(vault_path: str) -> str:
     """The graveyard file for one vault (``<vault>/_review/DECOMMISSIONED.md``)."""
     return os.path.join(vault_path or '', REVIEW_FOLDER,
@@ -642,6 +672,29 @@ def _status_is_revived(status: str) -> bool:
     return any(m in s for m in REVIVE_MARKERS)
 
 
+def _status_is_banished(status: str) -> bool:
+    """v0.58.0 — does a master-table gesture read as BANISHED (🗑️ /
+    delete / banish / blacklist / purge — the substring law of the
+    other verdicts, applied to the combined icon + Status text)?
+
+    Precedence: ♻️ revived wins (it is the undo door of every burial —
+    a hand-edited cell that says both means "bring it back"). Beyond
+    that the banishment is the STRONGEST retirement in the grammar:
+    dead (🪦) and reviewed (✅) dismiss the URL and sweep _review
+    placeholders, but 🗑️ ALSO removes the note from the library and
+    forgets its ledger row — when a cell says both dead and delete, the
+    owner's removal intent wins (the note must go)."""
+    s = (status or '').strip().lower()
+    if not s:
+        return False
+    if _status_is_revived(s):
+        return False            # the undo door outranks every burial
+    if BANISH_EMOJI in s:
+        return True
+    words = {w for w in BANISH_WORDS if w in s}
+    return bool(words)
+
+
 def _status_is_reviewed(status: str) -> bool:
     """v0.47.0 — True when a Status cell reads as reviewed-and-kept
     (the owner's ✅ gesture). 'unreviewed' (the pre-filled default)
@@ -686,6 +739,9 @@ def _status_is_waiting(status: str) -> bool:
         return True                     # blank — still waiting
     if _status_is_dead(s) or _status_is_reviewed(s) or _status_is_revived(s):
         return False
+    if _status_is_banished(s):
+        return False                    # v0.58.0 — 🗑️ owns the row: the
+        # banishment pass consumes it, never the caught-up retry
     if _hand_delivery._status_is_hand(s):
         return False                    # the fourth door owns it
     low = s.lower()
@@ -975,6 +1031,14 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   again, its _review placeholder is swept.
 > 🪦 dead / ❌ dead / ☠️ dead / 💀 dead — the link is dead: same
 >   never-fetch retirement, same placeholder sweep.
+> 🗑️ banished / delete — the site outlived its welcome (terms
+>   changed, no longer free, no longer useful): the STRONGEST
+>   retirement — the note itself is REMOVED from the library
+>   (recoverable in .trash/banished) AND the URL is blacklisted,
+>   never fetched again. ♻️ revived undoes it. You can also set
+>   this verdict INSIDE the note itself: open any note and add
+>   the tag 🗑️ (or "delete") — the next run removes it, blacklists
+>   the URL, and writes the record row here.
 > ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
 >   like new again.
 > 🖐 hand — the fourth door's gesture, the fifth door's engine: set
@@ -1425,9 +1489,415 @@ def harvest_hand_rows(state, vault_path: str,
     return harvested
 
 
+# ===========================================================================
+# v0.58.0 — THE BANISHMENT: delete and never fetch again
+#
+# The owner's ask (session, verbatim): "Some websites that are
+# currently stored in the vault are not favored anymore … they've
+# changed their terms or doesn't offer free services … if I just
+# delete it's record from vault, system will re-fetch and restore it.
+# But I want a system that let me to delete and never fetch again some
+# websites … in tags of websites, we can have a meta-data for this
+# case, for example I choose 'delete' or a specific emoji."
+#
+# The vault is a garden, not an archive: sites change their terms,
+# drop their free tier, die quietly. The owner keeps it "tiny,
+# essential and practical without hoarding wasteful websites" — and
+# the deletion loop he named is real: a silently deleted note is an
+# ACCIDENT to this app (v0.57.0's redo pass regenerates it — the note
+# is the success), so plain deletion always comes back. The banishment
+# is the DELIBERATE gesture: mark the note (🗑️ tag / delete /
+# decommission: true) or mark the master-table row (🗑️ Status) — the
+# next run removes the note, blacklists the URL (the never-fetch
+# dismissal gate), and leaves the record row revivable (♻️).
+# ===========================================================================
+
+def _parse_banish_frontmatter(path: str) -> Optional[Dict]:
+    """v0.58.0 — the frontmatter the banishment reads: ``source``,
+    ``managed_by`` (ownership — a hand-written note is never our call),
+    the ``tags`` LIST (flow style ``tags: [a, b]`` AND the block style
+    Obsidian's property editor writes — ``tags:`` on its own line, the
+    items as ``  - a`` lines below), and the banish boolean keys
+    (``decommission: / banish: / blacklist:``). None when the file has
+    no frontmatter block or cannot be read. String-scan only — the
+    house law (core never grows a YAML dependency)."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read(200_000).splitlines()
+    except Exception:
+        return None
+    if not lines or lines[0].strip() != '---':
+        return None
+    tags: List[str] = []
+    banish_values: Dict[str, str] = {}
+    out: Dict[str, str] = {}
+    in_tag_block = False
+    for line in lines[1:]:
+        s = line.strip()
+        if s == '---':
+            break
+        if in_tag_block and s.startswith('- '):
+            tags.append(s[2:].strip().strip('"').strip("'").strip())
+            continue
+        in_tag_block = False
+        if ':' not in s:
+            continue
+        key, _, val = s.partition(':')
+        key = key.strip().lower()
+        val = val.strip()
+        if key == 'tags':
+            inner = val
+            if inner.startswith('[') and inner.endswith(']'):
+                inner = inner[1:-1]
+            elif not inner:
+                in_tag_block = True      # block style — items follow
+            for item in inner.split(','):
+                item = item.strip().strip('"').strip("'").strip()
+                if item:
+                    tags.append(item)
+            continue
+        clean = val.strip('"').strip("'").strip()
+        if key in BANISH_KEYS:
+            banish_values[key] = clean
+        if key in ('source', 'managed_by'):
+            out[key] = clean
+    out['tags'] = tags
+    out['banish'] = banish_values
+    return out
+
+
+def _note_reads_banished(fm: Optional[Dict]) -> (bool, str):
+    """v0.58.0 — does a note's own frontmatter carry the owner's delete
+    verdict? Pure predicate over what :func:`_parse_banish_frontmatter`
+    read. A tag counts when it CONTAINS the emoji (``🗑️``, ``🗑️
+    delete``) or IS a banish word exactly (``delete`` — the tag
+    ``deleted-files`` never fires); a boolean key counts when its value
+    reads true/yes/1/on. Returns ``(verdict, the marker that fired)``
+    — the marker rides the log line and the table row so the owner sees
+    WHICH of his gestures the app obeyed."""
+    if not fm:
+        return False, ''
+    for t in (fm.get('tags') or []):
+        s = str(t).strip().lower().lstrip('#').strip()
+        if not s:
+            continue
+        if BANISH_EMOJI in s:
+            return True, str(t).strip()
+        if s in BANISH_WORDS:
+            return True, str(t).strip()
+    for key, val in (fm.get('banish') or {}).items():
+        if key not in BANISH_KEYS:
+            continue    # a stranger's key is never our verdict
+        if str(val).strip().lower() in ('true', 'yes', '1', 'on'):
+            return True, f"{key}: {val}"
+    return False, ''
+
+
+def scan_banished_notes(vault_path: str,
+                        log: Optional[Callable] = None) -> List[Dict]:
+    """v0.58.0 — every note in the library carrying the banish mark.
+
+    Walks the vault the sweep walks (category folders, ``_review``,
+    ``_missing``, ``_moc`` — the note can be marked wherever it lives;
+    ``_inbox`` record tables and dot-folders are skipped, so a note
+    already resting in ``.trash/banished`` is never re-found). Returns
+    ``[{'url', 'path', 'marker', 'app_owned'}, ...]`` sorted by the
+    walk's deterministic order — hand-written marked notes ride the
+    list with ``app_owned: False`` so the burial can keep + warn (the
+    sacred law) instead of silently ignoring them. Pure file reads; no
+    state DB, no network; never raises."""
+    log = log or (lambda *a, **k: None)
+    out: List[Dict] = []
+    if not vault_path or not os.path.isdir(vault_path):
+        return out
+    for root, dirs, files in os.walk(vault_path):
+        dirs[:] = sorted(d for d in dirs
+                         if d != '_inbox' and not d.startswith('.'))
+        for name in sorted(files):
+            if not name.lower().endswith('.md'):
+                continue
+            path = os.path.join(root, name)
+            if not os.path.isfile(path):
+                continue
+            fm = _parse_banish_frontmatter(path)
+            if not fm:
+                continue            # not a frontmattered note — a human's
+            marked, marker = _note_reads_banished(fm)
+            if not marked:
+                continue
+            url = (fm.get('source') or '').strip()
+            if not url.lower().startswith(('http://', 'https://')):
+                continue            # the directory note / tagless files
+            out.append({'url': url, 'path': path, 'marker': marker,
+                        'app_owned': fm.get('managed_by', '').lower()
+                        == MANAGED_BY_GITCURATOR})
+    return out
+
+
+def _banish_note_file(vault_path: str, path: str,
+                      log: Optional[Callable] = None) -> str:
+    """v0.58.0 — move ONE note file into ``<vault>/.trash/banished/``
+    (Obsidian's hidden trash: out of the library — VaultIndex, the
+    mirror, and the Website Directory never read dot-folders — but
+    recoverable by hand; a mistaken burial is one file move away from
+    undone). The banned-domain sweep's own mechanics, dry-run aware.
+    Returns the destination path, or '' when the move failed (the
+    dismissal still holds — the gate is the DB, the file is the
+    furniture)."""
+    log = log or (lambda *a, **k: None)
+    if not vault_path or not path or not os.path.isfile(path):
+        return ''
+    quarantine = os.path.join(vault_path, BANISH_QUARANTINE_RELPATH)
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        dst = unique_path(os.path.join(quarantine,
+                                       os.path.basename(path)))
+        _dryrun.makedirs(quarantine, exist_ok=True)
+        _dryrun.write_text(dst, content)
+        _dryrun.remove(path)
+        # honesty (the graveyard's law): the move only counts when the
+        # bytes actually moved — a dry-run rehearsal leaves the note in
+        # place, so it reports '' and the caller says so.
+        if os.path.isfile(dst) and not os.path.exists(path):
+            return dst
+        return ''
+    except Exception as e:
+        log(f"⚠️ could not move {os.path.basename(path)} to "
+            f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')}: {e}",
+            "warning")
+        return ''
+
+
+def _find_note_for_url(vault_path: str, canonical: str,
+                       state=None, log: Optional[Callable] = None) -> str:
+    """v0.58.0 — the note FILE for one canonical URL (the table-gesture
+    burial needs it: the row names the link, the note holds the file).
+
+    The state ledger's row first — verified on disk (the app's own
+    note, for THIS link — the v0.57 law: a row pointing at a stranger
+    or at nothing is not a delivery); then a walk of the library
+    (category folders + ``_review``) for any app-owned note whose
+    ``source:`` normalizes to the canonical (the row was lost, the note
+    was moved by hand). ``''`` when nothing is found — the note is
+    already gone (a hand deletion, an earlier banishment) and the
+    burial proceeds DB-only. Never raises."""
+    log = log or (lambda *a, **k: None)
+    if not canonical:
+        return ''
+    if state is not None:
+        try:
+            prior = state.processed_row(canonical)
+        except Exception:
+            prior = None
+        if prior:
+            path = str(prior.get('note_path') or '')
+            if path and os.path.isfile(path):
+                fm = _parse_review_frontmatter(path)
+                if fm and fm.get('managed_by', '').lower() \
+                        == MANAGED_BY_GITCURATOR \
+                        and _same_source(fm.get('source') or '', canonical):
+                    return path
+    if not vault_path or not os.path.isdir(vault_path):
+        return ''
+    for root, dirs, files in os.walk(vault_path):
+        dirs[:] = sorted(d for d in dirs
+                         if d != '_inbox' and not d.startswith('.'))
+        for name in sorted(files):
+            if not name.lower().endswith('.md'):
+                continue
+            p = os.path.join(root, name)
+            if not os.path.isfile(p):
+                continue
+            fm = _parse_review_frontmatter(p)
+            if not fm or fm.get('managed_by', '').lower() \
+                    != MANAGED_BY_GITCURATOR:
+                continue
+            if _same_source(fm.get('source') or '', canonical):
+                return p
+    return ''
+
+
+def _banish_url(state, vault_path: str, canonical: str,
+                note_path: str, marker: str, gesture: str,
+                log: Optional[Callable] = None) -> Dict:
+    """v0.58.0 — THE BURIAL CORE (both doors meet here: the note's own
+    tag and the master table's Status cell).
+
+    DB first — the never-fetch gate must hold even when every file
+    operation below fails (the graveyard's law): the URL is dismissed
+    with the banished reason (the skip gate and the log name the door),
+    its retry-queue row is dropped (the re-fetch loop, closed). Then
+    the furniture: the note FILE leaves the library for
+    ``.trash/banished``, the processed row is forgotten (the ledger
+    must not outlive the note it pointed at — the exact false-success
+    shape v0.57.0 closed), and the link's half-fetched ``_review``
+    items go with it. Dry-run aware; never raises. Returns
+    ``{'dismissed', 'moved', 'row_forgotten', 'review_swept'}``."""
+    log = log or (lambda *a, **k: None)
+    report = {'dismissed': False, 'moved': '', 'row_forgotten': False,
+              'review_swept': 0}
+    if not canonical:
+        return report
+    reason = (f"{BANISH_REASON_PREFIX} — 🗑️ {gesture} "
+              f"({marker or 'delete mark'}); the note left the library, "
+              f"the URL is blacklisted, never fetched again (v0.58.0)")
+    try:
+        state.dismiss(canonical, reason)
+        report['dismissed'] = True
+    except Exception as e:
+        log(f"⚠️ Banishment DB write skipped for {canonical}: {e}",
+            "warning")
+    try:
+        state.resolve_retry(canonical)
+    except Exception:
+        pass    # the dismissal is the gate; the queue row is furniture
+    if note_path and os.path.isfile(note_path):
+        dst = _banish_note_file(vault_path, note_path, log=log)
+        report['moved'] = dst
+        if dst and not os.path.exists(note_path):
+            try:
+                state.forget_row(canonical)
+                report['row_forgotten'] = True
+            except Exception as e:
+                log(f"⚠️ Could not forget the processed row for "
+                    f"{canonical}: {e}", "warning")
+    else:
+        # the note is already gone (a hand deletion, an earlier
+        # banishment) — a ledger row pointing at nothing is exactly the
+        # false-success shape the owner reported; forget it.
+        try:
+            state.forget_row(canonical)
+            report['row_forgotten'] = True
+        except Exception:
+            pass
+    try:
+        report['review_swept'] = sweep_review_leftovers(
+            vault_path, canonical, log=log)
+    except Exception as e:
+        log(f"⚠️ Banishment _review sweep skipped for {canonical}: {e}",
+            "warning")
+    return report
+
+
+def banish_marked_notes(state, vault_path: str,
+                        log: Optional[Callable] = None) -> Dict:
+    """v0.58.0 — THE BANISHMENT, the note-tag door: enforce the owner's
+    delete verdicts written on the notes THEMSELVES.
+
+    Every APP-OWNED note in the library whose tags carry 🗑️ (or
+    ``delete`` / ``banish`` / ``blacklist`` / ``purge``), or whose
+    frontmatter carries a true ``decommission:`` / ``banish:`` /
+    ``blacklist:`` key, leaves the vault for ``.trash/banished`` and
+    its URL is blacklisted — dismissed with the banished reason, so the
+    never-fetch gate holds for every future arrival (a re-paste, a
+    re-arm, a fresh batch months later: skipped, 🗑️ in the log). The
+    master table gains the record row
+    (``🗑️ banished — confirmed <date>``, ♻️ revivable like any burial).
+    A hand-written note carrying the mark is KEPT with a warning (the
+    sacred law — the app never deletes what it did not write; the
+    owner deletes his own notes by hand in Obsidian, the natural
+    gesture).
+
+    Idempotent: a banished note rests in ``.trash`` (the scan never
+    enters dot-folders) and the table row is never duplicated (the
+    writer's law). Dry-run aware. Tolerated everywhere (bookkeeping
+    never kills a batch). Returns ``{'marked', 'banished',
+    'notes_moved', 'kept_handwritten', 'review_swept',
+    'rows_written'}``."""
+    log = log or (lambda *a, **k: None)
+    report = {'marked': 0, 'banished': 0, 'notes_moved': 0,
+              'kept_handwritten': 0, 'review_swept': 0, 'rows_written': 0}
+    if not vault_path or not os.path.isdir(vault_path):
+        return report
+    items = scan_banished_notes(vault_path, log=log)
+    if not items:
+        return report            # the cheap no-op — most runs
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    seen: set = set()
+    record_urls: List[str] = []
+    record_notes: Dict[str, str] = {}
+    for it in items:
+        report['marked'] += 1
+        if not it.get('app_owned'):
+            report['kept_handwritten'] += 1
+            log(f"✍️ kept {os.path.basename(it['path'])} — it carries the "
+                f"🗑️ mark but is hand-written (yours); delete it by hand "
+                f"in Obsidian if you want it gone", "warning")
+            continue
+        canonical = normalize_website_url(it.get('url') or '')
+        if not canonical or canonical in seen:
+            continue            # two marked notes, one link — one burial
+        seen.add(canonical)
+        b = _banish_url(state, vault_path, canonical, it.get('path'),
+                        it.get('marker') or '', 'note tag', log=log)
+        report['review_swept'] += b['review_swept']
+        if not b['dismissed']:
+            continue            # the DB refused — the verdict is not law
+        report['banished'] += 1
+        record_urls.append(canonical)
+        record_notes[canonical] = f"🗑️ marked on the note: " \
+                                  f"{it.get('marker') or 'delete'}"
+        if b['moved']:
+            report['notes_moved'] += 1
+            log(f"🗑️ {canonical}: banished — the note carried the delete "
+                f"mark; it left the library for "
+                f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')} and "
+                f"the URL is blacklisted (never fetched again; ♻️ "
+                f"revived in the master table undoes it)", "info")
+        elif _dryrun.is_enabled():
+            log(f"🗑️ {canonical}: banishment REHEARSED (dry-run) — the "
+                f"URL is blacklisted in the shadow cache and the note's "
+                f"move to "
+                f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')}"
+                f" was recorded, not performed", "info")
+        else:
+            log(f"🗑️ {canonical}: banished — the URL is blacklisted "
+                f"(never fetched again); the note file could not be "
+                f"moved, it stays where it is (an orphan now — the "
+                f"next run retries the move)", "warning")
+    if record_urls:
+        try:
+            report['rows_written'] = write_decommission_candidates(
+                vault_path, record_urls, source='note tag',
+                notes=record_notes,
+                status=f"🗑️ banished — confirmed {date_str}", log=log)
+        except Exception as e:
+            log(f"⚠️ Banishment record rows skipped: {e}", "warning")
+        log(f"🗑️ Banishment: {report['banished']} note(s) removed from "
+            f"the library and blacklisted — "
+            f"{report['kept_handwritten']} hand-written marked note(s) "
+            f"kept (yours); the master table holds the record rows "
+            f"(♻️ revivable)", "info")
+    elif report['kept_handwritten']:
+        log(f"🗑️ Banishment: {report['kept_handwritten']} marked note(s) "
+            f"are hand-written and were KEPT (yours) — nothing "
+            f"banished", "info")
+    return report
+
+
 def consume_decommission_table(state, vault_path: str,
                                log: Optional[Callable] = None) -> Dict:
     """v0.44.0/v0.47.0 — enforce the owner's master-table decisions.
+
+    v0.58.0 — pass 0 is THE BANISHMENT: every 🗑-marked row (🗑️ /
+    delete / banish / blacklist / purge — :func:`_status_is_banished`)
+    gets the STRONGEST retirement in the grammar. Dead (🪦) and
+    reviewed (✅) dismiss the URL and sweep ``_review`` placeholders;
+    banished ALSO removes the note itself from the library (found on
+    disk via the ledger row or a vault walk — a proper, categorized
+    note in a category folder is exactly the case the owner named:
+    "Website X is currently stored under a folder in my obsidian …
+    it's not good or useful anymore") and forgets the processed row
+    so the ledger never points at a note the vault no longer carries.
+    The URL is dismissed with the banished reason (the never-fetch
+    gate — even a future paste is skipped), and the row is stamped
+    ``🗑️ banished — confirmed <date>``. A banish row whose note is
+    ALREADY gone (the owner deleted the file by hand and marked the
+    row — his exact workaround for the re-fetch loop he reported) is
+    dismissed DB-only, the loop closed. When a cell says both dead and
+    delete the banishment wins (the removal intent is the stronger
+    sentence); ♻️ revived outranks everything (it is the undo door).
 
     For every dead-marked row (``_status_is_dead``): the URL is
     ``dismiss()``ed (the never-fetch gate process_link already honors —
@@ -1479,11 +1949,13 @@ def consume_decommission_table(state, vault_path: str,
     rewrite is byte-stable ('confirmed' rows are skipped). Dead beats
     reviewed when a hand-edited cell says both (the burial is the
     stronger sentence). Tolerated everywhere (the table is bookkeeping,
-    never a batch killer). Returns ``{'dead', 'reviewed', 'revived',
-    'handed', 'placeholders_swept', 'rows_confirmed'}``."""
+    never a batch killer). Returns ``{'dead', 'reviewed', 'banished',
+    'revived', 'handed', 'placeholders_swept', 'notes_moved',
+    'rows_confirmed'}``."""
     log = log or (lambda *a, **k: None)
-    report = {'dead': 0, 'reviewed': 0, 'revived': 0, 'handed': 0,
-              'placeholders_swept': 0, 'rows_confirmed': 0}
+    report = {'dead': 0, 'reviewed': 0, 'banished': 0, 'revived': 0,
+              'handed': 0, 'placeholders_swept': 0, 'notes_moved': 0,
+              'rows_confirmed': 0}
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
         return report
@@ -1500,9 +1972,48 @@ def consume_decommission_table(state, vault_path: str,
     date_str = datetime.now().strftime('%Y-%m-%d')
     retired_canonicals: List[str] = []
 
+    # ---- pass 0 (v0.58.0): the banishments (🗑️ — the strongest
+    # retirement; it runs FIRST so the removal intent wins over a
+    # dead/reviewed stamp on the same hand-edited row) ------------------
+    banished_canonicals: List[str] = []
+    for row in rows:
+        if not _status_is_banished(row['status']):
+            continue
+        canonical = normalize_website_url(row['url'])
+        if not canonical or canonical in banished_canonicals:
+            continue
+        banished_canonicals.append(canonical)
+        report['banished'] += 1
+        note_path = _find_note_for_url(vault_path, canonical, state=state,
+                                       log=log)
+        b = _banish_url(state, vault_path, canonical, note_path,
+                        row['status'] or '', 'master-table gesture',
+                        log=log)
+        if b.get('moved'):
+            report['notes_moved'] += 1
+        # Confirm the row (byte-stable rewrite — the marker stays).
+        parts = row['raw'].split('|')
+        if len(parts) >= 8 and 'confirmed' not in row['status'].lower():
+            parts[6] = f" 🗑️ banished — confirmed {date_str} "
+            if lines is None:
+                try:
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as f:
+                        lines = f.read().splitlines()
+                except Exception as e:
+                    log(f"⚠️ Could not re-read the master table: {e}",
+                        "warning")
+                    lines = []
+            if lines and row['line'] < len(lines):
+                lines[row['line']] = '|'.join(parts)
+                report['rows_confirmed'] += 1
+
     # ---- pass 1: the retirements (DB first — the gate must hold even
     # if a file sweep fails below) ---------------------------------------
     for row in rows:
+        if _status_is_banished(row['status']):
+            continue    # v0.58.0 — the banishment owns this row (the
+            # note LEFT; a dead/reviewed stamp would only dismiss it)
         dead = _status_is_dead(row['status'])
         reviewed = (not dead) and _status_is_reviewed(row['status'])
         if not (dead or reviewed):
@@ -1667,6 +2178,11 @@ def consume_decommission_table(state, vault_path: str,
             log(f"⚠️ Could not write the master table: {e}",
                 "warning")
 
+    if report['banished']:
+        log(f"🗑️ Master table: {report['banished']} link(s) banished — "
+            f"{report['notes_moved']} note(s) removed from the library "
+            f"(.trash/banished), URLs blacklisted, never fetched again "
+            f"(♻️ revived undoes any)", "info")
     if report['dead']:
         log(f"🪦 Master table: {report['dead']} link(s) decommissioned — "
             f"dismissed, {report['placeholders_swept']} placeholder(s) "
@@ -1945,6 +2461,23 @@ class WebsitePipeline:
                             normalize_website_url(_u))
             except Exception as e:  # bookkeeping never kills a batch
                 self.log(f"⚠️ Graveyard consume skipped: {e}", "warning")
+        # v0.58.0 — THE BANISHMENT: the owner's delete verdicts written
+        # on the notes themselves (a 🗑️ / delete / banish / blacklist /
+        # purge tag, or a true decommission: frontmatter key) are
+        # enforced BEFORE anything fetches — the marked notes leave the
+        # library for .trash/banished, their URLs are blacklisted (the
+        # never-fetch gate), the ledger rows are forgotten, and the
+        # master table holds the record rows (♻️ revivable). The
+        # table's own 🗑️ Status gesture rode the consume above (pass
+        # 0). Not gated on fetch_fn: a pure file+DB pass (the hermetic
+        # law — the tests exercise it with the injected fetcher); a
+        # vault with no marked notes is a cheap walk.
+        if self.vault_path and os.path.isdir(self.vault_path):
+            try:
+                banish_marked_notes(self.state, self.vault_path,
+                                    log=self.log)
+            except Exception as e:  # bookkeeping never kills a batch
+                self.log(f"⚠️ Banishment pass skipped: {e}", "warning")
         self.taxonomy_path = resolve_taxonomy_path(self.config)
         # v0.20.0 — blocked domains (the X fix): these links are already
         # addressed as rows in the _inbox platform tables; the pipeline
@@ -2579,6 +3112,13 @@ class WebsitePipeline:
             if canonical in self._graveyard_urls:
                 result['error'] = ('decommissioned by owner (graveyard) — '
                                    'never fetched again')
+            elif _dreason.startswith(BANISH_REASON_PREFIX):
+                # v0.58.0 — the banishment: the note left the library AND
+                # the URL is blacklisted (the delete-never-refetch
+                # contract the owner asked for, verbatim)
+                result['error'] = ('banished by owner (🗑️) — the note was '
+                                   'removed and the URL blacklisted; '
+                                   'never fetched again')
             elif _auto_verdict:
                 # v0.46.0 — the fetcher's own verdict retired this link
                 # (dead / paywalled / refused): the graveyard's gate,
@@ -2594,6 +3134,11 @@ class WebsitePipeline:
             if canonical in self._graveyard_urls:
                 self.log(f"🪦 {url}: decommissioned by owner — skipped "
                          "(the graveyard table's verdict)", "info")
+            elif _dreason.startswith(BANISH_REASON_PREFIX):
+                self.log(f"🗑️ {url}: banished by owner — skipped (the "
+                         f"note is gone, the URL is blacklisted; ♻️ "
+                         f"revived in the master table brings it back)",
+                         "info")
             elif _auto_verdict:
                 self.log(f"🪦 {url}: skipped — auto-verdict: "
                          f"{_auto_verdict} (revive via the graveyard if "
