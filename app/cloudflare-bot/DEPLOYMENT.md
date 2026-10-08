@@ -5,6 +5,48 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.57.0 deploy record — the unchanged 0.30.0 worker, RE-DEPLOYED and verified (LIVE ✅ · the ritual completed with the owner's token)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d836c195-ae9c-495a-af5c-f42f04629d04` — v0.57.0 is a
+> DESKTOP-ONLY release: the note-is-the-success pass — the delivered
+> pages finally ride the batch as WEBSITE links so the LLM actually
+> runs on them, `note_is_properly_stored` is the bar every ✅ must
+> clear, and a hand link whose note is not properly stored is
+> redone automatically — all desktop code in
+> `gitcurator/core/website_pipeline.py`,
+> `gitcurator/core/hand_delivery.py`,
+> `gitcurator/cli.py` and the GUI wiring). The Worker's code is
+> unchanged since v0.30.0 — `git diff v0.56.0..v0.57.0 --
+> app/cloudflare-bot/` is EMPTY.
+>
+> **The re-deploy ritual COMPLETED this session** (the v0.56 record's
+> open follow-up, closed): with the owner's workers API token in
+> hand, `CLOUDFLARE_API_TOKEN=… ./node_modules/.bin/wrangler deploy`
+> from `app/cloudflare-bot/` produced the fresh version ID above
+> over identical code — a pure no-op parity check, as predicted.
+> (The account-level key from the same credentials block is a
+> Global API Key, not a bearer token — wrangler 400s on it; the
+> `cfut_…` token is the one wrangler wants.)
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` in 0.31 s ✓ · both queue producers AND consumers
+> (curator-ingest + curator-ingest-dlq) reported in the deploy
+> output ✓ · D1 (curator-bot) + KV bindings carried ✓ ·
+> `wrangler secret list` → all four secrets persisted (BOT_TOKEN,
+> GITHUB_PAT, ALLOWED_USER_IDS, HMAC_SECRET) ✓.
+>
+> Desktop release v0.57.0 (GitCurator-v0.57.0-windows.zip, 129
+> files, 1,056,762 bytes, sha256
+> `6745afb89063a03f2296a50d9a975ecce6cb86a98f24823f01157f2d9b96c59d`,
+> download round-trip byte-identical) + CI green on the v0.57.0 tag
+> AND main (runs 37791003725 / 37791003960 — 1671 tests, 85-module
+> compile gate, offline golden 30/30, first try on both runs).
+
+---
+
 ## 📦 v0.56.0 deploy record — the unchanged 0.30.0 worker, live and verified (LIVE ✅ · ritual awaits the token)
 
 > **Live in production** at
