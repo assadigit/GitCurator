@@ -5,6 +5,50 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.55.0 deploy record — the unchanged 0.30.0 worker, live and verified (LIVE ✅ · ritual awaits the token)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (the v0.54.0 deploy's version ID
+> `217d4ad9-80df-470c-aba1-dcac8cc7b03d` — v0.55.0 is a
+> DESKTOP-ONLY release: the owner's own window, the right route, the
+> honest verdict — attach to the owner's own Chrome via its DevTools
+> port, his real profile through the attach link, the proxy legs
+> with the per-site route memory, all desktop code in
+> `gitcurator/core/chrome_tabs.py` and the GUI's
+> `processing_control.py`/`ui.py`). The Worker's code is unchanged
+> since v0.30.0 — `git diff v0.54.0..v0.55.0 -- app/cloudflare-bot/
+> src/` is EMPTY — so the live deployment IS the v0.55.0 worker,
+> byte for byte.
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` in 0.29 s ✓ (the queue consumers/producers and
+> the four persisted secrets were verified at the 217d4ad9 deploy and
+> nothing has been redeployed since).
+>
+> **The re-deploy ritual (the no-op parity check) awaits the owner's
+> `CLOUDFLARE_API_TOKEN`** — the token from the earlier session did
+> not survive the context hand-off (only its `cfut_3RMK…` prefix).
+> With the token in hand: `CLOUDFLARE_API_TOKEN=… npx wrangler
+> deploy` from `app/cloudflare-bot/` → a fresh version ID over
+> identical code, then `wrangler secret list` + `queues info
+> curator-ingest` to re-confirm what the live checks above already
+> show. Functionally a no-op — the v0.53.0 record set this exact
+> precedent.
+>
+> Desktop release v0.55.0 (GitCurator-v0.55.0-windows.zip, 129 files,
+> 1,046,924 bytes, sha256
+> `e0631a4be3751808aa0298dfec76edf6fba6bf49c17b601562d59abf12e3b227`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.55.0 tag (the re-run 37715165767 + main 37715161449 — 1579
+> tests, 85-module compile gate, offline golden 30/30; the first tag
+> run hit two one-offs — a CI-runner Chrome finding the bat test's
+> fallback, fixed by mocking find_chrome; a starved-loopback flake
+> in the handoff-liveness test, fixed with a second knock).
+
+---
+
 ## 📦 v0.54.0 deploy record — the unchanged 0.30.0 worker, re-deployed and verified (DEPLOYED ✅)
 
 > **Deployed to production on 2026-10-08** (worker version ID
