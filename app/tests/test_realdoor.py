@@ -1197,7 +1197,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0550(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.55.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.56.0')
 
     def test_changelog_has_the_v055_beat(self):
         text = self._read('CHANGELOG.md')
@@ -1215,7 +1215,9 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_ci_counts_this_module(self):
         text = self._read('.github', 'workflows', 'ci.yml')
-        self.assertIn('test_realdoor -v', text)
+        # v0.56.0 — tests.test_handharvest now closes the -v tail; the
+        # presence is the law)
+        self.assertIn('tests.test_realdoor', text)
 
     def test_the_older_release_pins_follow(self):
         # the established convention: the previous releases' bookkeeping
@@ -1226,8 +1228,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
                     'test_mastertable', 'test_autopip', 'test_fifthdoor',
                     'test_persistentdoor', 'test_bothdoors'):
             src = self._read('app', 'tests', f'{mod}.py')
-            self.assertIn('0.55.0', src,
-                          f'{mod} must re-pin to 0.55.0')
+            self.assertIn('0.56.0', src,
+                          f'{mod} must re-pin to 0.56.0')
 
 
 if __name__ == '__main__':

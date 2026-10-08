@@ -893,7 +893,10 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   processes them as real fetches — no manual saving (you can still
 >   save a page into _review/hand-delivered/ yourself; a delivered
 >   page is consumed either way). NOT a retirement — the link keeps
->   waiting until the page is delivered.
+>   waiting until the page is delivered. When the delivery STORES
+>   the proper, categorized note, the row retires itself:
+>   ✅ hand-delivered — fetched <date> (the half-fetched _review
+>   item is swept — the note in the vault is the record).
 > blank / unreviewed / " - " — still waiting: the caught-up check
 >   retries these rows BEFORE "everything is up to date" is said
 >   (the link is valid, its fetch failed — the machine tries it
@@ -1125,6 +1128,153 @@ def stamp_stored_rows(state, vault_path: str,
         log(f"📁 {stamped} master-table row(s) stamped 'stored' — their "
             f"retries succeeded, the notes are in the vault", "info")
     return stamped
+
+
+def sweep_review_leftovers(vault_path: str, canonical: str,
+                           keep_path: str = '',
+                           log: Optional[Callable] = None) -> int:
+    """v0.56.0 — THE HAND'S HARVEST, the sweep: remove the link's
+    HALF-FETCHED items from ``_review`` once its proper, categorized
+    note has landed in the vault.
+
+    The owner's words (session, verbatim): "remove their half-fetched
+    items from _review, because now they have A Proper and categorized
+    note." A half-fetched item is any app-owned note still sitting in
+    ``<vault>/_review/`` for this source — the failed placeholder the
+    wall left behind, a low-confidence note from an earlier era, a
+    partial or an analysis-failure note — whatever the successful
+    delivery made obsolete. The ownership test is the folder's own
+    frontmatter law (``managed_by: gitcurator`` — the same test
+    :func:`scan_review_notes` and :func:`_remove_scanned_placeholder`
+    use): a hand-written note is a human's, KEPT with a warning (the
+    duplicate detector's business, never ours). The master table
+    (``DECOMMISSIONED.md``) and the hand-delivered folder are never
+    touched (the table is the ledger, the delivered page is the
+    owner's record). Dry-run aware (every file mutation in the
+    pipeline goes through core/dryrun); never raises. Returns how
+    many notes were swept."""
+    log = log or (lambda *a, **k: None)
+    if not vault_path or not canonical:
+        return 0
+    review_dir = os.path.join(vault_path, REVIEW_FOLDER)
+    try:
+        names = sorted(os.listdir(review_dir))
+    except Exception:
+        return 0        # no folder / unreadable — nothing to sweep
+    swept = 0
+    for name in names:
+        if not name.lower().endswith('.md') or name == DECOMMISSION_TABLE:
+            continue
+        path = os.path.join(review_dir, name)
+        if not os.path.isfile(path):
+            continue    # the hand-delivered folder is a directory
+        try:
+            if keep_path and os.path.normpath(path) \
+                    == os.path.normpath(keep_path):
+                continue
+            fm = _parse_review_frontmatter(path)
+        except Exception:
+            continue    # an unreadable note is never our call
+        if not fm or fm.get('managed_by', '').lower() \
+                != MANAGED_BY_GITCURATOR:
+            source = ''
+            try:
+                with open(path, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    for line in f.read().splitlines()[:12]:
+                        if line.strip().lower().startswith('source:'):
+                            source = line.split(':', 1)[1].strip()
+                            break
+            except Exception:
+                source = ''
+            if source and _same_source(source, canonical):
+                log(f"⚠️ kept {name} — it looks hand-written for the "
+                    f"same source; the proper note and it now "
+                    f"coexist (the duplicate detector's call, never "
+                    f"ours)", "warning")
+            continue
+        source = (fm.get('source') or '').strip()
+        if not source or not _same_source(source, canonical):
+            continue    # another link's note — untouched
+        try:
+            _dryrun.remove(path)
+            swept += 1
+            log(f"♻️ swept the half-fetched _review item {name} — the "
+                f"proper, categorized note replaced it", "info")
+        except Exception as e:
+            log(f"⚠️ could not sweep {path}: {e}", "warning")
+    return swept
+
+
+def _same_source(source: str, canonical: str) -> bool:
+    """v0.56.0 — does a note's frontmatter ``source`` point at the
+    same link as ``canonical``? Both sides normalized (a hand-edited
+    note may carry the URL in whatever shape the owner pasted). Pure;
+    anything unreadable is simply not the same link."""
+    try:
+        return bool(source) and bool(canonical) \
+            and normalize_website_url(source) == canonical
+    except Exception:
+        return False
+
+
+def harvest_hand_rows(state, vault_path: str,
+                      log: Optional[Callable] = None) -> int:
+    """v0.56.0 — THE HAND'S HARVEST, the catch-up pass: a 🖐 row whose
+    link is ALREADY STORED (a processed row with a real note outside
+    ``_review`` — the exact situation the owner described, the runs
+    that stored correctly while the gesture waited) is retired to
+    ``✅ hand-delivered`` and its half-fetched _review items are
+    swept. The owner's law applied to the backlog, so the table stops
+    showing the door's gesture for links whose notes are already in
+    the vault. The state probe is optional (the hermetic law) and a
+    broken probe harvests nothing (the same law as
+    :func:`stamp_stored_rows`); owner-set verdicts stronger than the
+    gesture are never touched (the precedence law). Returns rows
+    harvested."""
+    log = log or (lambda *a, **k: None)
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return 0
+    retired: List[str] = []
+    try:
+        for row in _parse_decommission_rows(path):
+            s = row['status']
+            if _status_is_dead(s) or _status_is_reviewed(s) \
+                    or _status_is_revived(s):
+                continue    # a stronger verdict owns the cell
+            if not _hand_delivery._status_is_hand(s):
+                continue    # only the gesture retires here
+            canonical = normalize_website_url(row['url'])
+            if not canonical or canonical in retired:
+                continue
+            try:
+                if state.is_dismissed(canonical):
+                    continue    # retired rows are the verdicts' business
+                prior = state.processed_row(canonical)
+            except Exception:
+                continue    # a broken probe harvests nothing
+            if prior is None:
+                continue
+            if prior.get('fetch_status') == 'failed':
+                continue    # the placeholder story — still waiting
+            if '_review' in str(prior.get('note_path') or '').replace('\\', '/'):
+                continue    # a _review note waits for human eyes
+            retired.append(canonical)
+    except Exception as e:
+        log(f"⚠️ Hand-harvest scan skipped: {e}", "warning")
+        return 0
+    harvested = 0
+    if retired:
+        harvested = _hand_delivery.stamp_hand_delivered_rows(
+            vault_path, retired, log=log)
+        for canonical in retired:
+            try:
+                sweep_review_leftovers(vault_path, canonical, log=log)
+            except Exception as e:
+                log(f"⚠️ Hand-harvest sweep skipped for {canonical}: "
+                    f"{e}", "warning")
+    return harvested
 
 
 def consume_decommission_table(state, vault_path: str,
@@ -1515,6 +1665,15 @@ def refresh_master_table(state, vault_path: str,
             stamp_stored_rows(state, vault_path, log=log)
         except Exception as e:  # bookkeeping never kills a batch
             log(f"⚠️ Master-table stored-stamp skipped: {e}", "warning")
+        # v0.56.0 — THE HAND'S HARVEST: 🖐 rows whose links are already
+        # stored retire to the green checkbox (✅ hand-delivered) and
+        # their half-fetched _review items are swept — the owner's law,
+        # applied to the backlog at every batch's end. (Report shape
+        # unchanged — the harvest is logged, not counted.)
+        try:
+            harvest_hand_rows(state, vault_path, log=log)
+        except Exception as e:  # bookkeeping never kills a batch
+            log(f"⚠️ Hand-harvest pass skipped: {e}", "warning")
         if report['written']:
             log(f"📋 Master table refreshed: {report['waiting']} waiting "
                 f"(fetch failures + links parked in _review), "
@@ -2062,6 +2221,115 @@ class WebsitePipeline:
                      "hand-edited; both files now carry the same source",
                      "warning")
 
+    # -- v0.56.0: THE HAND'S HARVEST — the per-link probes --------------
+
+    def _table_rows_cached(self) -> List[Dict]:
+        """The master table's rows, parsed once per file STATE
+        (mtime+size keyed — a stamp the harvest writes mid-run
+        refreshes the cache honestly, so a retired row is never
+        re-harvested). Unreadable / missing reads as empty; never
+        raises; never a gate."""
+        try:
+            if not self.vault_path:
+                return []
+            path = decommission_table_path(self.vault_path)
+            if not os.path.isfile(path):
+                return []
+            st = os.stat(path)
+            key = (path, st.st_mtime_ns, st.st_size)
+            if getattr(self, '_hand_table_key', None) != key:
+                self._hand_table_key = key
+                self._hand_table_rows = _parse_decommission_rows(path)
+            return self._hand_table_rows
+        except Exception:
+            return []
+
+    def _row_reads_hand(self, canonical: str) -> bool:
+        """v0.56.0 — does the master table carry the 🖐 gesture for
+        this link? The table's own grammar decides (the precedence
+        law: death / reviewed / revived win first; first row wins on
+        a hand-added duplicate). A pure probe — never a gate, and a
+        table that cannot be read answers NO (the harvest and the
+        exemption simply do not fire; the old laws hold)."""
+        if not canonical:
+            return False
+        for row in self._table_rows_cached():
+            try:
+                if normalize_website_url(row.get('url') or '') != canonical:
+                    continue
+            except Exception:
+                continue
+            s = row.get('status') or ''
+            if _status_is_dead(s) or _status_is_reviewed(s) \
+                    or _status_is_revived(s):
+                return False
+            return _hand_delivery._status_is_hand(s)
+        return False
+
+    def _has_app_review_note(self, canonical: str) -> bool:
+        """v0.56.0 — does this link own an app-written note in
+        ``_review`` (ANY fetch_status — the half-fetched classes:
+        failed placeholders, low-confidence, partial, analysis
+        failures)? The folder scan is cached per folder STATE
+        (mtime+size keyed — a sweep or a fresh placeholder refreshes
+        it); the frontmatter's ``managed_by`` line is the ownership
+        law. Pure; never raises; unreadable reads as NO."""
+        if not canonical or not self.vault_path:
+            return False
+        try:
+            review_dir = os.path.join(self.vault_path, REVIEW_FOLDER)
+            key = ('review', os.stat(review_dir).st_mtime_ns,
+                   os.stat(review_dir).st_size)
+            if getattr(self, '_hand_review_key', None) != key:
+                self._hand_review_key = key
+                self._hand_review_rows = scan_review_notes(self.vault_path)
+            for it in self._hand_review_rows:
+                if _same_source(it.get('url') or '', canonical):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _harvest_hand_row(self, canonical: str, note_path: str) -> None:
+        """v0.56.0 — THE HAND'S HARVEST, the delivery-time half: a
+        link whose master-table row carries the 🖐 gesture just landed
+        a PROPER, categorized note (this is the only caller — the
+        success path of :meth:`_process_link_inner`), so the gesture
+        is retired into the green checkbox
+        (:func:`gitcurator.core.hand_delivery.stamp_hand_delivered_rows`)
+        and every app-owned half-fetched ``_review`` item for this
+        source is swept (:func:`sweep_review_leftovers`). Never
+        raises; never a gate — a link without the gesture simply
+        keeps the waiting family's laws (``📁 stored`` and friends)."""
+        if not self.vault_path or not canonical:
+            return
+        if not self._row_reads_hand(canonical):
+            return
+        stamped = 0
+        try:
+            stamped = _hand_delivery.stamp_hand_delivered_rows(
+                self.vault_path, [canonical], log=self.log)
+        except Exception as e:
+            self.log(f"⚠️ Hand-harvest stamp skipped for {canonical}: "
+                     f"{e}", "warning")
+        swept = 0
+        try:
+            swept = sweep_review_leftovers(
+                self.vault_path, canonical, keep_path=note_path,
+                log=self.log)
+        except Exception as e:
+            self.log(f"⚠️ Hand-harvest sweep skipped for {canonical}: "
+                     f"{e}", "warning")
+        if stamped or swept:
+            self._hand_table_key = None   # the stamp changed the table
+            self.log(f"✅ [{self._vault_name}] the hand's harvest: the 🖐 "
+                     f"row retired to the green checkbox (✅ "
+                     f"hand-delivered)"
+                     + (f", {swept} half-fetched _review item(s) swept"
+                        if swept else "")
+                     + " — the proper, categorized note is in the vault",
+                     "success")
+
     # -- the per-link flow ---------------------------------------------------
 
     def process_link(self, url: str) -> Dict:
@@ -2166,8 +2434,23 @@ class WebsitePipeline:
 
         in_vault = self.vault_index_has(canonical)
         prior = self.state.processed_row(canonical)
-        if in_vault and not (prior and prior.get('fetch_status') == 'failed'
-                             and self._is_review_path(prior.get('note_path'))):
+        # v0.56.0 — THE HAND'S HARVEST, the gate's half-fetched
+        # exemption: a link whose master-table row carries the 🖐
+        # gesture and whose vault presence is an app-owned _review
+        # note (ANY fetch_status — the low-confidence / partial /
+        # analysis-failure classes, not just 'failed') is NOT "already
+        # in the websites vault": it is a HALF-FETCHED item the owner
+        # asked the doors to complete, so the pipeline runs and the
+        # harvest replaces it with the proper, categorized note. The
+        # gesture is never a retirement (the v0.48 law) — this is its
+        # positive half: the hand may also mean "finish this one".
+        _hand_gesture = self._row_reads_hand(canonical)
+        _half_fetched_hand = (in_vault and _hand_gesture
+                              and self._has_app_review_note(canonical))
+        if in_vault and not (
+                (prior and prior.get('fetch_status') == 'failed'
+                 and self._is_review_path(prior.get('note_path')))
+                or _half_fetched_hand):
             # Already a real note (or a non-failed _review note): skip.
             result['outcome'] = 'skipped'
             result['error'] = 'already in the websites vault'
@@ -2176,6 +2459,38 @@ class WebsitePipeline:
             return result
 
         retry = self.state.retry_row(canonical)
+        if retry and retry['attempts'] >= MAX_FETCH_RETRIES:
+            # v0.56.0 — THE HAND'S REBORN COUNTER: a burned-out retry
+            # row is skipped by process_link forever ("no more
+            # retries"), and the waiting family's reborn
+            # (retry_master_waiting) never touches 🖐 rows — so the
+            # owner's exact flow (walled → 3 retries burned → 🖐 →
+            # the fifth door delivers the page) would die at this
+            # gate with the page WAITING in the folder. The gesture —
+            # or a delivered page already sitting there — reborns
+            # ONE counter (the same surgical per-link reborn the
+            # master-retry pass uses, never a queue-wide reset):
+            # the hand says "finish this one now".
+            _hand_reborn = _hand_gesture
+            if not _hand_reborn and self.hand_delivery and self.vault_path:
+                try:
+                    _hand_reborn = any(
+                        _same_source(d.get('url') or '', canonical)
+                        for d in _hand_delivery.collect_delivered(
+                            self.vault_path))
+                except Exception:
+                    _hand_reborn = False
+            if _hand_reborn:
+                try:
+                    self.state.reset_retry_attempts(canonical)
+                    retry = self.state.retry_row(canonical)
+                    self.log(f"🖐 {url}: the hand reborn the burned-out "
+                             f"retry counter — the gesture (or the "
+                             f"delivered page) says finish this one",
+                             "info")
+                except Exception as e:
+                    self.log(f"⚠️ could not reborn the retry counter "
+                             f"for {url}: {e}", "warning")
         if retry and retry['attempts'] >= MAX_FETCH_RETRIES:
             # A failed-fetch _review note already exists and retries are
             # exhausted: leave it, report, never drop silently.
@@ -2187,7 +2502,10 @@ class WebsitePipeline:
             return result
 
         upgraded = bool(in_vault and prior
-                        and prior.get('fetch_status') == 'failed')
+                        and (prior.get('fetch_status') == 'failed'
+                             or (_half_fetched_hand
+                                 and self._is_review_path(
+                                     prior.get('note_path') or ''))))
 
         # v0.12.0 — Phase 3 (locked-skip, SPEC §4.4/§6): a note the owner
         # moved by hand is LOCKED — its folder placement beats the
@@ -2400,6 +2718,19 @@ class WebsitePipeline:
         # Full success: any pending fetch-retry for this link is resolved.
         if retry:
             self.state.resolve_retry(canonical)
+        # v0.56.0 — THE HAND'S HARVEST (the owner's law, verbatim):
+        # "when newly fetched website with hand (🖐) are fetched and
+        # stored correctly, the system must automatically turn the
+        # hand emoji to green checkbox and remove their half-fetched
+        # items from _review". THIS is the moment — the proper,
+        # categorized note just landed — so a link whose row carries
+        # the gesture retires it (✅ hand-delivered) and its app-owned
+        # _review leftovers are swept. Tolerated everywhere: the
+        # harvest never breaks a delivery.
+        try:
+            self._harvest_hand_row(canonical, path)
+        except Exception as e:
+            self.log(f"⚠️ Hand harvest skipped for {url}: {e}", "warning")
 
         result.update(outcome='processed', note_path=path, category=category,
                       subcategory=subcategory, fetch_status=fetch_status,

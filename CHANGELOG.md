@@ -1,3 +1,86 @@
+## [0.56.0] — The hand's harvest — 2026-10-08
+
+Owner ask (session): "New update: when newly fetched website with
+hand (🖐) are fetched and stored correctly, the system must
+automatically turn the hand emoji to green checkbox and remove their
+half-fetched items from _review, because now they have A Proper and
+categorized note." Desktop release v0.56.0, Worker unchanged at
+**0.30.0** (it never touches the vault). Suite grows **1579 → 1623**
+(44 cases join tests/test_handharvest.py — pure stdlib at the unit
+level: temp vaults, injected fetchers, a fake LLM; no browser ever
+launches under test).
+
+**The diagnosis — the gesture had no ending.** The doors were built
+to DELIVER (v0.55 opened the owner's own Chrome on the right route),
+and the scorecard learned to wait for the notes (v0.54), but the
+table's own grammar never learned what a DELIVERED hand row becomes:
+the 🖐 Status sat forever after its link stored, `stamp_stored_rows`
+explicitly never touches owner verdicts, and the half-fetched
+`_review` items the link left behind (the failed placeholder, the
+low-confidence note) stayed in the folder while their proper,
+categorized note lived in the vault — two records for one source,
+the exact duplicate SPEC §4.4 forbids. Worse, two gates stood
+between a hand link and its delivery: a link parked in `_review`
+with a NON-failed note (classification confidence was low) was
+skipped "already in the websites vault" before the fourth door was
+ever asked, and a link whose 3 automatic retries burned out was
+skipped "no more retries" with its delivered page WAITING in the
+hand-delivered folder — the owner's exact flow (walled → 🖐 → the
+fifth door delivers → nothing happens) died at the gates, not the
+door.
+
+**The fix — THE STAMP.** When a hand-marked link's proper,
+categorized note lands (or has already landed — the catch-up pass
+runs with every batch's table refresh), the row's Status cell is
+retired from ``🖐 hand — queued <date>`` to `` ✅ hand-delivered —
+fetched <date> `` — the table's own green checkbox, a final verdict
+every scanner already obeys (never waiting, never re-queued, never
+handed to the fifth door again, never fetched again). Only a cell
+that still READS as the gesture is touched — death, reviewed and
+revived keep winning (the precedence law), a " - " waiting row keeps
+the 📁 stored stamp that was always its writer, and URLs match by
+canonical form. The table's legend now tells the ending too, so the
+owner reading the note knows the row retires itself.
+
+**The fix — THE SWEEP.** The moment the proper note exists, every
+app-owned `_review` item for that source is removed
+(``sweep_review_leftovers``): the failed placeholder the wall left
+behind, the low-confidence note from an earlier era, the partial —
+the owner's "half-fetched items", gone because the vault now holds
+the real record. The ownership test is the folder's own frontmatter
+law (``managed_by: gitcurator``): a hand-written note is a human's,
+kept with a warning (the duplicate detector's business). The master
+table and the delivered pages are never the sweep's — the table is
+the ledger, the pages are the owner's record. Dry-run aware like
+every mutation the pipeline makes.
+
+**The fix — THE FINISH (the two gates).** The hand's positive half:
+the gesture was never a retirement (v0.48), and now it is also a
+request the pipeline can honor. (1) A 🖐 link parked in `_review`
+with a NON-failed note is no longer "already in the websites vault" —
+it is a half-fetched item the owner asked the doors to complete, so
+the delivery runs and the harvest replaces it. The same link WITHOUT
+the gesture keeps the old skip law exactly (the exemption is the
+hand's, not a blanket change). (2) A burned-out retry counter (3
+attempts) no longer kills a hand link: the row's gesture — or a
+delivered page already waiting in the folder — reborns ONE counter
+(the same surgical per-link reborn the master-retry pass uses, never
+a queue-wide reset), so the owner's exact flow completes end to end:
+walled → 🖐 → the fifth door delivers the page → the page is the
+fetch answer → the note is classified and stored → the row retires
+to ✅ → the placeholder is swept. Opening was never the success
+(v0.54); now the success has a shape the table can show.
+
+1623-case suite: the stamp (the retirement, the idempotence, the
+precedence, canonical matching, the missing-table honesty), the
+sweep (every half-fetched class, the hand-written keep, the table
+and folder untouchable, dry-run), the catch-up (the backlog, the
+still-waiting rows, the broken probe), the delivery (the owner's
+exact burned-out flow, the exemption and its control, the reborn
+and its control, the machine-success harvest), the probes (the
+mtime-keyed caches that keep a mid-run stamp honest), and the
+release bookkeeping.
+
 ## [0.55.0] — The owner's own window; the right route — 2026-10-08
 
 Owner ask (session): "it still says under bot challenge. only 1 site
