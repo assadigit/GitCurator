@@ -411,16 +411,27 @@ class WorkerWebsitePhaseMixin:
                         f"⚠️ _inbox table prune skipped: {_prune_err}",
                         "warning")
 
+                # v0.59.0 — the banished tally rides the run's summary
+                # (the pipeline's own 🗑️ Run tally line spoke at start;
+                # the done line repeats the number so the end of the run
+                # answers the owner's "how many were wiped" too):
+                _banished = list(
+                    getattr(pipeline, 'banished_urls', None) or [])
                 summary = {'counters': dict(pipeline.counters),
                            'results': list(pipeline.last_results),
+                           'banished': len(_banished),
+                           'banished_urls': _banished,
                            'vault': website_vault}
                 self._website_summary = summary
                 c = pipeline.counters
+                _tally = (f" 🗑️ {len(_banished)} banished — removed "
+                          f"and never fetched again (you marked them)."
+                          if _banished else "")
                 self.log_message.emit(
                     f"🌐 Websites done: {c['processed']} processed, "
                     f"{c['review']} to review, {c['skipped']} skipped, "
                     f"{c['retried']} retried, {c['upgraded']} upgraded, "
-                    f"{c['failed']} failed.", "success")
+                    f"{c['failed']} failed.{_tally}", "success")
                 return summary
             finally:
                 state.close()

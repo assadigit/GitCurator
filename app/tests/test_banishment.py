@@ -8,6 +8,14 @@ But I want a system that let me to delete and never fetch again some
 websites … for example in tags of websites, we can have a meta-data
 for this case, for example i choose 'delete' or a specific emoji."
 
+v0.59.0 (same file, same law): the owner's follow-up — "When i write
+'delete' tag, it autocompletes to 'auto_delete' is that correct?" and
+"I want get a log of how many notes are wiped because of this method,
+every run. for example '10 Websites Removed and will never fetch
+again because you blah blah'" — so ``auto_delete`` / ``auto-delete``
+join the banish words (the editor's suggested tag is obeyed), and the
+run tally speaks every run (the zero run answers too).
+
 Covered here (zero network — an injected fetch_fn and a fake LLM, the
 house pattern):
 
@@ -245,6 +253,32 @@ class TestMarkers(_BanishCase):
         ok, why = wp._note_reads_banished(fm)
         self.assertTrue(ok)
         self.assertEqual(why, 'delete')
+
+    def test_auto_delete_tag_alias(self):
+        # v0.59.0 — the owner's report: "When i write 'delete' tag, it
+        # autocompletes to 'auto_delete' is that correct?" — the word
+        # his editor suggests is obeyed exactly like the word he typed:
+        for m in ('auto_delete', 'AUTO_DELETE', 'Auto_Delete',
+                  'auto-delete', '#auto_delete'):
+            fm = {'tags': [m], 'banish': {}}
+            ok, why = wp._note_reads_banished(fm)
+            self.assertTrue(ok, m)
+            self.assertTrue(why, m)
+        # still the exact-word law — these near-misses never fire:
+        for m in ('automatic_delete', 'auto', 'auto-delete-policy',
+                  'auto-deleted-files', 'xauto_deletex'):
+            self.assertFalse(
+                wp._note_reads_banished({'tags': [m], 'banish': {}})[0], m)
+
+    def test_auto_delete_status_cell_fires(self):
+        # the Status cell's substring law obeys the same alias (both
+        # surfaces, one verdict):
+        for s in ('auto_delete', 'Auto-Delete',
+                  'auto_delete — decided', '🗑️ + auto_delete'):
+            self.assertTrue(wp._status_is_banished(s), s)
+        # the app's own 'auto' stamp alone stays a non-verdict:
+        for s in ('auto', 'auto — dead', '📁 auto stored'):
+            self.assertFalse(wp._status_is_banished(s), s)
 
     def test_frontmatter_key_variants(self):
         for key in ('decommission', 'banish', 'blacklist'):
@@ -512,6 +546,20 @@ class TestTheLoopClosed(_BanishCase):
                                  'a fresh note was written for a '
                                  'blacklisted URL')
 
+    def test_auto_delete_tag_closes_the_loop(self):
+        # the autocomplete word closes the exact same loop (v0.59.0 —
+        # the tag the owner's editor puts under his thumb works):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _tag_note(note_path, marker='auto_delete')
+        fetch = _FakeFetch()
+        pipe = self.make_pipeline(fetch=fetch)   # __init__ banishes
+        self.assertFalse(os.path.exists(note_path))
+        results = pipe.run(['https://example.com/site'])
+        self.assertEqual(results[0]['outcome'], 'skipped')
+        self.assertIn('banished', results[0]['error'])
+        self.assertNotIn('https://example.com/site', fetch.calls)
+
     def test_rearm_never_resurrects_a_banished_url(self):
         canonical, note_path = self.store_proper_note(
             'https://example.com/site')
@@ -558,6 +606,79 @@ class TestTheLoopClosed(_BanishCase):
         review = wp.build_review_note(
             'https://example.com/walled', 'failed', 'HTTP 403')
         self.assertIn('🗑️', review)
+
+
+class TestTheTally(_BanishCase):
+    """v0.59.0 — the owner's ask: "I want get a log of how many notes
+    are wiped because of this method, every run. for example '10
+    Websites Removed and will never fetch again because you blah
+    blah'"."""
+
+    def _tally_lines(self):
+        return [m for (_, m) in self.logs
+                if m.startswith('🗑️ Run tally:')]
+
+    def test_tally_line_names_the_count_and_the_contract(self):
+        # both doors in one run: a note tagged 🗑️ AND a table row
+        # marked delete — the tally speaks ONCE, with the count:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        b, note_b = self.store_proper_note('https://b.example/y')
+        _tag_note(note_a)                       # the note's own door
+        self.write_table([('https://b.example/y', 'delete')])
+        self.logs.clear()
+        pipe = self.make_pipeline()             # __init__ banishes
+        tally = self._tally_lines()
+        self.assertEqual(len(tally), 1)         # once per run
+        self.assertIn('2 website(s) removed', tally[0])
+        self.assertIn('never fetched again', tally[0])
+        self.assertIn('you marked', tally[0])
+        self.assertIn('♻️', tally[0])           # the undo door is named
+        self.assertEqual(set(pipe.banished_urls), {a, b})
+        self.assertFalse(os.path.exists(note_a))
+        self.assertFalse(os.path.exists(note_b))
+
+    def test_tally_line_speaks_on_a_quiet_run(self):
+        # "every run" — the zero run answers too (a count, not silence):
+        self.make_pipeline()
+        self.assertEqual(self._tally_lines(), [
+            '🗑️ Run tally: 0 websites removed this run — no 🗑️ / '
+            'delete / auto_delete marks in the library'])
+
+    def test_tally_dedupes_across_the_doors(self):
+        # one URL marked BOTH on its note and in the table is ONE
+        # banishment — the tally counts websites, not gestures:
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _tag_note(note_path)
+        self.write_table([('https://example.com/site', '🗑️')])
+        self.logs.clear()
+        pipe = self.make_pipeline()
+        self.assertEqual(pipe.banished_urls, [canonical])
+        tally = self._tally_lines()
+        self.assertEqual(len(tally), 1)
+        self.assertIn('1 website(s) removed', tally[0])
+
+    def test_the_reports_carry_the_banished_urls(self):
+        # the two doors' reports carry the canonical lists the tally
+        # rolls up — the worker's summary reads them at the run's end:
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _tag_note(note_path)
+        r = wp.banish_marked_notes(self.db, self.vault,
+                                   log=lambda *a, **k: None)
+        self.assertEqual(r['urls'], [canonical])
+        # a vault without the table answers with the empty list:
+        r_empty = wp.consume_decommission_table(
+            self.db, os.path.join(self.tmp, 'nowhere'),
+            log=lambda *a, **k: None)
+        self.assertEqual(r_empty['banished_urls'], [])
+        # and the table door's report carries its own list:
+        other, _note2 = self.store_proper_note(
+            'https://other.example/y')
+        self.write_table([('https://other.example/y', 'delete')])
+        r2 = wp.consume_decommission_table(self.db, self.vault,
+                                           log=lambda *a, **k: None)
+        self.assertEqual(r2['banished_urls'], [other])
 
 
 class TestTableGesture(_BanishCase):
@@ -689,13 +810,15 @@ class TestReleaseBookkeeping(unittest.TestCase):
                   encoding='utf-8') as f:
             return f.read()
 
-    def test_version_is_0580(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.58.0')
+    def test_version_is_0590(self):
+        self.assertEqual(self._read('VERSION').strip(), '0.59.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
         self.assertIn('## [0.58.0]', text)
         self.assertIn('banish', text.lower())
+        self.assertIn('## [0.59.0]', text)
+        self.assertIn('tally', text.lower())
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')
@@ -710,6 +833,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
                           'website_pipeline.py')
         self.assertIn('BANISH_QUARANTINE_RELPATH', text)
         self.assertIn('banish_marked_notes', text)
+        self.assertIn('BANISH_TALLY_PREFIX', text)   # v0.59.0 — the
+        self.assertIn('banished_urls', text)         # tally + reports
 
 
 if __name__ == '__main__':

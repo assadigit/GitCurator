@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1702-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1709-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -41,7 +41,8 @@
 # LLM's low-confidence answer does not change on an immediate
 # re-ask). 48 cases join in tests/test_noteredo.py; v0.58.0 — THE
 # BANISHMENT: the owner asked to "delete and never fetch again"
-# marked notes — 31 cases join tests/test_banishment.py (1702).
+# marked notes — 31 cases join tests.test_banishment.py (1702); v0.59.0
+# adds 7 more (auto_delete alias + the run tally) — 1709.
 # v0.56.0 — THE HAND'S HARVEST: the owner's report — "New update:
 # when newly fetched website with hand (🖐) are fetched and stored
 # correctly, the system must automatically turn the hand emoji to
@@ -530,4 +531,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1702 tests + worker 50 + offline golden run (v0.58.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1709 tests + worker 50 + offline golden run (v0.59.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
