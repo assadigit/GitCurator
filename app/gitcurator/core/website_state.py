@@ -167,6 +167,26 @@ class WebsiteStateDB:
             self.conn.commit()
             return True
 
+    def forget_row(self, url: str) -> bool:
+        """v0.58.0 — THE BANISHMENT's ledger half: remove a link's
+        processed row UNCONDITIONALLY.
+
+        The caller just removed the note FILE on purpose (🗑️ — the note
+        carried the owner's delete mark and left for
+        ``.trash/banished``, or the owner deleted it by hand and marked
+        the master-table row), so the row must not outlive the note it
+        pointed at — the exact false-success shape v0.57.0 closed for
+        the hand rows ("the state ledger remembered a note the vault no
+        longer carried"). :meth:`forget_failed_row` keeps its guard (it
+        serves verdicts that only sweep FAILED placeholders); THIS door
+        serves the deliberate removal of a REAL, proper note. Returns
+        True when a row was removed."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM websites_processed WHERE url=?", (url,))
+            self.conn.commit()
+            return bool(cur.rowcount)
+
     # -- v0.19.0 proxy-epoch meta + retry re-arm --------------------------
 
     def get_meta(self, key: str) -> Optional[str]:

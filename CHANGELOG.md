@@ -1,3 +1,114 @@
+## [0.58.0] — The banishment — 2026-10-09
+
+Owner ask (session): "Some websites that are currently stored in
+the vault are not favored anymore. for example they've changed
+their terms or doesn't offer free services, So I need a mechanism
+to delete and never fetch again some websites … the problem is
+that if I just delete it's record from vault, system will re-fetch
+and restore it. But I want a system that let me to delete and
+never fetch again some websites … for example in tags of websites,
+we can have a meta-data for this case, for example i choose
+'delete' or a specific emoji … this way we solve an important
+problem. the websites are dynamic and might be dead or stop being
+useful or relevant after a while, this way, user can polish and
+keep the vault tiny, essential and practical without hoarding
+wasteful websites." Desktop release v0.58.0, Worker unchanged at
+**0.30.0** (it never touches the vault). Suite grows **1671 →
+1702** (31 cases join tests/test_banishment.py — pure stdlib at
+the unit level: temp vaults, injected fetchers, a fake LLM; no
+browser ever launches under test).
+
+**The problem, named precisely.** The vault is a garden, not an
+archive — sites change their terms, drop their free tier, die
+quietly — but the app had NO door for "this one is not wanted
+anymore". Worse, the two existing doors pointed the other way:
+delete a note silently and v0.57.0's redo pass calls it a FALSE
+SUCCESS and regenerates it (the note is the success — a missing
+file is an accident to be repaired, never a verdict); delete a
+note and re-paste the URL and the pipeline happily fetches and
+restores it. Exactly the loop the owner reported: deletion alone
+always comes back. The one retirement grammar that existed
+(v0.44.0's graveyard) lives in the master table's Status cells —
+built for DEAD links (🪦), rows that only exist for links WAITING
+in `_review`. A healthy, properly-categorized note in a category
+folder has no table row, no Status cell, no emoji surface at all.
+
+**The design — the verdict lives where the owner curates.** Two
+surfaces, one burial:
+
+1. **THE NOTE'S OWN TAGS (the ask, verbatim).** Any app-owned
+   note whose `tags:` line carries 🗑️ — or the bare word
+   `delete` / `banish` / `blacklist` / `purge` (exact-match per
+   tag: the tag `deleted-files` on a note about deleting files
+   never fires) — or whose frontmatter carries a true
+   `decommission:` / `banish:` / `blacklist:` key, is marked.
+   Both YAML tag styles parse (the flow `tags: [a, b]` the app
+   writes AND the block style Obsidian's property editor writes).
+   The discoverability surface: every note the app writes now
+   closes with the hint — *"Not useful anymore? Add the tag 🗑️
+   (or "delete") to this note — the next run removes it from the
+   library and never fetches this site again."*
+
+2. **THE MASTER TABLE'S OWN 🗑️** (the icon column speaks, same
+   law as 🖐/🪦/✅): a Status cell reading 🗑️ / delete / banish /
+   blacklist / purge gets the same burial — including for a link
+   whose note the owner ALREADY deleted by hand (his exact
+   workaround): the row is the verdict, the dismissal is the
+   contract, the loop closes DB-only when there is no file left
+   to move.
+
+**The burial — DB first (the graveyard's law), then the
+furniture.** `banish_marked_notes` runs at pipeline start, before
+anything fetches: the URL is `dismiss()`ed with the
+*banished-by-owner* reason (the skip gate in `process_link` names
+the door — 🗑️, blacklisted, ♻️ revived brings it back — never
+confused with the graveyard's decommissioned or the generic
+deleted-note line), its retry-queue row is dropped (any re-arm
+finds nothing), the note FILE leaves the library for
+`.trash/banished/` (Obsidian's hidden trash — the banned-domain
+sweep's precedent: VaultIndex, the mirror, the Website Directory
+and the banishment's own scan never read dot-folders, so the
+quarantined note is invisible but recoverable by hand), the
+`websites_processed` row is FORGOTTEN — a new
+`WebsiteStateDB.forget_row` (the unconditional twin of
+`forget_failed_row`, which keeps its guard) so the ledger never
+remembers a note the vault no longer carries (the exact
+false-success shape v0.57.0 closed) — and the link's half-fetched
+`_review` items sweep with it (`sweep_review_leftovers`). The
+master table gains the record row — `🗑️ banished — confirmed
+<date>`, source *note tag* / *master-table gesture* — visible,
+idempotent, and ♻️-revivable like every burial. The waiting
+classifier learns the grammar: a 🗑 row is NEVER a " - " row
+(never re-fetched by the caught-up check); when a hand-edited
+cell says both dead and delete the banishment wins (the removal
+intent is the stronger sentence); ♻️ outranks everything (it is
+the undo door). Hand-written notes carrying the mark are KEPT
+with a warning (the sacred law — the app never deletes what it
+did not write; the owner deletes his own notes by hand in
+Obsidian). Dry-run rehearses honestly: nothing moves, no table
+row lands, the log says REHEARSED.
+
+**The loop, closed.** The owner's exact flow, tested end to end:
+mark the note → next run banishes (pipeline `__init__` — no
+button, no flag, the pass IS the next run) → a future paste of
+the same URL months later is skipped (never fetched, no fresh
+note, 🗑️ in the log) → another re-arm finds no queue row → and
+if he ever changes his mind, ♻️ revived on the record row
+undismisses and the link is fetched like new.
+
+Tests (tests/test_banishment.py, 31): marker grammar (both tag
+styles, the exact-word law, the boolean keys, ♻️ precedence, the
+graveyard's own stamps never collide); the scan (category notes,
+`_review` items, hand-written kept, `.trash` blind); the
+ledger-first finder; the full burial (file, DB, ledger, leftovers,
+record row); idempotency (byte-stable table, single trash
+listing); dry-run; the loop closed both ways (tag and table
+gesture, including the hand-deleted-note DB-only burial); the
+revive door; the gate's wording; the note's own hint line; the
+release bookkeeping (VERSION, changelog, CI, AGENTS). Suite
+**1702** (was 1671); tests.test_decommission's no-op report
+expectation gained the `banished` + `notes_moved` keys.
+
 ## [0.57.0] — The note is the success — 2026-10-09
 
 Owner ask (session): "I've noticed that chrome still fetches a new

@@ -129,6 +129,7 @@ The app keeps a persistent record per note in `cache.db` (new table, created in 
 | Same note, different folder (**moved**) | Accept it. Update the note's `category` / `subcategory` lines and tags to match the new folder (targeted line edit, atomic write), set `category_locked: true`, log a correction, never move it back. Moving a note out of `_review` into a category folder counts as a correction too. |
 | Same place, content changed by hand (**edited**) | Flag it in the run report. Skip it. |
 | Note gone (**deleted**) | Add its URL to a dismissed list. Never re-add. List it in the run report (it may have been accidental). |
+| Note carries the 🗑️ delete verdict (**banished**, v0.58.0) | The owner's deliberate "delete and never fetch again": remove the note to `.trash/banished`, dismiss its URL (never fetched again), forget its ledger row, sweep its `_review` leftovers, and write the record row in the review master table (♻️ revivable). The verdict reads from a `🗑️` / `delete` / `banish` / `blacklist` / `purge` tag, a true `decommission:` frontmatter key, or the master table's own 🗑️ Status. A silent deletion stays the redo contract (§4.3) — only the explicit mark is a verdict. |
 | Two files, same source (**duplicate**) | Flag both. Touch neither. |
 | File in a machine vault with no `source:` (**unmanaged**) | Ignore it. List it. |
 | Moved into a folder that is not in the taxonomy (**unmapped**) | Keep it there. Mark it `unmapped` in the report. Never invent a category. |
