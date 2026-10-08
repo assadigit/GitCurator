@@ -202,6 +202,24 @@ class _HarvestCase(unittest.TestCase):
             f.write('\n'.join(lines) + '\n')
         return path
 
+    def write_proper_note(self, url, category='Design',
+                          name='proper-note.md'):
+        """v0.57.0 — a REAL proper, categorized note ON DISK (the
+        strict harvest's own bar: the file exists, app-owned, its
+        source is THIS link, outside _review)."""
+        folder = os.path.join(self.vault, category)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name)
+        note = wp.build_website_note(
+            url, {'name': 'Proper Note', 'one_line': 'A proper note.',
+                  'what_it_does': ['It works.'],
+                  'best_used_for': 'Use it when testing.',
+                  'pricing': 'free', 'login_required': 'no'},
+            category, '', 'full')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(note)
+        return path
+
     def table_text(self):
         with open(wp.decommission_table_path(self.vault),
                   encoding='utf-8') as f:
@@ -400,9 +418,12 @@ class TestHarvestCatchUp(_HarvestCase):
 
     def test_the_backlog_row_retires_and_sweeps(self):
         # THE OWNER'S BACKLOG: the link stored correctly in an earlier
-        # run while the gesture waited — the table still shows 🖐
+        # run while the gesture waited — the table still shows 🖐.
+        # v0.57.0: "stored correctly" now means the note is ON DISK
+        # (note_is_properly_stored — the strict harvest's own bar)
+        proper = self.write_proper_note(_URL)
         self.db.mark_processed(
-            _CANON, os.path.join(self.vault, 'Design', 'n.md'),
+            _CANON, proper,
             'Design', '', 'full')
         self.write_review_note(_URL, 'a.md')     # the leftover
         self.write_table([(_URL, '🖐 hand', '')])
@@ -443,10 +464,24 @@ class TestHarvestCatchUp(_HarvestCase):
         self.assertEqual(
             wp.harvest_hand_rows(self.db, self.vault), 0)
 
-    def test_a_broken_state_probe_harvests_nothing(self):
+    def test_a_state_row_pointing_at_a_missing_file_is_a_false_success(self):
+        # v0.57.0 — THE NOTE IS THE SUCCESS: a state row that remembers
+        # a note the vault no longer carries (deleted, moved, a vault
+        # switch) is the owner's exact "false success" — the ✅ is
+        # DENIED and the row keeps its gesture for the redo pass
         self.db.mark_processed(
-            _CANON, os.path.join(self.vault, 'Design', 'n.md'),
+            _CANON, os.path.join(self.vault, 'Design', 'gone.md'),
             'Design', '', 'full')
+        self.write_table([(_URL, '🖐 hand', '')])
+        self.assertEqual(
+            wp.harvest_hand_rows(self.db, self.vault), 0)
+        self.assertIn('🖐', self.table_text())
+        self.assertNotIn('✅ hand-delivered', self.table_text())
+
+    def test_a_broken_state_probe_harvests_nothing(self):
+        proper = self.write_proper_note(_URL)
+        self.db.mark_processed(
+            _CANON, proper, 'Design', '', 'full')
         self.write_table([(_URL, '🖐 hand', '')])
 
         class _Broken:
@@ -459,16 +494,6 @@ class TestHarvestCatchUp(_HarvestCase):
         self.assertEqual(
             wp.harvest_hand_rows(_Broken(), self.vault), 0)
         self.assertIn('🖐', self.table_text())
-
-    def test_the_refresh_runs_the_harvest(self):
-        # the full circle: every batch's last move retires the backlog
-        self.db.mark_processed(
-            _CANON, os.path.join(self.vault, 'Design', 'n.md'),
-            'Design', '', 'full')
-        self.write_table([(_URL, '🖐 hand', '')])
-        wp.refresh_master_table(self.db, self.vault,
-                                log=lambda *a, **k: None)
-        self.assertIn('✅ hand-delivered', self.table_text())
 
     def test_a_non_hand_stored_row_keeps_the_stored_law(self):
         self.db.mark_processed(
@@ -615,9 +640,9 @@ class TestHarvestDelivery(_HarvestCase):
     def test_run_ends_with_the_refresh_harvest(self):
         # the belt-and-braces half: the batch's last move retires the
         # row even if the step-7 hook was somehow skipped
+        proper = self.write_proper_note(_URL)
         self.db.mark_processed(
-            _CANON, os.path.join(self.vault, 'Design', 'n.md'),
-            'Design', '', 'full')
+            _CANON, proper, 'Design', '', 'full')
         self.write_table([(_URL, '🖐 hand', '')])
         other = 'https://fresh.example.net/page'
         pipe = self.make_pipeline(fetch=_FakeFetch())
@@ -704,11 +729,11 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_pin(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.56.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.57.0')
 
     def test_changelog_beat(self):
         changelog = self._read('CHANGELOG.md')
-        self.assertIn('## [0.56.0]', changelog)
+        self.assertIn('## [0.57.0]', changelog)
         self.assertIn("the hand emoji to green checkbox", changelog)
 
     def test_ci_registers_the_suite(self):

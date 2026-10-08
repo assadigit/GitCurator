@@ -1,3 +1,94 @@
+## [0.57.0] — The note is the success — 2026-10-09
+
+Owner ask (session): "I've noticed that chrome still fetches a new
+session, moreover it correctly loads the websites, and websites gets
+loaded on those tabs, and in logs it shows this '✅' but actually
+the llm model does not actually work on that website and create a
+proper note. also the app must refetch and generate notes, if they
+notes aren't properly stored. For example websiteX has hand emoji.
+and it's fetched and became ✅ in the table, but actually it's note
+is not properly saved and only saved under _review folder, so it's
+false success and must be redo." Desktop release v0.57.0, Worker
+unchanged at **0.30.0** (it never touches the vault). Suite grows
+**1623 → 1671** (48 cases join tests/test_noteredo.py — pure stdlib
+at the unit level: temp vaults, injected fetchers, a fake LLM; no
+browser ever launches under test).
+
+**The diagnosis — a ROUTING bug, hiding behind the delivery's
+fanfare.** The fifth door kept its v0.53/v0.54 promises: the tabs
+opened, the pages loaded, the DOM was taken and written into
+`_review/hand-delivered/`, and the log told its "✅ took the page
+from your Chrome" story. But the RE-RUN — the mini-batch that was
+supposed to feed those pages through classify → analyze → note —
+passed the delivered WEBSITE urls to the **GitHub** loop
+(`_start_worker_with_urls(list(urls))` in the GUI,
+`run_batch_visual(cfg, "direct", urls=delivered)` in the CLI): the
+GitHub loop marked every one "non-GitHub URL — skipped", the
+Websites pipeline saw `links = []`, and **the LLM never ran on the
+delivered page**. The owner read a log full of ✅ while no note was
+ever written — the exact false success he named. And the aftermath
+was a black hole: a hand link whose delivery WAS consumed but whose
+note came out half-fetched (low classification confidence — a
+`_review` item, never a category note) was invisible to every
+automatic pass — `scan_master_hand_rows` excludes delivered rows,
+low confidence never enqueues a retry, and the harvest only fires
+on a proper note. The row sat 🖐 (or worse, the state ledger
+remembered a note the vault no longer carried and the harvest
+stamped ✅ over a missing file) while nothing refetched it.
+
+**The fix — four laws, one sentence: the note is the success.**
+
+1. **THE ROUTING** — the delivered pages ride the batch as WEBSITE
+   links (`non_github_urls`), never as GitHub urls: the GUI's
+   `_on_delivered` and the CLI's `--chrome-retry` both start the
+   re-run through the Websites pipeline, so the delivered page
+   answers the fetch, the LLM classifies and analyzes, and the
+   proper, categorized note actually lands. The re-run log says so:
+   "re-processing them now through the Websites pipeline as real
+   fetches (classify → analyze → the proper, categorized note)…".
+
+2. **THE TEST** — `note_is_properly_stored` is the bar every ✅ must
+   clear: the state row exists, the fetch did not fail, the note
+   path is outside `_review`, **the file is on disk**, its
+   frontmatter is the app's own (`managed_by: gitcurator`) and its
+   `source` is THIS link. A state row that remembers a note the
+   vault no longer carries (deleted, moved, a vault switch) is the
+   owner's exact false success — the harvest
+   (`harvest_hand_rows` + `_harvest_hand_row`) now denies the green
+   checkbox and leaves the gesture in place for the redo.
+
+3. **THE REDO** — `scan_master_redo_rows` finds every 🖐 hand row
+   whose delivery happened (a consumed queue row or the page file
+   in the folder) but whose note is not properly stored; the redo
+   re-runs the FULL pipeline on each: `take_hand_delivered`'s new
+   `allow_consumed` re-reads the delivered page in place (the file
+   is the record — no new Chrome tab, the first consume date stays
+   the truth), the machine doors are never asked, the LLM writes
+   the proper note, the row retires, the half-fetched item sweeps.
+   The redo rides three triggers: the GUI's end-of-run pass (after
+   the hand Chrome delivery), the caught-up check (before "All
+   caught up" may be said, the hero now checks the redo set too),
+   and the CLI's `--chrome-retry` (the redo set joins the re-run
+   even when no tab needs opening). A half-fetched outcome on a 🖐
+   link now SAYS so in the log: "NOT properly stored yet: the 🖐 row
+   keeps its gesture and the redo pass will re-read the delivered
+   page and ask the LLM again."
+
+4. **THE BOUND** — each link is redone once per app session (the
+   `_hand_redo_tried` ledger): the LLM's low-confidence answer does
+   not change on an immediate second ask, so the next session asks
+   again with fresh context, new prompts, grown corrections — the
+   redo repeats without ever spinning.
+
+The ladder's own laws are untouched: the fifth door still attaches
+to the owner's running Chrome when its debug port answers, launches
+his real profile when his Chrome is closed, and rides the dedicated
+identity with the per-site route memory otherwise (his report that
+"chrome still fetches a new session" is the honest fallback — his
+Chrome was running without the debug port, and the door never
+fights or restarts it on its own; More ▸ 🪄 Attach to my Chrome is
+the one-time setup that makes the tabs open in HIS window).
+
 ## [0.56.0] — The hand's harvest — 2026-10-08
 
 Owner ask (session): "New update: when newly fetched website with

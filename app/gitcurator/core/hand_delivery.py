@@ -595,7 +595,8 @@ def hand_fetch_result(url: str, body: bytes, wall: str,
 
 
 def take_hand_delivered(vault_path: str, canonical: str,
-                        log: Optional[Callable] = None
+                        log: Optional[Callable] = None,
+                        allow_consumed: bool = False
                         ) -> Optional[object]:
     """The per-link check the pipeline makes BEFORE every fetch: is
     there a delivered page for THIS link? Returns a FetchResult (the
@@ -604,7 +605,20 @@ def take_hand_delivered(vault_path: str, canonical: str,
     :func:`consume_delivered` (queue stamped, file kept). v0.53.0 —
     a page the APP delivered (door 'auto') is re-verified first: one
     that fails the fifth door's verdict is discarded (the app's own
-    file, removed) and the link keeps waiting — None, honestly."""
+    file, removed) and the link keeps waiting — None, honestly.
+
+    v0.57.0 — THE NOTE IS THE SUCCESS, the redo-consume:
+    ``allow_consumed=True`` re-reads a page whose queue row was
+    already stamped consumed — the owner's law ("the app must refetch
+    and generate notes, if they notes aren't properly stored … false
+    success and must be redo"). The delivered page is the RECORD (it
+    stays in the folder), so a redo reads it in place: no new Chrome
+    tab, no re-stamp of the queue (the first consume date is the
+    truth), the page simply answers the fetch again while the LLM is
+    asked to build the proper, categorized note this time. The
+    pipeline passes the flag exactly when the row carries the 🖐
+    gesture (a link with a proper note never reaches the fetch — the
+    dedupe gate answers first)."""
     if not vault_path or not canonical:
         return None
     try:
@@ -612,7 +626,9 @@ def take_hand_delivered(vault_path: str, canonical: str,
     except Exception:
         return None
     meta = (queue.get('links') or {}).get(canonical)
-    if not meta or meta.get('consumed'):
+    if not meta:
+        return None
+    if meta.get('consumed') and not allow_consumed:
         return None
     suggested = meta.get('suggested') or suggested_filename(canonical)
     path = os.path.join(hand_delivery_dir(vault_path), suggested)
@@ -635,7 +651,7 @@ def take_hand_delivered(vault_path: str, canonical: str,
                         f"app's own file), the link keeps waiting for "
                         f"its doors", "warning")
             return None
-    if not dryrun.is_enabled():
+    if not dryrun.is_enabled() and not meta.get('consumed'):
         try:
             queue['links'][canonical]['consumed'] = \
                 time.strftime('%Y-%m-%d %H:%M')

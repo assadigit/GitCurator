@@ -507,6 +507,99 @@ class ProcessingControlMixin:
                 f"More ▸ 🤖 Chrome tab-retry, or save the pages into "
                 f"the hand-delivered folder yourself", "warning")
 
+    # -- v0.57.0: THE NOTE IS THE SUCCESS — the redo pass ------------------
+
+    def _scan_master_redo(self):
+        """v0.57.0 — the 🖐 hand rows whose delivery was a FALSE SUCCESS:
+        the page was delivered (a consumed queue row or the page file
+        in the hand-delivered folder) but the note is NOT properly
+        stored (:func:`website_pipeline.note_is_properly_stored` fails
+        — a half-fetched ``_review`` item, a missing file, a stranger
+        note). The owner's words: "it's fetched and became ✅ in the
+        table, but actually it's note is not properly saved and only
+        saved under _review folder, so it's false success and must be
+        redo." Returns ``[{'url', 'reason'}]``; best-effort and
+        guarded exactly like ``_scan_master_waiting`` (no vault, no
+        pipeline, a running batch or a broken state ledger means no
+        scan — the hermetic law)."""
+        try:
+            cfg = self.config or {}
+            vault = (cfg.get('website_vault_path') or '').strip()
+            if not vault or not os.path.isdir(vault):
+                return []
+            if not (cfg.get('pipelines') or {}).get('websites', False):
+                return []
+            if getattr(self, '_batch_running', False):
+                return []      # a running batch owns the table's truth
+            if _dryrun.is_enabled():
+                state = _website_pipeline.WebsiteStateDB(
+                    db_path=_dryrun.shadow_cache_path(
+                        os.path.join(APP_DIR, 'cache.db')))
+            else:
+                state = _website_pipeline.WebsiteStateDB()
+            try:
+                return _website_pipeline.scan_master_redo_rows(
+                    vault, state=state) or []
+            finally:
+                state.close()
+        except Exception:
+            return []
+
+    def _maybe_redo_hand_notes(self):
+        """v0.57.0 — the owner's law, automatic: "the app must refetch
+        and generate notes, if they notes aren't properly stored." A
+        hand row whose delivery landed only a half-fetched note is
+        REDONE right here — no new Chrome tab (the delivered page is
+        the record; the pipeline re-reads it in place), the LLM asked
+        again, the proper, categorized note written. Bounded honestly:
+        each link is redone ONCE per app session (``_hand_redo_tried``
+        — the LLM's low-confidence answer will not change on an
+        immediate second ask; the next session asks again with fresh
+        context); skipped while a Chrome delivery is gathering pages
+        (those links get their own re-run through the Websites
+        pipeline). Quiet no-op whenever the pass cannot run."""
+        cfg = self.config or {}
+        if not (cfg.get('pipelines') or {}).get('websites', False):
+            return
+        vault = (cfg.get('website_vault_path') or '').strip()
+        if not vault or not os.path.isdir(vault):
+            return
+        if getattr(self, '_closing', False) or not self.isVisible():
+            return
+        if int(getattr(self, '_chrome_delivery_pending', 0) or 0) > 0 \
+                or getattr(self, '_chrome_delivery_busy', False):
+            return  # the delivery's own re-run owns those links now
+        if getattr(self, '_batch_running', False):
+            return  # the running batch's end-of-run pass will fire it
+        rows = self._scan_master_redo()
+        if not rows:
+            return
+        tried = getattr(self, '_hand_redo_tried', None)
+        if tried is None:
+            tried = self._hand_redo_tried = set()
+        rows = [r for r in rows if r.get('url') not in tried]
+        if not rows:
+            return
+        tried.update(r.get('url') for r in rows)
+        urls = [r['url'] for r in rows]
+        first_reason = str(rows[0].get('reason') or '').strip()
+        self.log_message(
+            f"🔁 {len(urls)} hand note(s) NOT properly stored — "
+            f"refetching and re-generating them now (the delivered "
+            f"page is re-read, the LLM writes the proper, categorized "
+            f"note; a ✅ is only earned by the note itself"
+            + (f"; first reason: {first_reason}" if first_reason else "")
+            + ")", "info")
+        try:
+            self._delivery_rerun_pending = True
+            self._start_worker_with_urls([], non_github_urls=urls)
+        except Exception as e:
+            self._delivery_rerun_pending = False
+            self.log_message(
+                f"⚠️ The hand-note redo could not start ({e}) — the next "
+                f"SYNC's caught-up check picks them up automatically",
+                "warning")
+
     def hand_rows_deliver_now(self):
         """More ▸ 🖐 Scrape hand rows via Chrome — v0.52.0, the manual
         trigger: the 🖐 hand rows of the master table (the # cell or
@@ -1354,15 +1447,32 @@ class ProcessingControlMixin:
                 else:
                     self.log_message(
                         f"🤖 {len(urls)} page(s) delivered from your "
-                        f"Chrome — re-processing them now as real "
-                        f"fetches…", "success")
+                        f"Chrome — re-processing them now through the "
+                        f"Websites pipeline as real fetches (classify → "
+                        f"analyze → the proper, categorized note)…",
+                        "success")
                     # v0.54 — the re-run is part of THIS delivery's
                     # story: its finish merges into the stashed
                     # scorecard (the batch that waited) instead of
                     # celebrating a second, partial story on its own
+                    # v0.57.0 — THE NOTE IS THE SUCCESS, the routing
+                    # fix: the delivered links ride as WEBSITE links
+                    # (``non_github_urls``), never as GitHub urls —
+                    # the owner's report ("in logs it shows this ✅
+                    # but actually the llm model does not actually
+                    # work on that website and create a proper note")
+                    # was exactly this bug: 'direct' mode fed the
+                    # website URLs to the GITHUB loop, which marked
+                    # each one "non-GitHub URL — skipped", and the
+                    # Websites pipeline never saw them. The LLM never
+                    # ran; the pages sat in the folder while the log
+                    # told its ✅ story. Now they land in the Websites
+                    # phase, the delivered page answers the fetch, and
+                    # the note is the success.
                     self._delivery_rerun_pending = True
                     try:
-                        self._start_worker_with_urls(list(urls))
+                        self._start_worker_with_urls(
+                            [], non_github_urls=list(urls))
                     except Exception as e:
                         self._delivery_rerun_pending = False
                         self.log_message(
@@ -1954,6 +2064,19 @@ class ProcessingControlMixin:
                 except Exception as _hand_err:
                     self.log_message(
                         f"⚠️ Hand-row Chrome pass skipped: {_hand_err}",
+                        "warning")
+                # v0.57.0 — THE NOTE IS THE SUCCESS, the redo pass: the
+                # hand links whose notes are still not properly stored
+                # (half-fetched _review items, the false successes) are
+                # re-generated now — the delivered page re-read, the
+                # LLM asked again. Skipped while a Chrome delivery is
+                # gathering (those links get their own re-run); each
+                # link redone once per session. Tolerated everywhere.
+                try:
+                    self._maybe_redo_hand_notes()
+                except Exception as _redo_err:
+                    self.log_message(
+                        f"⚠️ Hand-note redo pass skipped: {_redo_err}",
                         "warning")
                 # v0.50.0 — the fifth door's offer rides BEFORE the
                 # scorecard: the run's fetch failures are the run's last

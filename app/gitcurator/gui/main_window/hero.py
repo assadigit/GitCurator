@@ -274,6 +274,29 @@ class HeroMixin:
                             f"⚠️ The hand-row Chrome pass could not "
                             f"start ({_e}) — More ▸ 🖐 Scrape hand rows "
                             f"via Chrome runs it anytime", "warning")
+            # v0.57.0 — THE NOTE IS THE SUCCESS, the redo check: before
+            # "everything is up to date" may be said, the hand notes
+            # must actually BE properly stored (the owner's law: "the
+            # app must refetch and generate notes, if they notes
+            # aren't properly stored"). A 🖐 link whose delivery landed
+            # only a half-fetched _review item is a false success —
+            # it is redone right here (the delivered page re-read, the
+            # LLM asked again for the proper, categorized note; once
+            # per app session per link). (Guarded: the bare hero-flow
+            # stubs carry no processing-control collaborator.)
+            _redo = getattr(self, '_maybe_redo_hand_notes', None)
+            if callable(_redo) and not _work_started:
+                try:
+                    _redo()
+                    # the redo pass starts its own batch when it finds
+                    # work — treat that as work started (its own finish
+                    # path tells the story)
+                    _work_started = bool(
+                        getattr(self, '_batch_running', False))
+                except Exception as _e:
+                    self.log_message(
+                        f"⚠️ The hand-note redo pass could not run "
+                        f"({_e})", "warning")
             if _work_started:
                 return
             self._set_hero_state('sync')
