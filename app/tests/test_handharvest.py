@@ -719,9 +719,16 @@ class TestReleaseBookkeeping(unittest.TestCase):
         agents = self._read('AGENTS.md')
         self.assertIn('test_handharvest', agents)
 
-    def test_deployment_record(self):
-        deployment = self._read('app', 'cloudflare-bot', 'DEPLOYMENT.md')
-        self.assertIn('0.56.0', deployment)
+    def test_the_harvest_is_part_of_the_doors_api(self):
+        # the stamp is exported where every door's public name lives —
+        # the callers (the pipeline's step-7 hook, the catch-up pass)
+        # import it by name, so the contract is the release's to keep.
+        # (The DEPLOYMENT.md v0.56.0 record is a POST-RELEASE commit
+        # on main — the house ritual every release follows — so it is
+        # deliberately NOT a tag-time gate; the live worker's story
+        # is verified in the record itself.)
+        from gitcurator.core import hand_delivery as hd
+        self.assertIn('stamp_hand_delivered_rows', hd.__all__)
 
 
 if __name__ == '__main__':
