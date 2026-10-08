@@ -5,6 +5,46 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.58.0 deploy record — the unchanged 0.30.0 worker, LIVE and verified (LIVE ✅ · desktop-only release)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d836c195-ae9c-495a-af5c-f42f04629d04` — v0.58.0 is a
+> DESKTOP-ONLY release: THE BANISHMENT — the owner's "delete and
+> never fetch again" verdict: a 🗑️ / delete / banish / blacklist /
+> purge tag on the note (or the master table's own 🗑️ Status, or a
+> true `decommission:` frontmatter key) removes the note from the
+> library to `.trash/banished`, blacklists the URL (the never-fetch
+> dismissal gate), forgets the ledger row
+> (`WebsiteStateDB.forget_row`), sweeps the `_review` leftovers, and
+> writes the ♻️-revivable record row — all desktop code in
+> `gitcurator/core/website_pipeline.py` and
+> `gitcurator/core/website_state.py`). The Worker's CODE is unchanged
+> since v0.30.0 — `git diff v0.57.0..v0.58.0 -- app/cloudflare-bot/src/`
+> is EMPTY (only this DEPLOYMENT.md record differs).
+>
+> **The no-op re-deploy ritual awaits the owner's token this
+> session** (the v0.56.0 precedent): the workers API token is
+> session-scoped and was not re-supplied, and `wrangler` without it
+> cannot produce a fresh version ID. The LIVE deployment already
+> serves the byte-identical code — with the token in hand:
+> `CLOUDFLARE_API_TOKEN=… ./node_modules/.bin/wrangler deploy` from
+> `app/cloudflare-bot/` (a pure parity check, as the v0.57.0 record
+> proved).
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` in 0.32 s ✓.
+>
+> Desktop release v0.58.0 (GitCurator-v0.58.0-windows.zip, 129
+> files, 1,064,412 bytes, sha256
+> `b19a45c3776583ad9c67e5e423a711a32841af73317aafdad221e7a6b6e625b9`,
+> download round-trip byte-identical) + CI green on the v0.58.0 tag
+> AND main (runs 37832749864 / 37832750064 — 1702 tests, 85-module
+> compile gate, offline golden 30/30, first try on both runs).
+
+---
+
 ## 📦 v0.57.0 deploy record — the unchanged 0.30.0 worker, RE-DEPLOYED and verified (LIVE ✅ · the ritual completed with the owner's token)
 
 > **Live in production** at
