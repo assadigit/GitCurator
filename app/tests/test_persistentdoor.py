@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_persistentdoor.py — v0.54.0: the door keeps its grip; the
+"""test_persistentdoor.py — v0.55.0: the door keeps its grip; the
 profile remembers.
 
 The owner's report (this session): "this time the links which I defined
@@ -999,13 +999,17 @@ class TestProfilePlumbing(unittest.TestCase):
 
     def test_the_driver_passes_the_knobs_to_the_session(self):
         # fetch_pages_via_chrome → ChromeSession(profile_dir, persist)
+        # v0.55 grammar: the session also takes the leg's extra_flags
+        # (the proxy argv — empty on the direct leg's default here)
         calls = {}
 
         class _FakeSessionCls:
             def __init__(self, exe, log=None, page_timeout_s=45.0,
-                         profile_dir=None, persist=True):
+                         profile_dir=None, persist=True,
+                         extra_flags=None, real_profile=False):
                 calls['profile_dir'] = profile_dir
                 calls['persist'] = persist
+                calls['extra_flags'] = list(extra_flags or [])
                 self.port = 1
 
             def new_tab(self, url):
@@ -1026,6 +1030,9 @@ class TestProfilePlumbing(unittest.TestCase):
                 profile_dir='/tmp/somewhere', persist=False)
         self.assertEqual(calls['profile_dir'], '/tmp/somewhere')
         self.assertFalse(calls['persist'])
+        # v0.55 — the direct leg's own flag rides the argv (TRULY off,
+        # even where the OS has a system proxy set)
+        self.assertEqual(calls['extra_flags'], ['--no-proxy-server'])
         # and the defaults flow too (persist on, dir auto)
         calls.clear()
         with mock.patch.object(ct, 'ChromeSession', _FakeSessionCls):
@@ -1033,6 +1040,7 @@ class TestProfilePlumbing(unittest.TestCase):
                 [_URL], log=lambda *a: None, chrome_exe='/bin/true')
         self.assertIsNone(calls['profile_dir'])
         self.assertTrue(calls['persist'])
+        self.assertEqual(calls['extra_flags'], ['--no-proxy-server'])
 
     def test_the_knob_names_are_the_config_example_names(self):
         root = os.path.dirname(os.path.dirname(
@@ -1075,11 +1083,11 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0540(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.54.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.55.0')
 
     def test_changelog_has_the_v054_beat(self):
         text = self._read('CHANGELOG.md')
-        self.assertIn('## [0.54.0]', text)
+        self.assertIn('## [0.55.0]', text)
         self.assertIn('opening is not the success', text.lower())
         self.assertIn('profile', text.lower())
 
@@ -1093,7 +1101,9 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_ci_counts_this_module(self):
         text = self._read('.github', 'workflows', 'ci.yml')
-        self.assertIn('test_persistentdoor -v', text)
+        # v0.55 — the module rides the unittest line (test_realdoor
+        # now closes the -v tail; the presence is the law)
+        self.assertIn('tests.test_persistentdoor', text)
 
     def test_the_older_release_pins_follow(self):
         # the established convention: the previous releases' bookkeeping
@@ -1103,8 +1113,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
                     'test_decommission', 'test_reviewtable',
                     'test_mastertable', 'test_autopip', 'test_fifthdoor'):
             src = self._read('app', 'tests', f'{mod}.py')
-            self.assertIn("'0.54.0'", src,
-                          f'{mod} did not re-pin to 0.54.0')
+            self.assertIn("'0.55.0'", src,
+                          f'{mod} did not re-pin to 0.55.0')
 
 
 if __name__ == '__main__':

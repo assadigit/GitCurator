@@ -1613,6 +1613,13 @@ class UiMixin:
         # with failures.
         more_menu.addAction("🤖 Chrome tab-retry failed links",
                             self.chrome_tab_retry_now)
+        # v0.55.0 — the owner's own Chrome: restart it WITH its DevTools
+        # port open so the fifth door drives HIS instance — his profile,
+        # his cookies, his logins; the tabs land in his window and the
+        # door never closes his browser. The one-time setup (his
+        # explicit OK; his tabs come back).
+        more_menu.addAction("🪄 Attach to my Chrome",
+                            self.attach_my_chrome_now)
         self.backup_export_btn = more_menu.addAction("📤 Export Backup ZIP")
         self.backup_export_btn.triggered.connect(self._backup_export_zip)
         more_menu.addSeparator()

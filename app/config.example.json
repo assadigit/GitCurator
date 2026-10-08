@@ -71,6 +71,10 @@
   "web_browser_retry_wave": 8,
   "web_browser_profile_persist": true,
   "web_browser_profile_dir": "",
+  "web_browser_attach": true,
+  "web_browser_attach_port": 9222,
+  "web_browser_real_profile": true,
+  "web_browser_proxy": "auto",
   "web_blocked_domains": [
     "x.com",
     "twitter.com",

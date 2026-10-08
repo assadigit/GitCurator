@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1512-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1579-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -11,7 +11,38 @@
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
-# 30 masterretry + 44 persistentdoor).
+# 30 masterretry + 44 persistentdoor + 67 realdoor).
+# v0.55.0 — THE OWNER'S OWN WINDOW; THE RIGHT ROUTE: the owner's
+# report — "it still says under bot challenge. only 1 site (from 4
+# test sites) appeared, but app didn't even succeed to fetch it and
+# generate content for it … the system must be able to open tabs in
+# my real chrome instance instead, also the app must automatically
+# open them with proxy on and off, because some sites needed proxy,
+# while some didn't need and proxy caused problems" — the dedicated
+# identity is honest but a STRANGER (no clearances, no logins, and
+# whatever network path the OS handed it), and the one page that
+# visibly loaded was called a challenge anyway (the verdict's HTML
+# markers fire on pages that merely EMBED a challenge widget). Now:
+# (1) ATTACH — a DevTools port that answers (web_browser_attach_port,
+# default 9222) is driven AS IS: the tabs open in the OWNER'S own
+# window (his profile, his cookies, his logins, his network path) and
+# the door NEVER closes his browser (only its own tabs; the
+# chrome-attach.bat the app writes + More > Attach to my Chrome is
+# the one-time setup, junction-past Chrome 136+'s default-profile
+# guard); when his Chrome is closed the door launches HIS real
+# profile through that same attach link; (2) THE RIGHT ROUTE — the
+# door's own launches ride two legs, direct first
+# (--no-proxy-server — the residential line the challenges like)
+# then the owner's configured proxy (--proxy-server=socks5://… — the
+# route the censored domains need), a first-leg failure retried on
+# the second IN the same delivery, and every site REMEMBERS the
+# route that delivered (chrome-proxy-memory.json, one line of truth
+# per domain); (3) THE VERDICT'S HONESTY — a page with real CONTENT
+# that carries a challenge marker EMBEDS a widget (a Turnstile in a
+# login form) and is the SITE, not the wall; the weak title words
+# ('blocked', 'access denied') only count on an interstitial's
+# short, few-word title. 67 cases join in tests/test_realdoor.py
+# (1579).
 # v0.54.0 — THE DOOR KEEPS ITS GRIP; THE PROFILE REMEMBERS: the
 # owner's report — "the links which I defined by 'hand' emoji opened
 # their tabs in a new google chrome session, but app didn't actually
@@ -435,7 +466,7 @@ jobs:
           gitcurator/core/netctx.py
 
       - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor -v
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor tests.test_realdoor -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -446,4 +477,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1512 tests + worker 50 + offline golden run (v0.54.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1579 tests + worker 50 + offline golden run (v0.55.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
