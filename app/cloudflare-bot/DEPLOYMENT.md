@@ -5,6 +5,53 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.56.0 deploy record — the unchanged 0.30.0 worker, live and verified (LIVE ✅ · ritual awaits the token)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (the 217d4ad9 deployment — v0.56.0 is a DESKTOP-ONLY release:
+> the hand's harvest — a delivered 🖐 row retires to the green
+> checkbox `✅ hand-delivered — fetched <date>`, its half-fetched
+> `_review` items are swept, and the pipeline's two gates learn to
+> finish what the hand asks, all desktop code in
+> `gitcurator/core/hand_delivery.py`,
+> `gitcurator/core/website_pipeline.py` and the bookkeeping that
+> rides `refresh_master_table`). The Worker's code is unchanged
+> since v0.30.0 — `git diff v0.55.0..v0.56.0 -- app/cloudflare-bot/
+> src/` is EMPTY — so the live deployment IS the v0.56.0 worker,
+> byte for byte.
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ · root → `200` in 0.33 s ✓ (the queue consumers/producers and
+> the four persisted secrets — BOT_TOKEN, GITHUB_PAT,
+> ALLOWED_USER_IDS, HMAC_SECRET — were verified at the 217d4ad9
+> deploy and nothing has been redeployed since).
+>
+> **The re-deploy ritual (the no-op parity check) still awaits the
+> owner's `CLOUDFLARE_API_TOKEN`** — the token from the earlier
+> sessions did not survive the context hand-offs (only its
+> `cfut_3RMK…` prefix). With the token in hand:
+> `CLOUDFLARE_API_TOKEN=… npx wrangler deploy` from
+> `app/cloudflare-bot/` → a fresh version ID over identical code,
+> then `wrangler secret list` + `queues info curator-ingest` to
+> re-confirm what the live checks above already show. Functionally
+> a no-op — the v0.53.0/v0.55.0 records set this exact precedent.
+>
+> Desktop release v0.56.0 (GitCurator-v0.56.0-windows.zip, 129
+> files, 1,051,415 bytes, sha256
+> `11595ddd46bf73a7119a976dd060a782c21422a4e1c64b54adeadb30441b4fe7`,
+> download round-trip byte-identical) + CI green on the v0.56.0 tag
+> AND main (runs 37774926290 / 37774923528 — 1623 tests, 85-module
+> compile gate, offline golden 30/30; the first tag run failed on
+> a gate the release ritual cannot satisfy at tag time — a
+> deployment-record assertion for a record that is by house ritual
+> a post-release main commit — fixed forward by pinning the door's
+> API contract instead and re-pointing the tag before any release
+> was minted).
+
+---
+
 ## 📦 v0.55.0 deploy record — the unchanged 0.30.0 worker, live and verified (LIVE ✅ · ritual awaits the token)
 
 > **Live in production** at
