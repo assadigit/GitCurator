@@ -1049,13 +1049,38 @@ def cmd_chrome_retry(args) -> int:
                                     "table")})
     except Exception as _e:
         cli_print(f"⚠️ Hand-row scan skipped: {_e}", "warning")
+    # v0.57.0 — THE NOTE IS THE SUCCESS, the redo set: 🖐 hand links
+    # whose page was already delivered (a consumed queue row or the
+    # file in the folder) but whose note is NOT properly stored (the
+    # false-success classes — half-fetched _review items, missing
+    # files). They ride the re-run directly: no new Chrome tab (the
+    # delivered page is the record, the pipeline re-reads it), the
+    # LLM asked again for the proper, categorized note. Computed
+    # BEFORE the empty check — a redo set alone is work too.
+    redo_urls: list = []
+    try:
+        _redo_state = _wp.WebsiteStateDB(_db_file) \
+            if os.path.exists(_db_file) else _wp.WebsiteStateDB()
+        try:
+            redo_urls = [r.get("url") for r in
+                         _wp.scan_master_redo_rows(vault, state=_redo_state)
+                         if r.get("url")]
+        finally:
+            _redo_state.close()
+    except Exception as _e:
+        cli_print(f"⚠️ Redo scan skipped: {_e}", "warning")
     print(paint("Failed links waiting for the fifth door "
                 "(your real Chrome, one tab each)", C.BOLD))
     print(rule())
-    if not links:
-        print(paint("  ✓ empty — no fetch-failed link is waiting.",
-                    C.GREEN))
+    if not links and not redo_urls:
+        print(paint("  ✓ empty — no fetch-failed link is waiting, no "
+                    "hand note needs a redo.", C.GREEN))
         return 0
+    if redo_urls:
+        print(paint("  🔁 redo — hand note(s) not properly stored:",
+                    C.YELLOW))
+        for u in redo_urls:
+            print(f"      {paint(u, C.DIM)}")
     for l in links:
         err = (l.get("error") or "")[:100]
         print(f"  {paint('•', C.YELLOW)} {l['url']}")
@@ -1084,15 +1109,29 @@ def cmd_chrome_retry(args) -> int:
     first_errs = "; ".join(
         str(f.get("error") or "")[:90]
         for f in failed_links[:3] if f.get("error"))
-    if not delivered:
+    if not delivered and not redo_urls:
         cli_print(f"🤖 The fifth door delivered nothing — {failed} "
                   f"tab(s) failed"
                   + (f" ({first_errs})" if first_errs else "")
                   + "; the links keep waiting.", "warning")
         return 1
-    cli_print(f"🤖 {len(delivered)} page(s) delivered from your real "
-              f"Chrome — processing them now as real fetches…", "success")
-    rc = run_batch_visual(cfg, "direct", urls=delivered,
+    _reprocess = delivered + [u for u in redo_urls
+                              if u not in delivered]
+    if delivered:
+        cli_print(f"🤖 {len(delivered)} page(s) delivered from your real "
+                  f"Chrome — processing them now through the Websites "
+                  f"pipeline as real fetches…", "success")
+    if redo_urls:
+        cli_print(f"🔁 {len(redo_urls)} hand note(s) not properly stored — "
+                  f"re-generating them from the delivered pages (the LLM "
+                  f"writes the proper, categorized notes)", "info")
+    # v0.57.0 — THE ROUTING FIX: the delivered pages are WEBSITE links
+    # and ride the batch as ``non_github`` (the Websites pipeline),
+    # never as GitHub urls — the old 'direct' call fed them to the
+    # GitHub loop, which skipped every one as "non-GitHub URL" while
+    # the log told its ✅ story and no note was ever written.
+    rc = run_batch_visual(cfg, "direct", urls=[],
+                          non_github=_reprocess,
                           bot_source=False, vault_arg=args.vault,
                           dry_run=bool(getattr(args, "dry_run", False)))
     if failed:

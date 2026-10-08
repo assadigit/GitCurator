@@ -856,6 +856,96 @@ def scan_master_hand_rows(vault_path: str,
     return out
 
 
+def scan_master_redo_rows(vault_path: str, state=None,
+                          log: Optional[Callable] = None) -> List[Dict]:
+    """v0.57.0 — THE NOTE IS THE SUCCESS, the redo scan: the 🖐 hand
+    rows whose delivery was a FALSE SUCCESS — the page was delivered
+    (a queue.json entry consumed, or its page file sitting in the
+    hand-delivered folder) but the note never became a proper,
+    categorized note in the vault
+    (:func:`note_is_properly_stored` fails: no state row, a failed
+    fetch, a half-fetched ``_review`` item, a file missing on disk, a
+    note that is not the app's own for this link).
+
+    The owner's report (session, verbatim): "the app must refetch and
+    generate notes, if they notes aren't properly stored … it's
+    fetched and became ✅ in the table, but actually it's note is not
+    properly saved and only saved under _review folder, so it's false
+    success and must be redo." This scan IS the redo set — every row
+    here is owed another pass through the full pipeline (the delivered
+    page re-read in place by :func:`take_hand_delivered`'s
+    ``allow_consumed`` — no new Chrome tab, the LLM asked again, the
+    note rebuilt).
+
+    Which rows qualify:
+
+      * the combined gesture reads HAND, no stronger verdict
+        outranks it (dead / reviewed / revived — the precedence law);
+      * the link's delivery HAPPENED (queue row consumed or the
+        suggested page file exists) — an un-delivered hand row is the
+        Chrome pass's set (:func:`scan_master_hand_rows`), never the
+        redo's;
+      * the state ledger says the note is NOT properly stored
+        (``state=None`` degrades honestly: nothing can be proven
+        false, so nothing is redone — the hermetic law; a broken
+        probe answers the same).
+
+    Returns ``[{'url', 'reason'}]`` in the table's row order, deduped
+    by canonical URL (first row wins). Pure file + state reads; never
+    raises on a hand-edited table."""
+    out: List[Dict] = []
+    log = log or (lambda *a, **k: None)
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return out
+    if state is None:
+        return out        # nothing can be proven false — the hermetic law
+    delivered: set = set()
+    folder = ''
+    try:
+        from gitcurator.core import hand_delivery as _hd
+        queue = _hd._read_queue(vault_path)
+        folder = _hd.hand_delivery_dir(vault_path)
+        for url, meta in (queue.get('links') or {}).items():
+            suggested = (meta or {}).get('suggested') \
+                or _hd.suggested_filename(url)
+            page_landed = os.path.isfile(os.path.join(folder, suggested))
+            if (meta or {}).get('consumed') or page_landed:
+                delivered.add(normalize_website_url(url))
+    except Exception:
+        delivered = set()   # a broken queue never hides a false success
+    seen: set = set()
+    try:
+        for row in _parse_decommission_rows(path):
+            s = row['status']
+            if _status_is_dead(s) or _status_is_reviewed(s) \
+                    or _status_is_revived(s):
+                continue
+            if not _hand_delivery._status_is_hand(s):
+                continue
+            canonical = normalize_website_url(row['url'])
+            if not canonical or canonical in seen:
+                continue
+            if canonical not in delivered:
+                continue    # no delivery yet — the Chrome pass's set
+            try:
+                if state.is_dismissed(canonical):
+                    continue    # retired rows are the verdicts' business
+                prior = state.processed_row(canonical)
+            except Exception:
+                continue    # a broken probe redoes nothing
+            proper, why = note_is_properly_stored(prior)
+            if proper:
+                continue    # the note IS properly stored — done, honestly
+            seen.add(canonical)
+            out.append({'url': canonical,
+                        'reason': why or 'the note is not properly stored'})
+    except Exception as e:
+        log(f"⚠️ Redo scan skipped: {e}", "warning")
+        return out
+    return out
+
+
 def scan_decommission_table(vault_path: str) -> Dict[str, str]:
     """v0.44.0 — read the owner's burial decisions.
 
@@ -1218,6 +1308,59 @@ def _same_source(source: str, canonical: str) -> bool:
         return False
 
 
+def note_is_properly_stored(prior: Optional[Dict]) -> (bool, str):
+    """v0.57.0 — THE NOTE IS THE SUCCESS, the test: does a state row's
+    note amount to a PROPER, CATEGORIZED note in the vault?
+
+    The owner's report (session, verbatim): "For example websiteX has
+    hand emoji. and it's fetched and became ✅ in the table, but
+    actually it's note is not properly saved and only saved under
+    _review folder, so it's false success and must be redo." A ✅ may
+    only ever mean the note ITSELF is properly stored, so every
+    half-fetched shape fails the test — each with its own one-line
+    reason (the redo pass and the logs tell it):
+
+      * no state row, or fetch_status ``failed`` — the wall's
+        placeholder story, never a note;
+      * the note path under ``_review`` — a half-fetched item (low
+        confidence, partial, an analysis failure), waiting for eyes;
+      * the file missing on disk — a note the state remembers but the
+        vault no longer carries (deleted, moved, a vault switch);
+      * frontmatter that is not the app's own note FOR THIS link — a
+        same-named stranger is not a delivery.
+
+    Pure; never raises (anything unreadable is simply not proper)."""
+    try:
+        if not prior:
+            return False, 'no processed row — the note never landed'
+        if str(prior.get('fetch_status') or '') == 'failed':
+            return False, 'the row records a failed fetch'
+        path = str(prior.get('note_path') or '').replace('\\', '/')
+        if not path:
+            return False, 'no note path recorded'
+        if '/_review/' in f'/{path.strip("/")}/':
+            return False, 'the note is half-fetched in _review'
+        if not os.path.isfile(path):
+            return False, 'the note file is missing on disk'
+        fm = _parse_review_frontmatter(path)
+        if not fm or str(fm.get('managed_by') or '').lower() \
+                != MANAGED_BY_GITCURATOR:
+            return False, 'the note is not app-owned'
+        source = str(fm.get('source') or '').strip()
+        if not source:
+            return False, 'the note carries no source link'
+        try:
+            own = normalize_website_url(
+                str(prior.get('url') or prior.get('canonical') or ''))
+        except Exception:
+            own = ''
+        if own and normalize_website_url(source) != own:
+            return False, 'the note belongs to another link'
+        return True, ''
+    except Exception:
+        return False, 'the note could not be verified'
+
+
 def harvest_hand_rows(state, vault_path: str,
                       log: Optional[Callable] = None) -> int:
     """v0.56.0 — THE HAND'S HARVEST, the catch-up pass: a 🖐 row whose
@@ -1230,7 +1373,15 @@ def harvest_hand_rows(state, vault_path: str,
     the vault. The state probe is optional (the hermetic law) and a
     broken probe harvests nothing (the same law as
     :func:`stamp_stored_rows`); owner-set verdicts stronger than the
-    gesture are never touched (the precedence law). Returns rows
+    gesture are never touched (the precedence law).
+
+    v0.57.0 — THE NOTE IS THE SUCCESS: the "already stored" test is
+    :func:`note_is_properly_stored` — the ✅ is only earned when the
+    note is ON DISK, app-owned, for THIS link, outside ``_review``.
+    A state row pointing at a half-fetched ``_review`` item, or at a
+    file the vault no longer carries, is a FALSE success — the row
+    keeps its gesture and joins the redo pass
+    (:func:`scan_master_redo_rows`) instead. Returns rows
     harvested."""
     log = log or (lambda *a, **k: None)
     path = decommission_table_path(vault_path)
@@ -1254,12 +1405,9 @@ def harvest_hand_rows(state, vault_path: str,
                 prior = state.processed_row(canonical)
             except Exception:
                 continue    # a broken probe harvests nothing
-            if prior is None:
-                continue
-            if prior.get('fetch_status') == 'failed':
-                continue    # the placeholder story — still waiting
-            if '_review' in str(prior.get('note_path') or '').replace('\\', '/'):
-                continue    # a _review note waits for human eyes
+            proper, _why = note_is_properly_stored(prior)
+            if prior is None or not proper:
+                continue    # no proper, categorized note — no harvest
             retired.append(canonical)
     except Exception as e:
         log(f"⚠️ Hand-harvest scan skipped: {e}", "warning")
@@ -2290,7 +2438,8 @@ class WebsitePipeline:
             return False
         return False
 
-    def _harvest_hand_row(self, canonical: str, note_path: str) -> None:
+    def _harvest_hand_row(self, canonical: str, note_path: str,
+                          fetch_status: str = 'full') -> None:
         """v0.56.0 — THE HAND'S HARVEST, the delivery-time half: a
         link whose master-table row carries the 🖐 gesture just landed
         a PROPER, categorized note (this is the only caller — the
@@ -2300,10 +2449,29 @@ class WebsitePipeline:
         and every app-owned half-fetched ``_review`` item for this
         source is swept (:func:`sweep_review_leftovers`). Never
         raises; never a gate — a link without the gesture simply
-        keeps the waiting family's laws (``📁 stored`` and friends)."""
+        keeps the waiting family's laws (``📁 stored`` and friends).
+
+        v0.57.0 — THE NOTE IS THE SUCCESS: the stamp itself is EARNED
+        by :func:`note_is_properly_stored` (the note on disk, the
+        app's own, for THIS link, outside ``_review``) — a write that
+        cannot be proven proper leaves the gesture in place for the
+        redo pass instead of a green checkbox over a half-fetched
+        item (the owner's "false success" law)."""
         if not self.vault_path or not canonical:
             return
         if not self._row_reads_hand(canonical):
+            return
+        try:
+            proper, _why = note_is_properly_stored(
+                {'url': canonical, 'note_path': note_path,
+                 'fetch_status': fetch_status})
+        except Exception:
+            proper = False
+        if not proper:
+            self.log(f"🖐 [{self._vault_name}] {canonical}: the note could "
+                     f"not be proven properly stored — the row keeps its "
+                     f"gesture (the redo pass asks the LLM again; a ✅ is "
+                     f"only earned by the note itself)", "warning")
             return
         stamped = 0
         try:
@@ -2531,11 +2699,18 @@ class WebsitePipeline:
         # <vault>/_review/hand-delivered/) IS the fetch — the machine
         # doors are never asked, the story rides in the reason, the
         # queued file is consumed (kept in place — it is the record).
+        # v0.57.0 — THE NOTE IS THE SUCCESS, the redo-consume: a link
+        # whose row carries the 🖐 gesture may re-read an ALREADY
+        # CONSUMED page (the false-success redo — the delivered page is
+        # the record, the LLM is asked again for the proper, categorized
+        # note; a link with a proper note never reaches this step — the
+        # dedupe gate answers first).
         fetch = None
         if self.hand_delivery:
             try:
                 fetch = _hand_delivery.take_hand_delivered(
-                    self.vault_path, canonical, log=self.log)
+                    self.vault_path, canonical, log=self.log,
+                    allow_consumed=_hand_gesture)
             except Exception as e:
                 self.log(f"⚠️ Hand-delivery check skipped: {e}", "warning")
         if fetch is None:
@@ -2670,8 +2845,18 @@ class WebsitePipeline:
                               fetch_status=fetch_status)
                 self.counters['review'] += 1
                 self.last_results.append(result)
+                # v0.57.0 — THE NOTE IS THE SUCCESS: for a 🖐 hand link
+                # this is NOT a success — the note is half-fetched, so
+                # the row keeps its gesture and the redo pass
+                # (scan_master_redo_rows) asks the LLM again. The log
+                # says so instead of letting a delivery's earlier ✅
+                # lines tell a false story (the owner's law).
                 self.log(f"🗂️ [{self._vault_name}] {url}: {reason} — filed "
-                         "under _review", "warning")
+                         "under _review"
+                         + (" — NOT properly stored yet: the 🖐 row keeps "
+                            "its gesture and the redo pass will re-read the "
+                            "delivered page and ask the LLM again"
+                            if _hand_gesture else ""), "warning")
                 return result
 
             subcategory, conf2 = self._classify_subcategory(
@@ -2699,6 +2884,14 @@ class WebsitePipeline:
                           fetch_status=fetch_status)
             self.counters['review'] += 1
             self.last_results.append(result)
+            # v0.57.0 — the redo story for a 🖐 hand link (the note is
+            # half-fetched; the redo pass asks the LLM again)
+            if _hand_gesture:
+                self.log(f"🗂️ [{self._vault_name}] {url}: analysis failed — "
+                         "filed under _review — NOT properly stored yet: "
+                         "the 🖐 row keeps its gesture and the redo pass "
+                         "will re-read the delivered page and ask the LLM "
+                         "again", "warning")
             return result
 
         # ---- 7. build & write ------------------------------------------------
@@ -2728,7 +2921,8 @@ class WebsitePipeline:
         # _review leftovers are swept. Tolerated everywhere: the
         # harvest never breaks a delivery.
         try:
-            self._harvest_hand_row(canonical, path)
+            self._harvest_hand_row(canonical, path,
+                                   fetch_status=fetch_status)
         except Exception as e:
             self.log(f"⚠️ Hand harvest skipped for {url}: {e}", "warning")
 
