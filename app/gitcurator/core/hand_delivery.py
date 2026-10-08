@@ -751,6 +751,92 @@ def stamp_hand_rows(vault_path: str, urls: List[str],
     return stamped
 
 
+def stamp_hand_delivered_rows(vault_path: str, urls: List[str],
+                              log: Optional[Callable] = None) -> int:
+    """v0.56.0 — THE HAND'S HARVEST: retire the 🖐 gesture into the
+    green checkbox when its link's PROPER note has landed.
+
+    The owner's report (session, verbatim): "when newly fetched
+    website with hand (🖐) are fetched and stored correctly, the
+    system must automatically turn the hand emoji to green checkbox
+    and remove their half-fetched items from _review, because now
+    they have A Proper and categorized note."
+
+    Only a row whose Status still reads HAND
+    (:func:`_status_is_hand`, with death / reviewed / revived winning
+    first — the table's precedence law) is rewritten, to
+    `` ✅ hand-delivered — fetched <date> `` — the table's own success
+    verdict, so the retired row never waits, never re-queues, never
+    asks the fifth door for a tab again. URLs are matched by their
+    canonical form (the table's hand-edited cells keep whatever shape
+    the owner typed). Pure file edit, atomic + dry-run aware (the
+    house table-writer law); never raises. Returns rows retired."""
+    log = log or (lambda *a, **k: None)
+    from gitcurator.core.website_pipeline import (
+        decommission_table_path, _parse_decommission_rows,
+        normalize_website_url, _status_is_dead, _status_is_reviewed,
+        _status_is_revived)
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return 0
+    wanted = set()
+    for u in (urls or []):
+        try:
+            c = normalize_website_url(u)
+            if c:
+                wanted.add(c)
+        except Exception:
+            wanted.add(str(u or ''))
+    if not wanted:
+        return 0
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+        rows = _parse_decommission_rows(path)
+    except Exception as e:
+        log(f"⚠️ Hand-harvest stamp skipped — the table could not be "
+            f"read: {e}", "warning")
+        return 0
+    date_str = time.strftime('%Y-%m-%d')
+    stamped = 0
+    for row in rows:
+        try:
+            canonical = normalize_website_url(row['url'])
+        except Exception:
+            canonical = row['url']
+        if canonical not in wanted and row['url'] not in wanted:
+            continue
+        s = row['status']
+        if _status_is_dead(s) or _status_is_reviewed(s) \
+                or _status_is_revived(s):
+            continue    # a stronger verdict owns the cell — never touched
+        if not _status_is_hand(s):
+            continue    # not the gesture — the waiting family's writers
+                        # ('📁 stored', stamp_stored_rows) own that row
+        parts = row['raw'].split('|')
+        if len(parts) < 8:
+            continue
+        parts[6] = f" ✅ hand-delivered — fetched {date_str} "
+        lines[row['line']] = '|'.join(parts)
+        stamped += 1
+    if not stamped:
+        return 0
+    now = time.strftime('%Y-%m-%d %H:%M')
+    lines = [f"> Last updated: {now}"
+             if line.startswith('> Last updated:') else line
+             for line in lines]
+    try:
+        atomic_write_text(path, '\n'.join(lines).rstrip('\n') + '\n')
+    except Exception as e:
+        log(f"⚠️ Hand-harvest stamp could not be written: {e}",
+            "warning")
+        return 0
+    log(f"✅ {stamped} hand row(s) retired to the green checkbox "
+        f"(✅ hand-delivered) — their proper, categorized notes are "
+        f"in the vault", "info")
+    return stamped
+
+
 __all__ = [
     'HAND_FOLDER_NAME', 'QUEUE_FILENAME', 'README_FILENAME',
     'HAND_MARKERS', 'WALL_MARKERS',
@@ -759,5 +845,5 @@ __all__ = [
     'enqueue_hand_delivery', 'find_chrome', 'open_in_chrome',
     'collect_delivered', 'consume_delivered', 'hand_fetch_result',
     'take_hand_delivered', 'pending_hand_links', '_status_is_hand',
-    'stamp_hand_rows',
+    'stamp_hand_rows', 'stamp_hand_delivered_rows',
 ]

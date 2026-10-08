@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1579-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1623-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -11,7 +11,30 @@
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
-# 30 masterretry + 44 persistentdoor + 67 realdoor).
+# 30 masterretry + 44 persistentdoor + 67 realdoor + 44 handharvest).
+# v0.56.0 — THE HAND'S HARVEST: the owner's report — "New update:
+# when newly fetched website with hand (🖐) are fetched and stored
+# correctly, the system must automatically turn the hand emoji to
+# green checkbox and remove their half-fetched items from _review,
+# because now they have A Proper and categorized note" — the gesture
+# had no ending: a delivered hand row sat 🖐 forever (the truth stamp
+# never touches owner verdicts) while its half-fetched _review items
+# coexisted with the proper note. Now three laws close the loop:
+# (1) THE STAMP — when the proper, categorized note lands (or has
+# landed: the catch-up rides every batch's table refresh), the row's
+# Status retires to " ✅ hand-delivered — fetched <date> ", a final
+# green-checkmark verdict every scanner already obeys; (2) THE SWEEP —
+# every app-owned _review item for the source (the failed placeholder,
+# the low-confidence note, the partial — the "half-fetched items") is
+# removed the moment the proper note exists, a hand-written note kept
+# with a warning (the managed_by frontmatter law); (3) THE FINISH — a
+# 🖐 link parked in _review with a NON-failed note is no longer
+# "already in the websites vault" (the gesture asks the doors to
+# complete it), and a burned-out retry counter reborns for the hand
+# (or a delivered page waiting in the folder) — the owner's exact flow
+# (walled → 🖐 → the fifth door delivers → the note stores → the row
+# retires → the placeholder sweeps) completes end to end. 44 cases
+# join in tests/test_handharvest.py (1623).
 # v0.55.0 — THE OWNER'S OWN WINDOW; THE RIGHT ROUTE: the owner's
 # report — "it still says under bot challenge. only 1 site (from 4
 # test sites) appeared, but app didn't even succeed to fetch it and
@@ -466,7 +489,7 @@ jobs:
           gitcurator/core/netctx.py
 
       - name: Run the test suite (core + e2e + goodrepos + reliability + quarantine + phase0 + phase1 + phase2 + phase3 + phase4 + phase5 + packaging + llamacpp + phase6 + connection + detectset + webproxy + intakefix + sealfix + v0230 + refactor_surface + swotfix + socialomit + resyncfix + reconfix + batchfinish + soundsettings + reviewretry + bothdoors + decommission + thirddoor + ladder + handdelivery + reviewtable + fifthdoor + masterretry)
-        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor tests.test_realdoor -v
+        run: python -m unittest tests.test_core tests.test_e2e tests.test_goodrepos tests.test_reliability tests.test_quarantine tests.test_phase0 tests.test_phase1 tests.test_phase2 tests.test_phase3 tests.test_phase4 tests.test_phase5 tests.test_packaging tests.test_llamacpp tests.test_phase6 tests.test_connection tests.test_detectset tests.test_webproxy tests.test_intakefix tests.test_sealfix tests.test_v0230 tests.test_refactor_surface tests.test_websitesqueuefix tests.test_swotfix tests.test_webnote_v2 tests.test_lawfix tests.test_importbatch tests.test_socialomit tests.test_resyncfix tests.test_reconfix tests.test_batchfinish tests.test_soundsettings tests.test_reviewretry tests.test_bothdoors tests.test_decommission tests.test_thirddoor tests.test_ladder tests.test_autopip tests.test_mastertable tests.test_handdelivery tests.test_reviewtable tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn tests.test_persistentdoor tests.test_realdoor tests.test_handharvest -v
 
       - name: Offline golden-set run (websites pipeline, no network)
         run: python gitcurator/tools/run_golden_websites.py --offline
@@ -477,4 +500,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1579 tests + worker 50 + offline golden run (v0.55.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1623 tests + worker 50 + offline golden run (v0.56.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

@@ -1578,7 +1578,7 @@ def write_chrome_attach_bat(path: str,
             return None
         lines = [
             '@echo off',
-            'REM GitCurator v0.55.0 - attach the fifth door to YOUR Chrome',
+            'REM GitCurator v0.56.0 - attach the fifth door to YOUR Chrome',
             'REM (restarts Chrome with its DevTools port open; your tabs',
             'REM  come back; GitCurator closes only ITS OWN tabs; to undo,',
             'REM  just relaunch Chrome normally)',

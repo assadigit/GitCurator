@@ -35,18 +35,19 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
   tests.test_thirddoor tests.test_ladder tests.test_autopip \
   tests.test_mastertable tests.test_handdelivery tests.test_reviewtable \
   tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn \
-  tests.test_persistentdoor tests.test_realdoor
+  tests.test_persistentdoor tests.test_realdoor tests.test_handharvest
 ```
 
 That exact module list lives in `.github/workflows/ci.yml` (also: the
 compile step of the audited modules and the offline golden run —
 `python gitcurator/tools/run_golden_websites.py --offline`). The suite is
-**1579 tests, zero network** (v0.55.0; tests.test_reviewretry,
+**1623 tests, zero network** (v0.56.0; tests.test_reviewretry,
 tests.test_bothdoors, tests.test_decommission, tests.test_thirddoor,
 tests.test_ladder, tests.test_autopip, tests.test_mastertable,
 tests.test_handdelivery, tests.test_reviewtable, tests.test_fifthdoor,
 tests.test_masterretry, tests.test_iconcolumn,
-tests.test_persistentdoor and tests.test_realdoor are pure stdlib —
+tests.test_persistentdoor, tests.test_realdoor and
+tests.test_handharvest are pure stdlib —
 they run even where the Qt-importing modules cannot). New modules
 go into the CI compile list; new
 test modules into the unittest line. Version bumps: `VERSION` file +
@@ -56,7 +57,7 @@ test modules into the unittest line. Version bumps: `VERSION` file +
 
 | Area | What lives there |
 |---|---|
-| `core/` | Pure-stdlib, no-Qt pipeline logic: `links` (URL routing/identity), `storage` (atomic writes), `note_builder`, `llm_client` (Ollama/llama.cpp/cloud), `website_pipeline` (+ `website_state`), `note_state` (moves-as-corrections), `taxonomy`, `web_fetch`/`web_extract`, `hand_delivery` (the fourth door — pages saved by the owner's hand), `chrome_tabs` (the fifth door — the automatic real-Chrome tab retry, raw-socket CDP; v0.55: ATTACH to the owner's own Chrome via its DevTools port, his real profile through the attach link, the proxy legs with the per-site route memory), `mirror`, `linking`/`embeddings`/`recall` (Phase 6), `connection_check`, `dryrun` |
+| `core/` | Pure-stdlib, no-Qt pipeline logic: `links` (URL routing/identity), `storage` (atomic writes), `note_builder`, `llm_client` (Ollama/llama.cpp/cloud), `website_pipeline` (+ `website_state`), `note_state` (moves-as-corrections), `taxonomy`, `web_fetch`/`web_extract`, `hand_delivery` (the fourth door — pages saved by the owner's hand; v0.56: the HARVEST — a delivered 🖐 row retires to `✅ hand-delivered` and its half-fetched `_review` items are swept), `chrome_tabs` (the fifth door — the automatic real-Chrome tab retry, raw-socket CDP; v0.55: ATTACH to the owner's own Chrome via its DevTools port, his real profile through the attach link, the proxy legs with the per-site route memory), `mirror`, `linking`/`embeddings`/`recall` (Phase 6), `connection_check`, `dryrun` |
 | `integrations/` | Outside world: `telegram_fetch_worker` (Telethon subprocess), `telethon_fetcher`, `subprocess_runner`, `vaultseal` (private backups), `goodrepos` (public directory), `backfill_manager`, `error_reporter` |
 | `gui/` | PyQt6 app: `app.py` is the **facade** (every old import path still works — keep it that way); `processing_worker.py` (the batch worker + `gui/worker/` mixins), `worker_jobs`, `dialogs`, `headless`; `main_window/` = `window.py` shell + domain mixins (theme, ui, bot_queue, backup_seal, …) |
 | `cloud/` | Desktop↔Worker sync (`cloudflare_sync` — used by backfill_manager) + dormant GDrive/Cloudflare helpers (`cloudflare_manager`, `cloudflare_gui`, `gdrive_backup`, `gdrive_gui` — **kept, not deleted, by owner decision "fixed, not deleted"**; nothing wires them into the UI today) |
