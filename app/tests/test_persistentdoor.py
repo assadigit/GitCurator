@@ -385,8 +385,16 @@ class TestPersistentProfile(unittest.TestCase):
                     break
                 time.sleep(0.1)
             self.assertIsNotNone(session.proc.poll())  # the handoff
-            # …and the session is still ALIVE (the endpoint answers)
-            self.assertTrue(session.alive())
+            # …and the session is still ALIVE (the endpoint answers).
+            # v0.55 — one transient retry: a loaded CI runner can
+            # starve the loopback server for a beat (the 2026-10-08
+            # tag-run flake); the LAW is the endpoint's answer, and a
+            # busy server still answers on the second knock.
+            ok = session.alive()
+            if not ok:
+                time.sleep(0.5)
+                ok = session.alive()
+            self.assertTrue(ok)
         finally:
             session.close()
 
