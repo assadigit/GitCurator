@@ -1,3 +1,98 @@
+## [0.55.0] — The owner's own window; the right route — 2026-10-08
+
+Owner ask (session): "it still says under bot challenge. only 1 site
+(from 4 test sites) appeared, but app didn't even succeed to fetch
+it and generate content for it. if you think it could help
+circumvent the bot detection method, the system must be able to open
+tabs in my real chrome instance instead, also the app must
+automatically open them with proxy on and off, because some sites
+needed proxy, while some didn't need and proxy caused problems."
+Desktop release v0.55.0, Worker unchanged at **0.30.0** (it never
+touches the vault). Suite grows **1512 → 1579** (67 cases join
+tests/test_realdoor.py — pure stdlib at the unit level, a loopback
+/json/version server stands in for the owner's Chrome, a scripted
+socket for its DevTools WebSocket, a shell script for the browser
+binary; no browser ever launches under test).
+
+**The diagnosis — the dedicated identity is honest but a STRANGER.**
+Three of the four test sites sat on their challenges because a
+profile with no clearances, no logins and no history is exactly the
+first-visit shape the walls key on, and the door's Chrome rode
+whatever network path the OS handed it (a proxy exit the
+challenge-hating sites despise, a missing proxy the censored
+domains need). The one site that visibly LOADED was called a
+challenge anyway — the verdict's HTML markers fire on pages that
+merely EMBED a challenge widget (a Turnstile in a login form, a
+Cloudflare script tag on real content), so a delivered-ready page
+kept waiting until its budget died. And the owner named the two laws
+the door was missing: HIS Chrome (his cookies, his logins — the
+identity the walls already trust) and the RIGHT ROUTE per site.
+
+**The fix — THE OWNER'S OWN WINDOW (attach).** Before the door ever
+launches a Chrome of its own, it probes the DevTools port
+(``web_browser_attach_port``, default 9222). A Chrome that answers
+there — the owner's own instance started with
+``--remote-debugging-port`` — is driven AS IS: the tabs open in the
+owner's own window, with his profile, his cookies, his extensions
+and his network path, and the door NEVER closes his browser (the new
+``AttachedChromeSession.close()`` closes only the tabs the door
+itself opened — gentle by construction). The one-time setup is his
+explicit action: More ▸ 🪄 **Attach to my Chrome** writes
+``chrome-attach.bat`` (taskkill → the ATTACH LINK → relaunch with
+``--remote-debugging-port=9222 --restore-last-session``, his tabs
+come back) and runs it on his OK. The attach link itself is the one
+honest way past Chrome 136+'s refusal to debug the default
+user-data-dir path: a junction (Windows) / symlink (POSIX) at
+``<app>/chrome-real-link`` pointing at the owner's real user data —
+a different path to the same data. When no port answers but his
+Chrome is NOT running, the door launches HIS REAL PROFILE through
+that same link (``_try_real_profile_session``: his cookies, his
+logins, the strongest identity the door can launch — never erased,
+closed gracefully, and skipped entirely when his Chrome is already
+running without the port: never fought, never killed, never
+hijacked, with the honest log pointing at the 🪄 action).
+
+**The fix — THE RIGHT ROUTE (the proxy legs).** The door's own
+launches now ride TWO legs: DIRECT first
+(``--no-proxy-server`` — truly off, even where the OS has a system
+proxy: the residential line the challenges like), then the owner's
+configured proxy (``--proxy-server=socks5://127.0.0.1:10808`` from
+the same Settings → Proxy block the fetcher reads — the route the
+censored and DNS-poisoned domains need). A link that failed the
+first leg is ESCALATED onto the second in the SAME delivery (the
+escalation's landing pad is always planned), and every site
+REMEMBERS the route that actually delivered — one line of truth per
+domain in ``<app>/chrome-proxy-memory.json`` (a memory write is
+EARNED by a delivered page, never a guess; a corrupt file reads as
+empty; the next delivery takes the remembered leg, one try). Both
+legs failing is told in one sentence with both routes' names; the
+``web_browser_proxy`` knob (``'auto'`` default / ``'off'`` /
+``'on'``) pins the ladder, and an attached (his own) Chrome rides
+whatever route HE gave it — the memory is not written for his
+browser, and the legs do not apply to it.
+
+**The fix — THE VERDICT'S HONESTY.** ``page_is_real`` no longer
+calls a real page a challenge because it embeds a widget: the
+Cloudflare HTML markers now count only on a page that is otherwise
+THIN (under 500 characters of visible text — an interstitial is a
+script plus a sentence), while a page with real content carrying a
+marker is the SITE (the login form's Turnstile is not the wall). The
+weak title words ('blocked', 'access denied', 'security check')
+only count on an interstitial's SHORT, few-word title (≤ 60 chars
+and ≤ 4 words) — never as substrings of a real page's long title
+('Blocked and Reported' is a podcast, not a wall). The strong title
+phrases ('just a moment', 'checking your browser') stay decisive
+wherever they appear, and the ERR-code / crash / protocol laws are
+untouched.
+
+Config knobs added: ``web_browser_attach`` (ON),
+``web_browser_attach_port`` (9222), ``web_browser_real_profile``
+(ON), ``web_browser_proxy`` ("auto") — all in config.example.json.
+The v0.54 laws (the scorecard waits; the grip; the persistent
+dedicated profile) ride beneath the new ladder unchanged — the
+dedicated identity remains the honest floor that never fights the
+owner's running window.
+
 ## [0.54.0] — The door keeps its grip; the profile remembers — 2026-10-08
 
 Owner ask (session): "this time the links which I defined by 'hand'

@@ -559,6 +559,144 @@ class ProcessingControlMixin:
             "info")
         self._start_chrome_tab_retry(links)
 
+    # -- v0.55.0: the owner's own Chrome — the attach setup ----------------
+
+    def attach_my_chrome_now(self):
+        """More ▸ 🪄 Attach to my Chrome — v0.55.0, the owner's ask
+        ("the system must be able to open tabs in my real chrome
+        instance instead"): restart the owner's REAL Chrome with its
+        DevTools port open so the fifth door drives HIS instance —
+        his profile, his cookies, his logins, his clearances, his
+        network path; the tabs land in HIS window and GitCurator
+        never closes his browser (only its own tabs). Writes
+        ``chrome-attach.bat`` (kill Chrome → relaunch with
+        ``--remote-debugging-port=9222`` through the attach link;
+        ``--restore-last-session`` brings his tabs back) and runs it
+        on his explicit OK. Afterwards every delivery (and More ▸ 🖐
+        Scrape hand rows) attaches automatically."""
+        try:
+            if getattr(self, '_closing', False):
+                return
+            from gitcurator.core import hand_delivery as _hd
+            from gitcurator.core import chrome_tabs as _chrome_tabs
+            from gitcurator.constants import APP_DIR
+            chrome = _hd.find_chrome()
+            if not chrome:
+                self._show_custom_message_box(
+                    "No Chrome found",
+                    "GitCurator could not find Google Chrome on this "
+                    "machine — the fifth door needs the real browser.",
+                    success=False)
+                return
+            data_dir = _chrome_tabs.real_user_data_dir()
+            if not data_dir:
+                self._show_custom_message_box(
+                    "No Chrome profile found",
+                    "GitCurator could not find your Chrome profile "
+                    "(the usual location is empty) — nothing to "
+                    "attach to yet.", success=False)
+                return
+            cfg = self.config or {}
+            try:
+                port = int(cfg.get('web_browser_attach_port', 9222)
+                           or 9222)
+            except (TypeError, ValueError):
+                port = 9222
+            bat_path = os.path.join(APP_DIR, 'chrome-attach.bat')
+            written = _chrome_tabs.write_chrome_attach_bat(
+                bat_path, chrome_exe=chrome, port=port,
+                data_dir=data_dir, link_dir=APP_DIR)
+            if not written:
+                self._show_custom_message_box(
+                    "The attach script could not be written",
+                    f"GitCurator could not write {bat_path} — check "
+                    f"the folder's permissions and try again.",
+                    success=False)
+                return
+            if os.name != 'nt':
+                self.log_message(
+                    f"🪄 The attach script is ready: {bat_path} — a "
+                    f"Windows .bat (on this machine, start your Chrome "
+                    f"yourself with --remote-debugging-port={port} and "
+                    f"the door attaches automatically)", "info")
+                self._show_custom_message_box(
+                    "The attach script is ready",
+                    f"{bat_path}\n\nA Windows .bat (this machine is not "
+                    f"Windows) — start your Chrome with "
+                    f"--remote-debugging-port={port} and every "
+                    f"delivery attaches to it automatically.",
+                    success=True)
+                return
+            answer = self._confirm_attach_restart(bat_path)
+            if not answer:
+                self.log_message(
+                    "⏹️ Chrome attach setup cancelled — the door keeps "
+                    "its own identity (your Chrome is never touched "
+                    "without your OK)", "warning")
+                return
+            self.log_message(
+                f"🪄 Restarting your Chrome with the door attached "
+                f"(DevTools on 127.0.0.1:{port}) — your tabs come back; "
+                f"the next delivery opens ITS tabs in YOUR window",
+                "info")
+            try:
+                subprocess.Popen(
+                    ['cmd', '/c', bat_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL, close_fds=True,
+                    cwd=os.path.dirname(bat_path) or None)
+            except Exception as e:
+                self.log_message(
+                    f"⚠️ The attach script could not be run ({e}) — "
+                    f"run it by hand: {bat_path}", "warning")
+                self._show_custom_message_box(
+                    "Run it by hand",
+                    f"The script is ready but could not be launched "
+                    f"({e}).\n\nRun it by hand:\n{bat_path}",
+                    success=False)
+                return
+            self._show_custom_message_box(
+                "Your Chrome is being restarted with the door attached",
+                "Chrome is closing and reopening with its DevTools "
+                "port open (--restore-last-session brings your tabs "
+                "back).\n\nFrom now on every Chrome delivery (and More "
+                "▸ 🖐 Scrape hand rows via Chrome) opens its tabs in "
+                "YOUR window — your profile, your cookies, your "
+                "logins — and GitCurator never closes your browser "
+                "(only its own tabs).\n\nTo undo: just relaunch Chrome "
+                "normally.",
+                success=True)
+        except Exception as e:
+            try:
+                self.log_message(
+                    f"⚠️ The Chrome attach setup failed ({e})", "warning")
+            except Exception:
+                pass
+
+    def _confirm_attach_restart(self, bat_path: str) -> bool:
+        """The one explicit OK the restart needs: the owner's Chrome is
+        about to be closed and reopened (his tabs come back). Never
+        raises; a dialog that cannot be shown answers False (his
+        browser is never touched on a doubt)."""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            box = QMessageBox(self)
+            box.setWindowTitle("Attach the fifth door to MY Chrome")
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setText(
+                "GitCurator will now close and restart your Chrome with "
+                "its DevTools port open — your profile, your cookies, "
+                "your logins; your tabs come back (--restore-last-"
+                "session).\n\nThe fifth door then opens its tabs in YOUR "
+                "window (it never closes your browser — only its own "
+                "tabs).\n\nTo undo: relaunch Chrome normally.")
+            box.setStandardButtons(QMessageBox.StandardButton.Yes
+                                   | QMessageBox.StandardButton.No)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            return box.exec() == QMessageBox.StandardButton.Yes
+        except Exception:
+            return False
+
     # -- v0.44.0: the graveyard — decommissioning dead links ---------------
 
     def decommission_dead_links_now(self):
@@ -1250,10 +1388,12 @@ class ProcessingControlMixin:
         worker.start()
         self.log_message(
             f"🤖 Chrome tab retry: opening {len(links)} link(s) in your "
-            f"real Chrome (the door's dedicated identity — one tab per "
-            f"link; watch the tabs load; GitCurator takes each page "
-            f"when it is ready and processes it into the vault — the "
-            f"scorecard waits for the notes to land)",
+            f"real Chrome (your own window when its debug port "
+            f"answers — More ▸ 🪄 Attach to my Chrome; otherwise the "
+            f"door's identity, direct line first, then your proxy — "
+            f"one tab per link; watch the tabs load; GitCurator takes "
+            f"each page when it is ready and processes it into the "
+            f"vault — the scorecard waits for the notes to land)",
             "info")
 
     def _on_delivery_failed(self, failed):

@@ -1,8 +1,78 @@
 #!/usr/bin/env python3
 """
-chrome_tabs.py — v0.54.0, THE FIFTH DOOR: Chrome fetches the pages itself.
+chrome_tabs.py — v0.55.0, THE FIFTH DOOR: Chrome fetches the pages itself.
 
-The owner's report (this session): "this time the links which I defined
+The owner's report (this session): "it still says under bot challenge.
+only 1 site (from 4 test sites) appeared, but app didn't even succeed
+to fetch it and generate content for it. if you think it could help
+circumvent the bot detection method, the system must be able to open
+tabs in my real chrome instance instead, also the app must
+automatically open them with proxy on and off, because some sites
+needed proxy, while some didn't need and proxy caused problems."
+
+The diagnosis — the dedicated identity is honest but it is still a
+STRANGER: the v0.54 persistent profile has cookies of its own, yet
+three of the four test sites sat on their challenges because a
+profile with no clearances, no logins and no history is exactly the
+first-visit shape the walls key on, and the door's Chrome rode
+whatever network path the OS handed it (a system proxy the proxy-
+needing sites never configured, a proxy exit the challenge-hating
+sites despise). The one site that visibly LOADED was called a
+challenge anyway — the verdict's HTML markers fire on pages that
+merely EMBED a challenge widget (a Turnstile in a login form, a
+Cloudflare script tag on real content), so a delivered-ready page
+kept waiting until its budget died. And the owner named the two laws
+the door was missing: HIS Chrome (his cookies, his logins, his
+clearances — the identity the walls already trust) and the RIGHT
+ROUTE per site (some sites need the proxy, some are broken by it).
+
+The v0.55 law — THE OWNER'S OWN WINDOW, THE RIGHT ROUTE:
+
+    - ATTACH: before the door ever launches a Chrome of its own, it
+      probes the DevTools port (``web_browser_attach_port``, default
+      9222). A Chrome that answers there — the owner's own instance
+      started with ``--remote-debugging-port`` (the app writes
+      ``chrome-attach.bat`` and More ▸ 🪄 Attach to my Chrome runs
+      it) — is DRIVEN AS IS: the tabs open in the owner's own
+      window, with his profile, his cookies, his extensions and his
+      network path, and the door NEVER closes his browser (it closes
+      only the tabs it opened itself).
+    - HIS PROFILE: when no port answers but his Chrome is NOT
+      running, the door launches the owner's REAL profile through an
+      attach link (a junction on Windows, a symlink on POSIX — the
+      one honest way past Chrome 136+'s refusal to debug the default
+      user-data-dir path) with the port open: his cookies, his
+      logins, the strongest identity the door can launch. A Chrome
+      already running without the port is never fought, never
+      killed, never hijacked — the door falls to its own identity
+      and the More ▸ 🪄 action teaches the owner's Chrome to answer.
+    - THE RIGHT ROUTE: the door's own launches ride TWO legs —
+      direct first (``--no-proxy-server`` — the residential line the
+      challenges like), then the owner's configured proxy
+      (``--proxy-server=socks5://…`` — the route the censored and
+      DNS-poisoned domains need). A link that failed the first leg
+      is retried on the second IN THE SAME DELIVERY, and every site
+      REMEMBERS the route that worked (a per-domain memory beside
+      the door's identity) — the next delivery takes the remembered
+      leg first, one try, no guessing.
+    - THE VERDICT'S HONESTY: a page with real CONTENT that happens
+      to carry a challenge marker (the embedded widget) is the SITE,
+      not the wall — only a page that is thin AND marked reads as a
+      challenge; the weak title words ('blocked', 'access denied')
+      only count on an interstitial's short title, never as
+      substrings of a real page's long title.
+
+The v0.54 law — the door KEEPS ITS GRIP; the profile REMEMBERS —
+(kept, unchanged): the scorecard waits for the notes to land in the
+vault, a dropped DevTools socket is a half-second re-connect, and
+the door's dedicated profile persists its cookies (a returning
+visitor). The v0.55 ladder simply puts stronger identities in front
+of it: the owner's own window when it answers, his profile when his
+Chrome is closed, the door's own remembered identity otherwise —
+and the dedicated profile remains the honest floor that never
+fights the owner's running window.
+
+The owner's report (v0.54): "this time the links which I defined
 by 'hand' emoji opened their tabs in a new google chrome session, but
 app didn't actually wait and use those tabs to gather information to
 feed LLM and store them properly and obsidian, as soon as they loaded,
@@ -241,6 +311,32 @@ CONFIG_PROFILE_PERSIST = 'web_browser_profile_persist'
 #: empty = the default ``<app>/chrome-profile`` next to cache.db).
 CONFIG_PROFILE_DIR = 'web_browser_profile_dir'
 
+#: v0.55.0 — ATTACH: drive the owner's OWN running Chrome when its
+#: DevTools port answers (default ON; ``false`` keeps the door on its
+#: own identities only).
+CONFIG_ATTACH = 'web_browser_attach'
+
+#: v0.55.0 — the port probed for the owner's own Chrome (the standard
+#: DevTools port; the chrome-attach.bat the app writes opens it).
+CONFIG_ATTACH_PORT = 'web_browser_attach_port'
+DEFAULT_ATTACH_PORT = 9222
+
+#: v0.55.0 — the real-profile rung: when no port answers and the
+#: owner's Chrome is NOT running, the door launches the owner's REAL
+#: profile (through the attach link) instead of its own identity
+#: (default ON; ``false`` pins the door to the dedicated profile).
+CONFIG_REAL_PROFILE = 'web_browser_real_profile'
+
+#: v0.55.0 — the proxy legs: ``'auto'`` (default) tries direct first
+#: then the configured proxy, remembering per site the route that
+#: worked; ``'off'`` never rides the proxy; ``'on'`` always rides it.
+CONFIG_PROXY_LEGS = 'web_browser_proxy'
+
+#: v0.55.0 — the per-site route memory lives here (beside the door's
+#: identity; ``{domain: 'direct' | 'proxy'}`` — one line of truth per
+#: site, written only by a route that actually delivered a page).
+PROXY_MEMORY_FILENAME = 'chrome-proxy-memory.json'
+
 #: How long to wait for Chrome to print its DevTools endpoint (stderr).
 CHROME_STARTUP_TIMEOUT_S = 25.0
 
@@ -318,22 +414,45 @@ _ERR_CODE_RE = re.compile(r'ERR_[A-Z0-9_]{2,}')
 #: Chrome's crash phrases (the renderer's own sad-tab pages).
 _CRASH_MARKERS = ('aw, snap', "he's dead, jim", 'err_crashed')
 
-#: The bot-challenge grammar, two scopes: the TITLE phrases the
-#: interstitials use (a title is a sentence, not prose — safe to
-#: match), and the HTML markers only a challenge page carries (the
-#: Cloudflare challenge machinery's own script names). A page that
-#: reads as a challenge is NOT content: the door keeps waiting (the
-#: owner's real Chrome may still pass it) and names it honestly if it
-#: never does — but it is never delivered as the site's data.
-_CHALLENGE_TITLE_MARKERS = (
+#: The bot-challenge grammar, v0.55.0 — three scopes, honestly
+#: weighted. The TITLE phrases the interstitials use split into the
+#: STRONG ones ('just a moment', 'checking your browser' — the
+#: interstitial's own name, decisive wherever it appears) and the
+#: WEAK ones ('blocked', 'access denied' — real pages carry these
+#: words inside long titles; they only count on an interstitial's
+#: SHORT title). The HTML markers (the Cloudflare machinery's own
+#: script names) are only a wall on a page that is otherwise THIN
+#: (``_CHALLENGE_TEXT_FLOOR`` chars of visible text): a page with
+#: real content that carries a marker is a page that EMBEDS a
+#: challenge widget (a Turnstile in a login form), not a wall — the
+#: v0.55 verdict fix for the site that loaded and was still called
+#: a challenge.
+_CHALLENGE_TITLE_STRONG = (
     'just a moment', 'checking your browser', 'verify you are human',
-    'attention required', 'security check', 'ddos protection',
-    'enable javascript and cookies', 'access denied', 'blocked',
+    'attention required', 'ddos protection',
+    'enable javascript and cookies',
+)
+_CHALLENGE_TITLE_WEAK = (
+    'blocked', 'access denied', 'security check',
 )
 _CHALLENGE_HTML_MARKERS = (
     'challenge-platform', 'cf-chl', '__cf_chl', 'cf_chl_opt',
     'turnstile', 'cdn-cgi/challenge', 'cf-browser-verification',
 )
+
+#: v0.55.0 — a weak title word only counts on a title this short
+#: (an interstitial's title IS the sentence; a real page's long
+#: title merely contains the word).
+_WEAK_TITLE_MAX_LEN = 60
+#: …and with this few WORDS (the weak words are 1-2 words long; a
+#: real page's title carries more than four).
+_WEAK_TITLE_MAX_WORDS = 4
+
+#: v0.55.0 — the visible-text floor: below it, a page carrying a
+#: challenge marker is the challenge itself (the interstitial is a
+#: script plus a sentence); at or above it, the marker rides a
+#: widget on a page with real content — the SITE, not the wall.
+_CHALLENGE_TEXT_FLOOR = 500
 
 #: v0.53.0 — the smallest DOM that can be a real page (the floor the
 #: v0.50 door already kept; the verdict does the heavy lifting now).
@@ -686,6 +805,58 @@ def _probe_version_endpoint(port: int, timeout: float = 3.0) -> bool:
         return False
 
 
+def _http_on(port: int, method: str, path: str,
+             timeout: float = 15.0) -> (int, bytes):
+    """v0.55.0 — one HTTP round trip on a DevTools endpoint (loopback
+    only; both the door's own sessions and the attached one speak
+    it). Raises on any miss — the callers name it honestly."""
+    conn = http.client.HTTPConnection('127.0.0.1', int(port),
+                                      timeout=timeout)
+    try:
+        conn.request(method, path)
+        resp = conn.getresponse()
+        return resp.status, resp.read()
+    finally:
+        conn.close()
+
+
+def _open_tab_http(port: int, url: str) -> Dict:
+    """v0.55.0 — open one tab at ``url`` on the endpoint at ``port``
+    (PUT — the Chrome 111+ law — with a GET fallback for older
+    builds). Returns the target dict (its ``id`` and
+    ``webSocketDebuggerUrl``); raises ``CDPError`` on any miss."""
+    q = quote(url, safe='')
+    last = 'no HTTP answer'
+    for method in ('PUT', 'GET'):
+        try:
+            status, body = _http_on(port, method, f'/json/new?{q}')
+        except Exception as e:
+            last = str(e)
+            continue
+        if status == 200:
+            try:
+                return json.loads(body.decode('utf-8', errors='replace'))
+            except Exception as e:
+                raise CDPError(f'the new-tab answer was unreadable: {e}')
+        last = f'HTTP {status}'
+    raise CDPError(f'Chrome would not open a tab ({last})')
+
+
+def _close_tab_http(port: int, target_id: str) -> None:
+    """v0.55.0 — best-effort tab close on the endpoint at ``port``
+    (GET first; a miss is cosmetic — the door's own sessions are
+    terminated at the end anyway, and an attached browser is the
+    owner's to keep)."""
+    for method in ('GET', 'PUT'):
+        try:
+            status, _ = _http_on(port, method,
+                                 f'/json/close/{target_id}', timeout=8.0)
+            if status in (200, 204):
+                return
+        except Exception:
+            continue
+
+
 class ChromeSession:
     """The owner's real Chrome as a fetch engine: launched with a
     throwaway ``--user-data-dir`` (a FRESH session of the owner's own
@@ -713,17 +884,25 @@ class ChromeSession:
     def __init__(self, exe: str, log: Optional[Callable] = None,
                  page_timeout_s: float = DEFAULT_PAGE_TIMEOUT_S,
                  profile_dir: Optional[str] = None,
-                 persist: bool = True):
+                 persist: bool = True,
+                 extra_flags: Optional[List[str]] = None,
+                 real_profile: bool = False):
         log = log or (lambda *a, **k: None)
         self._log = log
         self._page_timeout_s = float(page_timeout_s)
+        self._extra_flags = [f for f in (extra_flags or []) if f]
+        self._real_profile = bool(real_profile)
         self.proc: Optional[subprocess.Popen] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self.profile = ''
         self.port = 0
         self._browser_ws_path = ''      # for the graceful Browser.close
-        self._profile_is_throwaway = not bool(persist)
-        if persist:
+        # v0.55.0 — the real-profile rung never erases anything (it is
+        # the owner's data behind the link); the throwaway law stays
+        # the dedicated/throwaway path's own.
+        self._profile_is_throwaway = (not bool(persist)) \
+            and (not self._real_profile)
+        if persist and not self._real_profile:
             self.profile = os.path.abspath(
                 (profile_dir or '').strip() or default_profile_dir())
             try:
@@ -741,14 +920,29 @@ class ChromeSession:
                         f"DevTools on 127.0.0.1:{self.port}) — no new "
                         f"window was opened", "info")
                     return
+        elif self._real_profile:
+            # v0.55.0 — the owner's REAL profile through the attach
+            # link: the caller resolved the link and pre-checked that
+            # his Chrome is not running; the door never adopts here
+            # (a live DevToolsActivePort in the real profile means a
+            # Chrome IS running — the rung was skipped for exactly
+            # that reason) and never erases the dir on close.
+            self.profile = os.path.abspath((profile_dir or '').strip())
+            if not self.profile:
+                raise CDPError('the real-profile rung needs the attach '
+                               'link path')
+            os.makedirs(self.profile, exist_ok=True)
+        else:
+            # the throwaway law: a fresh temp profile (persist=False)
+            self.profile = ''
         attempts = (list(_CHROME_FLAGS),
                     list(_CHROME_FLAGS) + list(_CONTAINER_FLAGS),
                     list(_CHROME_FLAGS) + list(_CONTAINER_FLAGS)
                     + list(_HEADLESS_FLAGS))
         last_err: Optional[Exception] = None
-        for attempt, extra_flags in enumerate(attempts):
+        for attempt, extra_flags_ in enumerate(attempts):
             try:
-                self._launch_and_announce(exe, extra_flags)
+                self._launch_and_announce(exe, extra_flags_)
                 break
             except CDPError as e:
                 last_err = e
@@ -769,7 +963,13 @@ class ChromeSession:
             raise last_err or CDPError(
                 'Chrome never announced its DevTools endpoint')
         self._drain_stderr()
-        if self._profile_is_throwaway:
+        if self._real_profile:
+            log(f"🤖 Chrome session live — YOUR REAL PROFILE through the "
+                f"attach link (your cookies, your logins, your "
+                f"clearances; DevTools on 127.0.0.1:{self.port}) — the "
+                f"door closes only its own tabs when it is done",
+                "info")
+        elif self._profile_is_throwaway:
             log(f"🤖 Chrome session live (your own Chrome, a fresh "
                 f"throwaway profile — your running window is untouched; "
                 f"DevTools on 127.0.0.1:{self.port})", "info")
@@ -828,17 +1028,25 @@ class ChromeSession:
         when persist is on, else a fresh throwaway temp dir; its own
         process group on POSIX), then read the DevTools endpoint off
         its stderr. Raises ``CDPError`` on any miss — the constructor
-        decides whether to retry."""
+        decides whether to retry. v0.55.0 — the session's own
+        ``extra_flags`` (the proxy leg's argv) ride EVERY attempt."""
         self.port = _pick_free_port()
         self._browser_ws_path = ''
         if not self.profile:
             self.profile = tempfile.mkdtemp(prefix='gitcurator-chrome-')
         else:
-            os.makedirs(self.profile, exist_ok=True)
+            try:
+                # exist_ok=True still raises on a DANGLING symlink (the
+                # makedirs quirk) — a launch failure, honestly named
+                os.makedirs(self.profile, exist_ok=True)
+            except Exception as e:
+                raise CDPError(f'the profile directory could not be '
+                               f'prepared ({e})')
         self._stderr_thread = None
         cmd = [exe, f'--remote-debugging-port={self.port}',
                f'--user-data-dir={self.profile}'] \
-            + list(extra_flags) + ['about:blank']
+            + list(extra_flags) + list(self._extra_flags) \
+            + ['about:blank']
         try:
             self.proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -911,46 +1119,18 @@ class ChromeSession:
 
     def _http(self, method: str, path: str,
               timeout: float = 15.0) -> (int, bytes):
-        conn = http.client.HTTPConnection('127.0.0.1', self.port,
-                                          timeout=timeout)
-        try:
-            conn.request(method, path)
-            resp = conn.getresponse()
-            return resp.status, resp.read()
-        finally:
-            conn.close()
+        return _http_on(self.port, method, path, timeout=timeout)
 
     def new_tab(self, url: str) -> Dict:
         """Open one tab at ``url`` (PUT — the Chrome 111+ law — with a
         GET fallback for older builds). Returns the target dict (its
         ``id`` and ``webSocketDebuggerUrl``)."""
-        q = quote(url, safe='')
-        last = 'no HTTP answer'
-        for method in ('PUT', 'GET'):
-            try:
-                status, body = self._http(method, f'/json/new?{q}')
-            except Exception as e:
-                last = str(e)
-                continue
-            if status == 200:
-                try:
-                    return json.loads(body.decode('utf-8', errors='replace'))
-                except Exception as e:
-                    raise CDPError(f'the new-tab answer was unreadable: {e}')
-            last = f'HTTP {status}'
-        raise CDPError(f'Chrome would not open a tab ({last})')
+        return _open_tab_http(self.port, url)
 
     def close_tab(self, target_id: str) -> None:
         """Best-effort tab close (HTTP first; a miss is cosmetic — the
         whole throwaway session is terminated at the end anyway)."""
-        for method in ('GET', 'PUT'):
-            try:
-                status, _ = self._http(method, f'/json/close/{target_id}',
-                                       timeout=8.0)
-                if status in (200, 204):
-                    return
-            except Exception:
-                continue
+        _close_tab_http(self.port, target_id)
 
     def alive(self) -> bool:
         """v0.54.0 — the honest liveness: the launcher process alive
@@ -1087,8 +1267,566 @@ class ChromeSession:
 
 
 # ---------------------------------------------------------------------------
+# v0.55.0 — THE OWNER'S OWN WINDOW: attach, and the real-profile rung
+# ---------------------------------------------------------------------------
+
+
+class AttachedChromeSession:
+    """v0.55.0 — the owner's OWN running Chrome, driven through its
+    DevTools port: the strongest identity the door can borrow (his
+    profile, his cookies, his logins, his extensions, his network
+    path — the identity the walls already trust). The tabs the door
+    opens land in HIS window; the door NEVER closes his browser —
+    ``close()`` closes only the tabs the door itself opened
+    (best-effort) and the session stays exactly as it found it.
+    ``alive()`` stays the endpoint's answer. The proxy legs do not
+    apply here (his Chrome rides whatever route HE gave it) and the
+    route memory is not written (his path is not the door's to
+    remember)."""
+
+    def __init__(self, port: int, log: Optional[Callable] = None):
+        log = log or (lambda *a, **k: None)
+        self.port = int(port)
+        self.proc = None              # nothing was launched — it's his
+        self.profile = ''             # his profile, never the door's
+        self._opened: List[str] = []  # the tabs the door opened itself
+
+    def new_tab(self, url: str) -> Dict:
+        """Open one tab in the owner's own Chrome (PUT — the Chrome
+        111+ law — with a GET fallback). The tab id is remembered so
+        close() stays gentle (only the door's own tabs)."""
+        tab = _open_tab_http(self.port, url)
+        tid = str(tab.get('id') or '')
+        if tid:
+            self._opened.append(tid)
+        return tab
+
+    def close_tab(self, target_id: str) -> None:
+        """Best-effort close of ONE tab — the door's own tabs only."""
+        _close_tab_http(self.port, target_id)
+
+    def alive(self) -> bool:
+        """The endpoint's answer — the owner's Chrome lives exactly as
+        long as it lives, whatever the door does."""
+        return _probe_version_endpoint(self.port)
+
+    def close(self) -> None:
+        """GENTLE: never Browser.close, never a kill — the owner's
+        browser is not the door's to close. Only the tabs the door
+        opened are closed (best-effort, idempotent, never raises)."""
+        for tid in list(self._opened):
+            try:
+                self.close_tab(tid)
+            except Exception:
+                pass
+        self._opened = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+#: v0.55.0 — where the owner's real Chrome keeps its user data, when
+#: it can be found (Chrome stable first; best-effort, never raises).
+_REAL_DATA_DIRS_WINDOWS = (
+    r'Google\Chrome\User Data',
+)
+_REAL_DATA_DIRS_POSIX = (
+    '.config/google-chrome',
+    '.config/chromium',
+    'Library/Application Support/Google/Chrome',
+)
+
+
+def real_user_data_dir() -> Optional[str]:
+    """v0.55.0 — the owner's REAL Chrome user-data directory, when one
+    exists on this machine (Windows %LOCALAPPDATA%\\Google\\Chrome\\
+    User Data; POSIX ~/.config/google-chrome & friends). None when no
+    real profile is found (the rung is skipped honestly). Pure path
+    probing; never raises."""
+    try:
+        home = os.path.expanduser('~')
+        if os.name == 'nt':
+            local = os.environ.get('LOCALAPPDATA') or os.path.join(
+                home, 'AppData', 'Local')
+            for rel in _REAL_DATA_DIRS_WINDOWS:
+                cand = os.path.join(local, rel)
+                if os.path.isdir(cand):
+                    return cand
+            return None
+        for rel in _REAL_DATA_DIRS_POSIX:
+            cand = os.path.join(home, rel)
+            if os.path.isdir(cand):
+                return cand
+        return None
+    except Exception:
+        return None
+
+
+def real_profile_link(data_dir: Optional[str] = None,
+                      link_dir: Optional[str] = None) -> Optional[str]:
+    """v0.55.0 — the ATTACH LINK: a junction (Windows) or symlink
+    (POSIX) at ``<app>/chrome-real-link`` pointing at the owner's real
+    user-data dir. Chrome 136+ refuses ``--remote-debugging-port`` on
+    the DEFAULT user-data-dir path — a link is a different path to
+    the same data, the one honest way to debug the owner's real
+    profile with his own Chrome. A link that already points at
+    ``data_dir`` is reused; one that is DANGLING or points elsewhere
+    (a moved profile, a leftover of another run) is re-pointed —
+    removed and recreated, best-effort. Best-effort throughout: a
+    failure returns None (the rung is skipped, the door falls to its
+    own identity). Never raises, never erases the TARGET."""
+    try:
+        data_dir = data_dir or real_user_data_dir()
+        if not data_dir or not os.path.isdir(data_dir):
+            return None
+        if not link_dir:
+            link_dir = os.path.dirname(default_profile_dir())
+        link = os.path.join(link_dir, 'chrome-real-link')
+        wants_recreate = False
+        if os.path.exists(link) or os.path.islink(link):
+            try:
+                if os.path.realpath(link) != os.path.realpath(data_dir):
+                    wants_recreate = True   # stale or dangling — re-point
+            except Exception:
+                wants_recreate = True
+            if not wants_recreate:
+                return link           # a link that already points there
+        else:
+            os.makedirs(link_dir, exist_ok=True)
+        if wants_recreate:
+            if not _remove_link(link):
+                return None           # a wrong link we cannot fix — skip
+        if os.name == 'nt':
+            # mklink /J — a directory junction needs no admin rights
+            r = subprocess.run(
+                ['cmd', '/c', 'mklink', '/J', link, data_dir],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=15)
+            if r.returncode == 0 and os.path.exists(link):
+                return link
+            return None
+        try:
+            os.symlink(data_dir, link)
+            return link
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _remove_link(link: str) -> bool:
+    """Remove a junction/symlink WITHOUT touching its target (the
+    owner's real data). Windows: ``rmdir`` on the reparse point;
+    POSIX: ``os.unlink``. Best-effort; False when it could not."""
+    try:
+        if not (os.path.exists(link) or os.path.islink(link)):
+            return True
+        if os.name == 'nt':
+            r = subprocess.run(
+                ['cmd', '/c', 'rmdir', link],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10)
+            return r.returncode == 0 and not os.path.exists(link)
+        if os.path.isdir(link) and not os.path.islink(link):
+            return False      # a real directory is never the door's to remove
+        os.unlink(link)
+        return True
+    except Exception:
+        return False
+
+
+#: v0.55.0 — the executables counted as "a Chrome is running" on
+#: POSIX (pgrep -x over these names; anything else falls to the
+#: honest launch failure).
+_RUNNING_BROWSER_NAMES = (
+    'chrome', 'chromium', 'chromium-browser',
+    'google-chrome', 'google-chrome-stable',
+)
+
+
+def chrome_is_running() -> bool:
+    """v0.55.0 — is a Chrome (any of the usual binaries) running right
+    now? Windows asks tasklist; POSIX asks pgrep -x over the usual
+    names. Best-effort by law: an unaskable question answers False
+    (the real-profile launch attempt then fails honestly — Chrome
+    hands off to the running instance and never announces — and the
+    ladder falls to the door's own identity). Never raises. Patchable
+    in tests (the pre-check seam)."""
+    try:
+        if os.name == 'nt':
+            r = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq chrome.exe',
+                 '/FO', 'CSV', '/NH'],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                timeout=10)
+            out = r.stdout.decode('utf-8', errors='replace').lower()
+            return 'chrome.exe' in out
+        import shutil as _sh
+        if not _sh.which('pgrep'):
+            return False
+        for name in _RUNNING_BROWSER_NAMES:
+            r = subprocess.run(['pgrep', '-x', name],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=5)
+            if r.returncode == 0:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _try_real_profile_session(exe: str, log: Callable,
+                              page_timeout_s: float,
+                              extra_flags: List[str]
+                              ) -> Optional[ChromeSession]:
+    """v0.55.0 — the real-profile rung: launch the owner's REAL
+    profile (through the attach link) with the DevTools port open —
+    his cookies, his logins, the strongest identity the door can
+    launch. Honest gates, in order: no real profile found → None; a
+    Chrome already running → None (never fought, never killed — the
+    log says how to teach it to answer); no attach link → None; a
+    launch that fails (Chrome 136+ still refuses, a locked profile, a
+    dead binary) → None (the caller falls to the dedicated identity).
+    The caller OWNS the returned session's close() (a graceful
+    Browser.close — it is the door's own launch)."""
+    data_dir = real_user_data_dir()
+    if not data_dir:
+        return None            # no real profile on this machine
+    if chrome_is_running():
+        log("🤖 Your Chrome is already running without its debug port — "
+            "the door will not fight or restart it on its own. More ▸ "
+            "🪄 Attach to my Chrome restarts it WITH the port (your tabs "
+            "come back); this delivery uses the door's own identity.",
+            "info")
+        return None
+    link = real_profile_link(data_dir)
+    if not link:
+        log("🤖 The attach link to your real Chrome profile could not be "
+            "created — the door uses its own identity this time",
+            "warning")
+        return None
+    try:
+        return ChromeSession(
+            exe, log, page_timeout_s=page_timeout_s,
+            profile_dir=link, persist=True, real_profile=True,
+            extra_flags=extra_flags)
+    except Exception as e:
+        log(f"🤖 Your real profile could not be launched with the debug "
+            f"port ({e}) — the door uses its own identity this time "
+            f"(Chrome 136+ guards the default profile tightly; More ▸ 🪄 "
+            f"Attach to my Chrome is the reliable route)",
+            "warning")
+        return None
+
+
+def _launch_identity_session(exe: str, log: Callable,
+                             page_timeout_s: float,
+                             profile_dir: Optional[str],
+                             persist: bool,
+                             real_profile: bool,
+                             extra_flags: List[str],
+                             _session_factory: Optional[Callable] = None
+                             ) -> Optional[object]:
+    """v0.55.0 — the door's identity LADDER for one proxy leg: the
+    real-profile rung first (the owner's own cookies — the strongest
+    identity the door can launch; skipped when the caller pinned an
+    explicit profile dir, which IS an identity choice), then the
+    dedicated persistent profile (the v0.54 returning visitor). The
+    tests' ``_session_factory`` seam bypasses the ladder entirely
+    (the scripted session IS the chosen identity). Returns None only
+    from the factory's own failure path — never raises."""
+    if _session_factory is not None:
+        return _session_factory(exe, log)
+    if real_profile and not (profile_dir or '').strip():
+        rung = _try_real_profile_session(exe, log, page_timeout_s,
+                                         extra_flags)
+        if rung is not None:
+            return rung
+    return ChromeSession(exe, log, page_timeout_s=page_timeout_s,
+                         profile_dir=profile_dir, persist=persist,
+                         extra_flags=extra_flags)
+
+
+def write_chrome_attach_bat(path: str,
+                            chrome_exe: Optional[str] = None,
+                            port: int = DEFAULT_ATTACH_PORT,
+                            data_dir: Optional[str] = None,
+                            link_dir: Optional[str] = None
+                            ) -> Optional[str]:
+    """v0.55.0 — write ``chrome-attach.bat``: the ONE-TIME setup that
+    teaches the owner's own Chrome to answer the door — it closes
+    Chrome, points an attach link at the real user-data dir (the
+    Chrome 136+ honest route) and relaunches Chrome WITH
+    ``--remote-debugging-port`` and ``--restore-last-session`` (his
+    tabs come back). The next delivery (or More ▸ 🖐 Scrape hand rows
+    via Chrome) attaches to HIS window automatically. Pure ASCII +
+    CRLF (the .bat law); best-effort, never raises; returns the path
+    or None. The app runs it only after the owner's explicit OK."""
+    try:
+        chrome_exe = chrome_exe or ''
+        if not chrome_exe:
+            from gitcurator.core import hand_delivery as _hd
+            chrome_exe = _hd.find_chrome() or ''
+        data_dir = data_dir or real_user_data_dir() or ''
+        if not (chrome_exe and data_dir):
+            return None
+        link = real_profile_link(data_dir, link_dir) or ''
+        if not link:
+            return None
+        lines = [
+            '@echo off',
+            'REM GitCurator v0.55.0 - attach the fifth door to YOUR Chrome',
+            'REM (restarts Chrome with its DevTools port open; your tabs',
+            'REM  come back; GitCurator closes only ITS OWN tabs; to undo,',
+            'REM  just relaunch Chrome normally)',
+            'taskkill /IM chrome.exe /T /F >nul 2>&1',
+            'timeout /t 2 /nobreak >nul',
+            f'if not exist "{link}" mklink /J "{link}" "{data_dir}"',
+            f'start "" "{chrome_exe}" '
+            f'--remote-debugging-port={int(port)} '
+            f'--user-data-dir="{link}" --restore-last-session',
+            '',
+        ]
+        text = '\r\n'.join(lines)
+        text.encode('ascii')          # the .bat law: pure ASCII
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or '.',
+                    exist_ok=True)
+        with open(path, 'w', encoding='ascii', newline='') as fh:
+            fh.write(text)
+        return path
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# v0.55.0 — THE RIGHT ROUTE: the proxy legs + the per-site memory
+# ---------------------------------------------------------------------------
+
+
+def chrome_proxy_flag(proxy: Optional[Dict]) -> List[str]:
+    """The Chrome argv for one configured proxy (``['--proxy-server=
+    socks5://127.0.0.1:10808']``; an http proxy rides ``http://``) —
+    the 'proxy ON' leg. An absent proxy is an EMPTY list (there is
+    nothing to turn on; the caller skips the leg honestly). Pure."""
+    if not proxy:
+        return []
+    ptype = str(proxy.get('type') or 'socks5').strip().lower()
+    host = str(proxy.get('host') or '').strip()
+    port = proxy.get('port')
+    if not host or not port:
+        return []
+    if ptype in ('socks5', 'socks4', 'http'):
+        return [f'--proxy-server={ptype}://{host}:{int(port)}']
+    return [f'--proxy-server=http://{host}:{int(port)}']
+
+
+#: v0.55.0 — the direct leg's own flag: TRULY off, even where the OS
+#: has a system proxy set (the owner's exact words: "proxy caused
+#: problems" — some sites must be asked on the local line, not
+#: whatever the system routes through).
+_DIRECT_LEG_FLAGS = ['--no-proxy-server']
+
+#: The remembered route values.
+ROUTE_DIRECT = 'direct'
+ROUTE_PROXY = 'proxy'
+
+
+def proxy_memory_path() -> str:
+    """v0.55.0 — where the per-site route memory lives:
+    ``<APP_DIR>/chrome-proxy-memory.json`` (beside the door's
+    identity; falls back next to this module like the profile dir)."""
+    try:
+        from gitcurator.constants import APP_DIR
+        return os.path.join(APP_DIR, PROXY_MEMORY_FILENAME)
+    except Exception:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            PROXY_MEMORY_FILENAME)
+
+
+def load_proxy_memory(path: Optional[str]) -> Dict:
+    """The remembered routes, ``{domain: 'direct' | 'proxy'}``. A
+    missing, unreadable or corrupt file reads as EMPTY (the ladder
+    simply tries both legs again — the memory is an optimization,
+    never a gate). Pure file read; never raises."""
+    if not path:
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return {}
+        return {str(k): str(v) for k, v in data.items()
+                if str(v) in (ROUTE_DIRECT, ROUTE_PROXY)}
+    except Exception:
+        return {}
+
+
+def save_proxy_memory(path: Optional[str], memory: Dict) -> bool:
+    """Write the remembered routes back (atomic; best-effort, never
+    raises). A path that cannot be written is logged by the caller,
+    never a failure — the next delivery simply tries both legs."""
+    if not path:
+        return False
+    try:
+        from gitcurator.core.storage import atomic_write_text
+        atomic_write_text(path, json.dumps(memory, indent=2,
+                                           ensure_ascii=False))
+        return True
+    except Exception:
+        return False
+
+
+def domain_of_url(url: str) -> str:
+    """The route memory's key: the host, lowercased, 'www.' stripped —
+    the wall and the route are the SITE's, not the page's. Pure."""
+    try:
+        host = (urlparse(url or '').hostname or '').lower()
+    except Exception:
+        return ''
+    if host.startswith('www.'):
+        host = host[4:]
+    return host
+
+
+def normalize_proxy_mode(mode: Optional[str]) -> str:
+    """'auto' (the both-ways ladder) | 'off' (never the proxy) |
+    'on' (always the proxy). Anything unreadable reads as 'auto' —
+    the owner's words were the default, not a preference."""
+    m = str(mode or '').strip().lower()
+    return m if m in ('auto', 'off', 'on') else 'auto'
+
+
+def plan_proxy_legs(urls: List[str], memory: Dict,
+                    proxy: Optional[Dict],
+                    mode: str = 'auto') -> List[tuple]:
+    """v0.55.0 — the static leg plan (pure): which urls ride which
+    leg BEFORE anyone fails anything. ``[('direct', [...]), ('proxy',
+    [...])]`` in run order — direct first (the residential line the
+    challenges like), proxy second. The laws: ``mode 'off'`` → every
+    url on the direct leg (never the proxy); ``mode 'on'`` → every
+    url on the proxy leg (a missing proxy degrades honestly to the
+    direct leg — nothing else can be asked); ``'auto'`` → unknown +
+    remembered-direct urls on the direct leg, remembered-proxy urls
+    on the proxy leg (a link that fails the first leg is ESCALATED
+    onto the second by the driver, in the same delivery); no proxy
+    configured + 'auto' → the direct leg only (the honest skip —
+    there is nothing to turn on). Never raises."""
+    urls = [u for u in (urls or []) if u]
+    mode = normalize_proxy_mode(mode)
+    have_proxy = bool(chrome_proxy_flag(proxy))
+    if mode == 'off' or (mode == 'auto' and not have_proxy) \
+            or (mode == 'on' and not have_proxy):
+        return [(ROUTE_DIRECT, list(urls))] if urls else []
+    if mode == 'on':
+        return [(ROUTE_PROXY, list(urls))] if urls else []
+    # auto, with a proxy: the remembered split — and the proxy leg is
+    # ALWAYS planned (even empty): it is the ESCALATION's landing pad
+    # (a link that fails the direct leg is retried on it, in the same
+    # delivery — the driver fills it before it skips an empty leg)
+    direct_leg: List[str] = []
+    proxy_leg: List[str] = []
+    for u in urls:
+        route = str((memory or {}).get(domain_of_url(u)) or '')
+        if route == ROUTE_PROXY:
+            proxy_leg.append(u)
+        else:
+            direct_leg.append(u)
+    legs = []
+    if direct_leg:
+        legs.append((ROUTE_DIRECT, direct_leg))
+    legs.append((ROUTE_PROXY, proxy_leg))
+    return legs
+
+
+def remember_route(memory: Dict, url: str, route: str) -> Dict:
+    """The memory write law (pure): a page that actually LANDED on a
+    leg writes that leg's name for its domain — one line of truth
+    earned by a delivery, never a guess. A url with no host is
+    ignored; the dict is returned for chaining."""
+    try:
+        host = domain_of_url(url)
+        if host and route in (ROUTE_DIRECT, ROUTE_PROXY):
+            memory[host] = route
+    except Exception:
+        pass
+    return memory
+
+
+# ---------------------------------------------------------------------------
 # The fetch driver — one tab per failed link, content from the live DOM
 # ---------------------------------------------------------------------------
+
+
+def _gather_through_session(session, work: List[str],
+                            page_timeout_s: float, wave: int,
+                            should_continue: Optional[Callable],
+                            log: Callable) -> List[Dict]:
+    """The wave engine (the v0.50-v0.54 law, unchanged): one tab per
+    link opened in waves so tabs load together, each page WAITED FOR
+    (the load watch) and taken from the live DOM. v0.55.0 — extracted
+    so the attach session and every proxy leg drive the SAME engine.
+    Returns one result dict per url (never raises; a dead session is
+    a per-url honest failure)."""
+    results: List[Dict] = []
+    pending = list(work)
+    while pending:
+        if should_continue is not None and not should_continue():
+            log("⏹️ Chrome tab retry stopped — the remaining links "
+                "keep waiting in the retry queue", "warning")
+            for u in pending:
+                results.append({'url': u, 'ok': False, 'html': '',
+                                'title': '',
+                                'error': 'stopped by the user'})
+            break
+        batch = pending[:wave]
+        pending = pending[wave:]
+        log(f"🤖 Chrome wave: opening {len(batch)} tab(s) in your "
+            f"real Chrome…", "info")
+        # open every tab of the wave first (parallel loading), then
+        # take each page in turn
+        opened: List[tuple] = []
+        for u in batch:
+            try:
+                tabs_info = session.new_tab(u)
+            except Exception as e:
+                results.append({'url': u, 'ok': False, 'html': '',
+                                'title': '', 'error': str(e)})
+                continue
+            opened.append((u, tabs_info))
+            log(f"🤖 Tab opened: {u}", "info")
+        for u, tabs_info in opened:
+            if not session.alive():
+                results.append({'url': u, 'ok': False, 'html': '',
+                                'title': '',
+                                'error': 'the Chrome session died '
+                                         'mid-run (its DevTools '
+                                         'endpoint stopped answering)'
+                                         })
+                continue
+            # fetch this page through its already-open tab
+            page = _fetch_opened_tab(session, u, tabs_info,
+                                     page_timeout_s, log)
+            results.append(page)
+            if page['ok']:
+                log(f"✅ {u}: took the page from your Chrome "
+                    f"(\"{page['title'][:60]}\", "
+                    f"{len(page['html']) // 1024} KB of live DOM)",
+                    "success")
+            else:
+                log(f"⚠️ {u}: {page['error']}", "warning")
+    return results
+
+
+def proxy_label_for_log(proxy: Optional[Dict]) -> str:
+    """"socks5 127.0.0.1:10808" — the leg's log label (never a secret:
+    a local listener's name, the same one the Settings page shows)."""
+    if not proxy:
+        return 'none'
+    t = str(proxy.get('type') or 'socks5').upper()
+    return f"{t} {proxy.get('host')}:{proxy.get('port')}"
 
 
 def fetch_pages_via_chrome(urls: List[str],
@@ -1099,17 +1837,35 @@ def fetch_pages_via_chrome(urls: List[str],
                            should_continue: Optional[Callable] = None,
                            _session_factory: Optional[Callable] = None,
                            profile_dir: Optional[str] = None,
-                           persist: bool = True
+                           persist: bool = True,
+                           proxy: Optional[Dict] = None,
+                           proxy_mode: str = 'auto',
+                           attach: bool = True,
+                           attach_port: int = DEFAULT_ATTACH_PORT,
+                           real_profile: bool = True,
+                           memory_path: Optional[str] = None
                            ) -> List[Dict]:
-    """The fifth door's engine: every URL fetched through the owner's
-    REAL Chrome (the door's dedicated persistent identity by default
-    — the anti-bot law; one tab per link, in waves so tabs load
-    together), the content read from the live DOM. Returns one
+    """The fifth door's engine, v0.55.0 — the owner's own window when
+    it answers, the right route when the door must launch its own
+    Chrome. The ladder: ATTACH (his running Chrome's DevTools port,
+    ``web_browser_attach_port`` — his profile, his cookies, his
+    network path; the tabs open in HIS window and the door never
+    closes his browser) → THE LEGS on the door's own identities: the
+    real-profile rung (his cookies, launched through the attach link
+    when his Chrome is closed) or the dedicated persistent profile
+    (the v0.54 returning visitor), each leg riding ONE route —
+    direct first (``--no-proxy-server``), then the configured proxy
+    (``--proxy-server=…``) — with a link that failed the first leg
+    retried on the second IN THE SAME delivery, and every site
+    remembering the route that worked (``memory_path``). One tab per
+    link, in waves; the content read from the live DOM. Returns one
     ``{'url', 'ok', 'html', 'title', 'error'}`` per URL — never
     raises (no Chrome found, a refused launch and every per-tab miss
-    are honest per-URL failures). Dry-run never reaches here (the
-    delivery layer guards it), and ``_session_factory`` lets the
-    tests drive a scripted session without a browser."""
+    are honest per-URL failures; a both-legs failure carries both
+    legs' sentences). Dry-run never reaches here (the delivery layer
+    guards it), and ``_session_factory`` lets the tests drive a
+    scripted session without a browser (the scripted session IS the
+    ladder's answer — no attach probe, one leg)."""
     log = log or (lambda *a, **k: None)
     results: List[Dict] = []
     work: List[str] = []
@@ -1146,71 +1902,134 @@ def fetch_pages_via_chrome(urls: List[str],
             "warning")
         return results
     wave = max(1, int(wave or DEFAULT_WAVE))
-    session = None
-    try:
-        if _session_factory is not None:
-            session = _session_factory(chrome, log)
+
+    # v0.55.0 — THE OWNER'S OWN WINDOW: his running Chrome's DevTools
+    # port answers → the tabs open in HIS browser (his profile, his
+    # cookies, his route), and the door never closes it. The scripted
+    # tests' factory bypasses the probe (hermetic by law).
+    if attach and _session_factory is None and attach_port:
+        if _probe_version_endpoint(int(attach_port)):
+            log(f"🤖 ATTACHED to your own running Chrome (DevTools on "
+                f"127.0.0.1:{int(attach_port)}) — the tabs open in YOUR "
+                f"window: your profile, your cookies, your logins, your "
+                f"network path. GitCurator closes only its own tabs.",
+                "info")
+            session = AttachedChromeSession(int(attach_port), log)
+            try:
+                results.extend(_gather_through_session(
+                    session, work, page_timeout_s, wave,
+                    should_continue, log))
+            finally:
+                session.close()   # gentle — only the door's own tabs
+            return results
+        log(f"🤖 Your Chrome's debug port (127.0.0.1:{int(attach_port)}) "
+            f"did not answer — the door drives its own identities (More ▸ "
+            f"🪄 Attach to my Chrome teaches your Chrome to answer; it "
+            f"needs to be running with the port open, or closed so the "
+            f"door can launch your real profile)", "info")
+
+    # v0.55.0 — THE RIGHT ROUTE: the legs. Direct first (the local
+    # line the challenges like), then the owner's proxy (the route
+    # the censored and DNS-poisoned domains need); a link that fails
+    # the first leg is escalated onto the second in the same
+    # delivery, and every site remembers the route that delivered.
+    memory = load_proxy_memory(memory_path) if memory_path else {}
+    memory_dirty = False
+    legs = plan_proxy_legs(work, memory, proxy, proxy_mode)
+    mode = normalize_proxy_mode(proxy_mode)
+    escalate = mode == 'auto' and bool(chrome_proxy_flag(proxy))
+    if mode == 'auto' and not chrome_proxy_flag(proxy):
+        log("🤖 No proxy is configured (Settings → Proxy) — the proxy "
+            "leg is skipped; every page rides the direct line",
+            "info")
+    outcomes: Dict[str, Dict] = {}
+    leg_errors: Dict[str, List[str]] = {}
+    stopped = False
+    for route, leg_urls in legs:
+        if escalate and route == ROUTE_PROXY:
+            escalated = [u for u in work
+                         if u not in outcomes and u in leg_errors
+                         and u not in leg_urls]
+            if escalated:
+                log(f"🤖 {len(escalated)} link(s) that failed the direct "
+                    f"leg are retried through your proxy now (the same "
+                    f"delivery, the other route — the owner's law: some "
+                    f"sites need the proxy, some are broken by it)",
+                    "info")
+                leg_urls = leg_urls + escalated
+        if not leg_urls:
+            continue          # the landing pad stayed empty — nothing to ride
+        flags = _DIRECT_LEG_FLAGS if route == ROUTE_DIRECT \
+            else chrome_proxy_flag(proxy)
+        if route == ROUTE_PROXY and not flags:
+            continue            # nothing to turn on — already logged
+        if route == ROUTE_DIRECT:
+            log(f"🤖 Chrome leg: DIRECT (no proxy — the local line) for "
+                f"{len(leg_urls)} link(s)", "info")
         else:
-            session = ChromeSession(chrome, log,
-                                    page_timeout_s=page_timeout_s,
-                                    profile_dir=profile_dir,
-                                    persist=persist)
-    except Exception as e:
-        for u in work:
-            results.append({'url': u, 'ok': False, 'html': '', 'title': '',
-                            'error': str(e)})
-        log(f"🤖 Fifth door could not open a Chrome session: {e}",
-            "warning")
-        return results
-    try:
-        pending = list(work)
-        while pending:
-            if should_continue is not None and not should_continue():
-                log("⏹️ Chrome tab retry stopped — the remaining links "
-                    "keep waiting in the retry queue", "warning")
-                for u in pending:
-                    results.append({'url': u, 'ok': False, 'html': '',
-                                    'title': '',
-                                    'error': 'stopped by the user'})
-                break
-            batch = pending[:wave]
-            pending = pending[wave:]
-            log(f"🤖 Chrome wave: opening {len(batch)} tab(s) in your "
-                f"real Chrome…", "info")
-            # open every tab of the wave first (parallel loading), then
-            # take each page in turn
-            opened: List[tuple] = []
-            for u in batch:
-                try:
-                    tabs_info = session.new_tab(u)
-                except Exception as e:
-                    results.append({'url': u, 'ok': False, 'html': '',
-                                    'title': '', 'error': str(e)})
-                    continue
-                opened.append((u, tabs_info))
-                log(f"🤖 Tab opened: {u}", "info")
-            for u, tabs_info in opened:
-                if not session.alive():
-                    results.append({'url': u, 'ok': False, 'html': '',
-                                    'title': '',
-                                    'error': 'the Chrome session died '
-                                             'mid-run (its DevTools '
-                                             'endpoint stopped answering)'
-                                             })
-                    continue
-                # fetch this page through its already-open tab
-                page = _fetch_opened_tab(session, u, tabs_info,
-                                         page_timeout_s, log)
-                results.append(page)
-                if page['ok']:
-                    log(f"✅ {u}: took the page from your Chrome "
-                        f"(\"{page['title'][:60]}\", "
-                        f"{len(page['html']) // 1024} KB of live DOM)",
-                        "success")
+            log(f"🤖 Chrome leg: through YOUR PROXY "
+                f"({proxy_label_for_log(proxy)}) for {len(leg_urls)} "
+                f"link(s)", "info")
+        session = None
+        try:
+            session = _launch_identity_session(
+                chrome, log, page_timeout_s, profile_dir, persist,
+                real_profile, flags, _session_factory)
+        except Exception as e:
+            log(f"🤖 Fifth door could not open a Chrome session: {e}",
+                "warning")
+            for u in leg_urls:
+                leg_errors.setdefault(u, []).append(str(e))
+            continue
+        if session is None:
+            for u in leg_urls:
+                leg_errors.setdefault(u, []).append(
+                    'no Chrome session could be opened')
+            continue
+        try:
+            pages = _gather_through_session(
+                session, leg_urls, page_timeout_s, wave,
+                should_continue, log)
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+        for page in pages:
+            u = page.get('url') or ''
+            if page.get('ok'):
+                outcomes[u] = page
+                if memory_path is not None:
+                    remember_route(memory, u, route)
+                    memory_dirty = True
+            else:
+                err = str(page.get('error') or 'no content').strip()
+                if route == ROUTE_DIRECT:
+                    leg_errors.setdefault(u, []).append(
+                        f"direct leg: {err}")
                 else:
-                    log(f"⚠️ {u}: {page['error']}", "warning")
-    finally:
-        session.close()
+                    leg_errors.setdefault(u, []).append(
+                        f"proxy leg: {err}")
+        if should_continue is not None and not should_continue():
+            stopped = True
+            break
+    if memory_dirty:
+        save_proxy_memory(memory_path, memory)
+    # the final story, in work order: the leg that delivered, or
+    # every leg's honest sentence together
+    for u in work:
+        if u in outcomes:
+            results.append(outcomes[u])
+            continue
+        errs = leg_errors.get(u)
+        if errs:
+            results.append({'url': u, 'ok': False, 'html': '',
+                            'title': '', 'error': ' | '.join(errs)})
+        else:
+            results.append({'url': u, 'ok': False, 'html': '', 'title': '',
+                            'error': 'stopped by the user' if stopped
+                                     else 'the link was not tried this '
+                                          'run'})
     return results
 
 
@@ -1220,18 +2039,43 @@ def fetch_pages_via_chrome(urls: List[str],
 # ---------------------------------------------------------------------------
 
 
+def _visible_text_len(html: str) -> int:
+    """v0.55.0 — how much VISIBLE text a DOM carries: script, style,
+    noscript, template and comment blocks stripped, tags stripped,
+    entities collapsed, whitespace squeezed. The challenge verdict's
+    thinness signal — a challenge interstitial is a script plus a
+    sentence (well under the floor); a real page carries hundreds of
+    characters of its own text even when it embeds a challenge
+    widget. Pure, best-effort, never raises."""
+    try:
+        text = re.sub(r'(?is)<(script|style|noscript|template)\b[^>]*>.*?</\1\s*>',
+                      ' ', html or '')
+        text = re.sub(r'(?s)<!--.*?-->', ' ', text)
+        text = re.sub(r'(?s)<[^>]*>', ' ', text)
+        text = re.sub(r'&[a-zA-Z#0-9]{1,10};', ' ', text)
+        return len(re.sub(r'\s+', ' ', text).strip())
+    except Exception:
+        return len(html or '')   # an unmeasurable page is not a thin one
+
+
 def page_is_real(html: str, href: str, title: str = '') -> (bool, str):
-    """True when the tab is showing the SITE's page. The four laws, in
+    """True when the tab is showing the SITE's page. The laws, in
     order (the strongest sentence wins): the tab's own URL must be
     http(s) — a tab that ended on ``chrome-error://`` or ``about:`` is
     Chrome's page, not the site's; the DOM must not carry an ``ERR_``
     code (Chrome prints the code, not prose, in every locale — a
     network-error page's own signature); it must not read as a crash
-    page ('Aw, Snap'); it must not read as a bot challenge (the title
-    phrases the interstitials use + the markers only a challenge page
-    carries). Returns ``(ok, reason)`` — ``reason`` is the honest
-    sentence the log, the report and the modal all carry; '' when ok.
-    Pure — no socket, no browser."""
+    page ('Aw, Snap'); it must not read as a bot challenge — the
+    v0.55 grammar: a STRONG interstitial title phrase is decisive
+    wherever it appears; a WEAK word ('blocked', 'access denied')
+    only counts on a SHORT title (an interstitial's title IS the
+    sentence — a real page's long title merely contains the word);
+    an HTML marker only counts on a page that is otherwise THIN
+    (``_CHALLENGE_TEXT_FLOOR`` visible characters — a page with real
+    content that carries the marker EMBEDS a challenge widget, it is
+    not stuck on one). Returns ``(ok, reason)`` — ``reason`` is the
+    honest sentence the log, the report and the modal all carry; ''
+    when ok. Pure — no socket, no browser."""
     href = (href or '').strip()
     html = html or ''
     lowered = html.lower()
@@ -1252,14 +2096,20 @@ def page_is_real(html: str, href: str, title: str = '') -> (bool, str):
         if marker in lowered or marker in t:
             return False, ("the tab crashed ('Aw, Snap' — the renderer "
                            "died)")
-    for marker in _CHALLENGE_TITLE_MARKERS:
+    for marker in _CHALLENGE_TITLE_STRONG:
         if marker in t:
             return False, (f"the page stayed on a bot challenge "
                            f"(title: {marker!r})")
-    for marker in _CHALLENGE_HTML_MARKERS:
-        if marker in lowered:
-            return False, (f"the page stayed on a bot challenge "
-                           f"({marker})")
+    if len(t) <= _WEAK_TITLE_MAX_LEN and len(t.split()) <= _WEAK_TITLE_MAX_WORDS:
+        for marker in _CHALLENGE_TITLE_WEAK:
+            if marker in t:
+                return False, (f"the page stayed on a bot challenge "
+                               f"(title: {marker!r})")
+    if _visible_text_len(html) < _CHALLENGE_TEXT_FLOOR:
+        for marker in _CHALLENGE_HTML_MARKERS:
+            if marker in lowered:
+                return False, (f"the page stayed on a bot challenge "
+                               f"({marker})")
     return True, ''
 
 
@@ -1547,7 +2397,11 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
                              ) -> Dict:
     """The fifth door, end to end: queue the failed links (the same
     queue.json the fourth door reads, stamped ``door: 'auto'``), fetch
-    every page through the owner's real Chrome — WAITING for each page
+    every page through the owner's real Chrome — v0.55.0: HIS OWN
+    running Chrome when its DevTools port answers (attach), his real
+    profile through the attach link when his Chrome is closed, the
+    door's own identity on the proxy legs (direct first, then the
+    owner's proxy, per-site route memory) otherwise — WAITING for each page
     (the v0.53 load watch: complete at an http(s) URL, still for the
     settle, real by the verdict — an error page or a crash page is a
     named failure, never a delivered page) — and write each one as its
@@ -1590,6 +2444,35 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
     persist = config.get(CONFIG_PROFILE_PERSIST, True)
     persist = True if persist is None else bool(persist)
     profile_dir = str(config.get(CONFIG_PROFILE_DIR) or '').strip() or None
+    # v0.55.0 — THE OWNER'S OWN WINDOW + THE RIGHT ROUTE: attach to his
+    # running Chrome when its DevTools port answers; launch his real
+    # profile when his Chrome is closed; ride the legs (direct first,
+    # then his configured proxy) with the per-site route memory.
+    attach = config.get(CONFIG_ATTACH, True)
+    attach = True if attach is None else bool(attach)
+    try:
+        attach_port = int(config.get(CONFIG_ATTACH_PORT,
+                                     DEFAULT_ATTACH_PORT)
+                          or DEFAULT_ATTACH_PORT)
+    except (TypeError, ValueError):
+        attach_port = DEFAULT_ATTACH_PORT
+    real_profile = config.get(CONFIG_REAL_PROFILE, True)
+    real_profile = True if real_profile is None else bool(real_profile)
+    proxy_mode = normalize_proxy_mode(
+        str(config.get(CONFIG_PROXY_LEGS, 'auto') or 'auto'))
+    proxy = None
+    try:
+        from gitcurator.core.web_fetch import proxy_from_config
+        proxy = proxy_from_config(config)
+    except Exception:
+        proxy = None            # an unreadable proxy block rides no leg
+    memory_path = proxy_memory_path()
+    if proxy and proxy_mode == 'auto':
+        log(f"🤖 Fifth door, v0.55: your own Chrome when its debug port "
+            f"answers (127.0.0.1:{attach_port}); otherwise the door's own "
+            f"identity — DIRECT first, then through your proxy "
+            f"({proxy_label_for_log(proxy)}) — and every site remembers "
+            f"the route that worked", "info")
     urls = [l['url'] for l in candidates]
     walls = {l['url']: l.get('error') or '' for l in candidates}
     try:
@@ -1611,7 +2494,10 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
                 urls, log=log, chrome_exe=chrome_exe,
                 page_timeout_s=page_timeout_s, wave=wave,
                 should_continue=should_continue,
-                profile_dir=profile_dir, persist=persist)
+                profile_dir=profile_dir, persist=persist,
+                proxy=proxy, proxy_mode=proxy_mode,
+                attach=attach, attach_port=attach_port,
+                real_profile=real_profile, memory_path=memory_path)
         except Exception as e:  # belt and braces — the promise is absolute
             log(f"⚠️ The Chrome tab fetch failed outright: {e}", "warning")
             pages = [{'url': u, 'ok': False, 'html': '', 'title': '',
@@ -1679,10 +2565,18 @@ def deliver_pages_via_chrome(vault_path: str, links: List[Dict],
 
 __all__ = [
     'CONFIG_GATE', 'CONFIG_PROFILE_DIR', 'CONFIG_PROFILE_PERSIST',
+    'CONFIG_ATTACH', 'CONFIG_ATTACH_PORT', 'CONFIG_REAL_PROFILE',
+    'CONFIG_PROXY_LEGS', 'DEFAULT_ATTACH_PORT', 'PROXY_MEMORY_FILENAME',
+    'ROUTE_DIRECT', 'ROUTE_PROXY',
     'DEFAULT_PAGE_TIMEOUT_S', 'DEFAULT_WAVE',
     'MAX_MESSAGE_BYTES', 'PAGE_SETTLE_S', 'CDPError', 'CDPTimeoutError',
     'CDPClosedError', 'encode_client_frame', 'decode_frames', 'CDPSocket',
     'is_loopback_url', 'default_profile_dir', 'ChromeSession',
+    'AttachedChromeSession', 'real_user_data_dir', 'real_profile_link',
+    'chrome_is_running', 'write_chrome_attach_bat',
+    'chrome_proxy_flag', 'proxy_memory_path', 'load_proxy_memory',
+    'save_proxy_memory', 'domain_of_url', 'normalize_proxy_mode',
+    'plan_proxy_legs', 'remember_route', 'proxy_label_for_log',
     'fetch_pages_via_chrome',
     'page_is_real', 'collect_failed_fetch_links',
     'deliver_pages_via_chrome',
