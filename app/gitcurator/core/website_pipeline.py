@@ -206,9 +206,9 @@ prompt_version: "{WEBSITE_PROMPT_VERSION}"
 ---
 *Source: [{url}]({url})*
 
-*Not useful anymore? Add the tag 🗑️ (or "delete") to this note — the
-next run removes it from the library and never fetches this site again
-(v0.58.0).*
+*Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
+this note — the next run removes it from the library and never fetches
+this site again (v0.58.0).*
 """
 
 
@@ -251,8 +251,9 @@ it is never lost; it will be retried automatically.
 ---
 *Source: [{url}]({url})*
 
-*Not useful anymore? Add the tag 🗑️ (or "delete") to this note — the
-next run removes it and never fetches this site again (v0.58.0).*
+*Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
+this note — the next run removes it and never fetches this site again
+(v0.58.0).*
 """
 
 
@@ -488,9 +489,21 @@ HAND_DOOR_HINT = (" — the fourth door: 🖐 hand-deliver it (More ▸ "
 #: note must never fire) — tags are single words, so the tight match is
 #: the honest one. The same verdict rides a boolean frontmatter key
 #: (``decommission: true``) for owners who type YAML faster than emoji.
+#: v0.59.0 — ``auto_delete`` joins the words: the owner's report
+#: (session): "When i write 'delete' tag, it autocompletes to
+#: 'auto_delete' is that correct?" — Obsidian suggests the tag his
+#: vault already knows, and the app must obey the word his editor
+#: puts under his thumb, not fight it. The hyphen twin rides along
+#: (``auto-delete``) — same word, the keyboard's other spelling.
 BANISH_EMOJI = "🗑️"
-BANISH_WORDS = ("delete", "banish", "blacklist", "purge")
+BANISH_WORDS = ("delete", "banish", "blacklist", "purge",
+                "auto_delete", "auto-delete")
 BANISH_KEYS = ("decommission", "banish", "blacklist")
+#: v0.59.0 — THE TALLY: the log line every run answers with (the
+#: owner's ask, verbatim: "I want get a log of how many notes are
+#: wiped because of this method, every run … '10 Websites Removed
+#: and will never fetch again because you blah blah'").
+BANISH_TALLY_PREFIX = "🗑️ Run tally:"
 #: Where banished notes go — inside Obsidian's hidden .trash (the
 #: banned-domain sweep's precedent: out of the library, invisible to
 #: VaultIndex/mirror/directory/the Website Directory, recoverable by
@@ -674,8 +687,9 @@ def _status_is_revived(status: str) -> bool:
 
 def _status_is_banished(status: str) -> bool:
     """v0.58.0 — does a master-table gesture read as BANISHED (🗑️ /
-    delete / banish / blacklist / purge — the substring law of the
-    other verdicts, applied to the combined icon + Status text)?
+    delete / banish / blacklist / purge / auto_delete — the substring
+    law of the other verdicts, applied to the combined icon + Status
+    text)?
 
     Precedence: ♻️ revived wins (it is the undo door of every burial —
     a hand-edited cell that says both means "bring it back"). Beyond
@@ -1031,14 +1045,16 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   again, its _review placeholder is swept.
 > 🪦 dead / ❌ dead / ☠️ dead / 💀 dead — the link is dead: same
 >   never-fetch retirement, same placeholder sweep.
-> 🗑️ banished / delete — the site outlived its welcome (terms
->   changed, no longer free, no longer useful): the STRONGEST
+> 🗑️ banished / delete / auto_delete — the site outlived its welcome
+>   (terms changed, no longer free, no longer useful): the STRONGEST
 >   retirement — the note itself is REMOVED from the library
 >   (recoverable in .trash/banished) AND the URL is blacklisted,
 >   never fetched again. ♻️ revived undoes it. You can also set
 >   this verdict INSIDE the note itself: open any note and add
->   the tag 🗑️ (or "delete") — the next run removes it, blacklists
->   the URL, and writes the record row here.
+>   the tag 🗑️ (or "delete" / "auto_delete") — the next run removes
+>   it, blacklists the URL, and writes the record row here. Every
+>   run answers with the tally line: how many were removed and
+>   never fetched again because you marked them.
 > ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
 >   like new again.
 > 🖐 hand — the fourth door's gesture, the fifth door's engine: set
@@ -1570,8 +1586,10 @@ def _note_reads_banished(fm: Optional[Dict]) -> (bool, str):
     """v0.58.0 — does a note's own frontmatter carry the owner's delete
     verdict? Pure predicate over what :func:`_parse_banish_frontmatter`
     read. A tag counts when it CONTAINS the emoji (``🗑️``, ``🗑️
-    delete``) or IS a banish word exactly (``delete`` — the tag
-    ``deleted-files`` never fires); a boolean key counts when its value
+    delete``) or IS a banish word exactly (``delete``, and since
+    v0.59.0 ``auto_delete`` — the word Obsidian autocompletes the
+    owner's typed "delete" to; the tag ``deleted-files`` never
+    fires); a boolean key counts when its value
     reads true/yes/1/on. Returns ``(verdict, the marker that fired)``
     — the marker rides the log line and the table row so the owner sees
     WHICH of his gestures the app obeyed."""
@@ -1803,11 +1821,13 @@ def banish_marked_notes(state, vault_path: str,
     enters dot-folders) and the table row is never duplicated (the
     writer's law). Dry-run aware. Tolerated everywhere (bookkeeping
     never kills a batch). Returns ``{'marked', 'banished',
-    'notes_moved', 'kept_handwritten', 'review_swept',
-    'rows_written'}``."""
+    'notes_moved', 'kept_handwritten', 'review_swept', 'rows_written',
+    'urls'}`` — ``urls`` is the canonical list the run's 🗑️ tally
+    counts (v0.59.0)."""
     log = log or (lambda *a, **k: None)
     report = {'marked': 0, 'banished': 0, 'notes_moved': 0,
-              'kept_handwritten': 0, 'review_swept': 0, 'rows_written': 0}
+              'kept_handwritten': 0, 'review_swept': 0, 'rows_written': 0,
+              'urls': []}
     if not vault_path or not os.path.isdir(vault_path):
         return report
     items = scan_banished_notes(vault_path, log=log)
@@ -1873,6 +1893,7 @@ def banish_marked_notes(state, vault_path: str,
         log(f"🗑️ Banishment: {report['kept_handwritten']} marked note(s) "
             f"are hand-written and were KEPT (yours) — nothing "
             f"banished", "info")
+    report['urls'] = list(record_urls)
     return report
 
 
@@ -1951,11 +1972,12 @@ def consume_decommission_table(state, vault_path: str,
     stronger sentence). Tolerated everywhere (the table is bookkeeping,
     never a batch killer). Returns ``{'dead', 'reviewed', 'banished',
     'revived', 'handed', 'placeholders_swept', 'notes_moved',
-    'rows_confirmed'}``."""
+    'rows_confirmed', 'banished_urls'}`` — ``banished_urls`` is the
+    canonical list the run's 🗑️ tally counts (v0.59.0)."""
     log = log or (lambda *a, **k: None)
     report = {'dead': 0, 'reviewed': 0, 'banished': 0, 'revived': 0,
               'handed': 0, 'placeholders_swept': 0, 'notes_moved': 0,
-              'rows_confirmed': 0}
+              'rows_confirmed': 0, 'banished_urls': []}
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
         return report
@@ -2191,6 +2213,7 @@ def consume_decommission_table(state, vault_path: str,
         log(f"✅ Master table: {report['reviewed']} link(s) retired as "
             f"reviewed — dismissed, never fetched again (♻️ revived "
             f"brings any back)", "info")
+    report['banished_urls'] = list(banished_canonicals)
     return report
 
 
@@ -2450,10 +2473,23 @@ class WebsitePipeline:
         # (and the offline golden run) exercise it with the injected
         # fetcher; a vault without the table is a cheap no-op.
         self._graveyard_urls: set = set()
+        # v0.59.0 — THE TALLY: the run's own count of websites removed
+        # by the owner's 🗑️ verdicts (both doors), named once per run —
+        # the owner's ask (session, verbatim): "I want get a log of how
+        # many notes are wiped because of this method, every run …
+        # '10 Websites Removed and will never fetch again because you
+        # blah blah'". Both door reports carry their canonical lists;
+        # the roll-up below dedupes (a URL both marked on its note and
+        # in the table is ONE banishment) and the worker's summary
+        # reads it at the end of the run.
+        self.banished_urls: List[str] = []
+        _banished_run: List[str] = []
         if self.vault_path and os.path.isdir(self.vault_path):
             try:
-                consume_decommission_table(
-                    self.state, self.vault_path, log=self.log)
+                _consume_report = consume_decommission_table(
+                    self.state, self.vault_path, log=self.log) or {}
+                _banished_run.extend(
+                    _consume_report.get('banished_urls') or [])
                 for _u, _st in scan_decommission_table(
                         self.vault_path).items():
                     if _status_is_dead(_st):
@@ -2463,21 +2499,38 @@ class WebsitePipeline:
                 self.log(f"⚠️ Graveyard consume skipped: {e}", "warning")
         # v0.58.0 — THE BANISHMENT: the owner's delete verdicts written
         # on the notes themselves (a 🗑️ / delete / banish / blacklist /
-        # purge tag, or a true decommission: frontmatter key) are
-        # enforced BEFORE anything fetches — the marked notes leave the
-        # library for .trash/banished, their URLs are blacklisted (the
-        # never-fetch gate), the ledger rows are forgotten, and the
-        # master table holds the record rows (♻️ revivable). The
-        # table's own 🗑️ Status gesture rode the consume above (pass
-        # 0). Not gated on fetch_fn: a pure file+DB pass (the hermetic
-        # law — the tests exercise it with the injected fetcher); a
-        # vault with no marked notes is a cheap walk.
+        # purge / auto_delete tag, or a true decommission: frontmatter
+        # key) are enforced BEFORE anything fetches — the marked notes
+        # leave the library for .trash/banished, their URLs are
+        # blacklisted (the never-fetch gate), the ledger rows are
+        # forgotten, and the master table holds the record rows (♻️
+        # revivable). The table's own 🗑️ Status gesture rode the consume
+        # above (pass 0). Not gated on fetch_fn: a pure file+DB pass
+        # (the hermetic law — the tests exercise it with the injected
+        # fetcher); a vault with no marked notes is a cheap walk.
         if self.vault_path and os.path.isdir(self.vault_path):
             try:
-                banish_marked_notes(self.state, self.vault_path,
-                                    log=self.log)
+                _note_report = banish_marked_notes(
+                    self.state, self.vault_path, log=self.log) or {}
+                _banished_run.extend(_note_report.get('urls') or [])
             except Exception as e:  # bookkeeping never kills a batch
                 self.log(f"⚠️ Banishment pass skipped: {e}", "warning")
+        # v0.59.0 — THE TALLY, spoken every run (the zero run answers
+        # too — "how many were wiped" is a number, and 0 is one):
+        self.banished_urls = list(dict.fromkeys(_banished_run))
+        if self.banished_urls:
+            self.log(
+                f"{BANISH_TALLY_PREFIX} {len(self.banished_urls)} "
+                f"website(s) removed this run and never fetched again "
+                f"— you marked them for deletion (🗑️ / delete / "
+                f"auto_delete); the notes rest in "
+                f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')}, the "
+                f"URLs are blacklisted, and ♻️ revived on the record row "
+                f"undoes any of them", "info")
+        else:
+            self.log(
+                f"{BANISH_TALLY_PREFIX} 0 websites removed this run — no "
+                f"🗑️ / delete / auto_delete marks in the library", "info")
         self.taxonomy_path = resolve_taxonomy_path(self.config)
         # v0.20.0 — blocked domains (the X fix): these links are already
         # addressed as rows in the _inbox platform tables; the pipeline

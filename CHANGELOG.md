@@ -1,3 +1,69 @@
+## [0.59.0] — The tally — 2026-10-09
+
+Owner ask (session): "When i write "delete" tag, it autocompletes to
+"auto_delete" is that correct? also, I want get a log of how many
+notes are wiped because of this method, every run. for example
+"10 Websites Removed and will never fetch again because you blah
+blah"" Desktop release v0.59.0, Worker unchanged at **0.30.0** (it
+never touches the vault). Suite grows **1702 → 1709** (7 cases join
+tests/test_banishment.py — pure stdlib at the unit level, the house
+pattern).
+
+**The autocomplete answer, first.** No — as v0.58.0 shipped, the
+exact-word law read only `delete` / `banish` / `blacklist` /
+`purge`, so an `auto_delete` tag would NOT have fired (Obsidian
+autocompletes from tags already in the vault; the word it suggests
+came from the owner's own library, not from GitCurator). v0.59.0
+closes the gap the honest way: **`auto_delete` (and its hyphen twin
+`auto-delete`) is now an official banish word** — exact-match per
+tag, case-insensitive, `#` stripped, on BOTH surfaces (the note's
+own tags AND the master table's Status cell, whose substring law
+obeys the same alias). The word the editor puts under the owner's
+thumb is obeyed exactly like the word he typed; near-misses
+(`automatic_delete`, `auto-deleted-files`, the app's own `auto`
+stamp) still never fire — the grammar stays tight where it must.
+
+**The tally — every run answers with a number.** The owner's
+second ask, verbatim: a log of how many notes were wiped by the
+banishment, *every* run. The pipeline now rolls up BOTH doors (the
+note-tag door and the master-table gesture door — each report
+carries its canonical URL list, `urls` / `banished_urls`), dedupes
+(a URL marked on its note AND in the table is ONE banishment), and
+speaks once per run, right at pipeline start, before anything
+fetches:
+
+> 🗑️ Run tally: 10 website(s) removed this run and never fetched
+> again — you marked them for deletion (🗑️ / delete / auto_delete);
+> the notes rest in .trash/banished, the URLs are blacklisted, and
+> ♻️ revived on the record row undoes any of them.
+
+And because "every run" means every run, the **zero run answers
+too**: `🗑️ Run tally: 0 websites removed this run — no 🗑️ / delete
+/ auto_delete marks in the library` — a count, not silence, so the
+log always tells the owner where his garden stands. The number
+rides the run's END as well: the worker's summary dict gains
+`banished` + `banished_urls`, and the final "🌐 Websites done: …"
+line appends `🗑️ N banished — removed and never fetched again (you
+marked them).` when the run removed anything.
+
+**The surfaces teach the word.** Every note the app writes closes
+with the retire hint — now `Add the tag 🗑️ (or "delete" /
+"auto_delete")` — and the master table's own legend documents
+`🗑️ banished / delete / auto_delete` with the tally line named, so
+the grammar the app obeys is the grammar the vault teaches.
+
+Tests (tests/test_banishment.py, +7 → 38 in the file): the alias
+(exact-word incl. case and `#` variants, near-misses never fire);
+the Status-cell alias (substring law, the app's `auto` stamp stays
+a non-verdict); the loop closed through the autocomplete word; the
+tally — once per run, both doors counted, the count + the contract
+("never fetched again", "you marked", ♻️ named) in the line; the
+quiet run's exact zero wording; the cross-door dedupe (one URL, two
+gestures, ONE banishment); the reports' URL lists (the empty vault
+answers `[]`). Release bookkeeping re-pointed (VERSION, changelog,
+CI counts, AGENTS, SPEC's banished row gains the alias + the
+tally). Suite **1709** (was 1702).
+
 ## [0.58.0] — The banishment — 2026-10-09
 
 Owner ask (session): "Some websites that are currently stored in

@@ -409,13 +409,15 @@ class TestConsume(_GraveyardCase):
                                                log=lambda *a, **k: None)
         # v0.48.0 — the report gained 'handed' (the fourth door's
         # queue gesture count); v0.58.0 — 'banished' + 'notes_moved'
-        # (the 🗑️ removal pass); still all zeros when the table is
+        # (the 🗑️ removal pass); v0.59.0 — 'banished_urls' (the run
+        # tally's list); still all zeros/empty when the table is
         # missing.
         self.assertEqual(report, {'dead': 0, 'reviewed': 0, 'banished': 0,
                                   'revived': 0, 'handed': 0,
                                   'placeholders_swept': 0,
                                   'notes_moved': 0,
-                                  'rows_confirmed': 0})
+                                  'rows_confirmed': 0,
+                                  'banished_urls': []})
 
 
 class TestNeverFetchAgain(_GraveyardCase):
@@ -526,7 +528,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0440(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.58.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.59.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
