@@ -1412,3 +1412,37 @@ After deployment, you'll have:
 ## Next Step
 
 Once Worker + Dashboard are deployed and tested, the final step is **integrating the desktop app** (main.py) with the Python modules. That's the `integration_snippet.py` work — I can do that next, or you can deploy first and verify everything works.
+
+---
+
+## v0.59.0 — desktop-only (the tally: auto_delete joins the banish words; every run answers with a count) — 2026-10-09
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (still the v0.54.0 deploy's version ID
+> `217d4ad9-80df-470c-aba1-dcac8cc7b03d` — v0.59.0 is a
+> DESKTOP-ONLY release: the banish-word alias `auto_delete` and the
+> run-tally roll-up live in `gitcurator/core/website_pipeline.py`
+> and the GUI worker's `website_phase.py` — the vault's grammar,
+> never the Worker's). The Worker's code is unchanged since
+> v0.30.0 — `git diff v0.58.0..v0.59.0 -- app/cloudflare-bot/src/`
+> is EMPTY (only this DEPLOYMENT.md record moved) — so the live
+> deployment IS the v0.59.0 worker, byte for byte.
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.30.0"}`
+> ✓ (last webhook 2026-10-08T21:58:49Z) · root → `200` in 0.26 s ✓.
+>
+> **The no-op re-deploy ritual still awaits the owner's
+> session-scoped `CLOUDFLARE_API_TOKEN` (cfut_…)** — the v0.56.0
+> precedent: with the token in hand, `CLOUDFLARE_API_TOKEN=… npx
+> wrangler deploy` from `app/cloudflare-bot/` produces a fresh
+> version ID over identical code. Functionally a no-op — the live
+> deployment already serves it.
+>
+> Desktop release v0.59.0 (GitCurator-v0.59.0-windows.zip, 129
+> files, sha256
+> `3e94482ccac64921aadaa46314ff0227d40e1894a2933f60430a1292b5075b7b`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.59.0 tag first try (runs 37852528185 + 37852531877 — 1709
+> tests, 85-module compile gate, offline golden 30/30).
