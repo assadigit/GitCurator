@@ -714,6 +714,64 @@ class TestTheTally(_BanishCase):
                                            log=lambda *a, **k: None)
         self.assertEqual(r2['banished_urls'], [other])
 
+    def test_a_held_gate_never_claims_removals(self):
+        # v0.60.2 — the REAL-RUN bug the live channel verification
+        # caught: a timeout run whose table carried 🗑 rows claimed
+        # "N website(s) removed this run" in the tally while every
+        # note sat untouched in the vault (consume_decommission_table
+        # answered banished_urls even under apply_banish=False — the
+        # gate's hold must hold in the TALLY too):
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        self.write_table([('https://b.example/y', 'delete')])
+        self.logs.clear()
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'timeout')
+        self.assertEqual(pipe.banished_urls, [])
+        self.assertTrue(os.path.exists(note_a))   # the note door held
+        tally = [m for (_, m) in self.logs
+                 if m.startswith('🗑️ Run tally:')]
+        self.assertEqual(len(tally), 1)
+        self.assertIn('0 websites removed', tally[0])
+        self.assertIn('KEPT (no answer in time', tally[0])
+
+    def test_the_holds_report_answers_empty_not_pending(self):
+        # the consume's own law: apply_banish=False answers
+        # banished_urls == [] (the verdicts WRITTEN this run — none),
+        # while the rows wait in pending_banish:
+        _a, _note = self.store_proper_note('https://a.example/x')
+        self.write_table([('https://b.example/y', 'delete')])
+        r = wp.consume_decommission_table(
+            self.db, self.vault, log=lambda *a, **k: None,
+            apply_banish=False)
+        self.assertEqual(r['banished_urls'], [])
+        self.assertEqual(r['banished'], 0)
+        self.assertEqual(r['pending_banish'], 1)
+
+    def test_confirmed_history_never_inflates_a_held_tally(self):
+        # the exact live-run shape: one pending gesture + one
+        # long-confirmed history row — the history row never rides a
+        # tally of any kind (it left long ago), and the held run
+        # still answers zero:
+        self.write_table([
+            ('https://b.example/y', 'delete'),
+            ('https://old.example/z',
+             '🗑️ banished — confirmed 2026-09-02')])
+        self.logs.clear()
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'timeout')
+        self.assertEqual(pipe.banished_urls, [])
+        tally = [m for (_, m) in self.logs
+                 if m.startswith('🗑️ Run tally:')]
+        self.assertEqual(len(tally), 1)
+        self.assertIn('0 websites removed', tally[0])
+        # and the ask itself never carried the history row:
+        r = wp.consume_decommission_table(
+            self.db, self.vault, log=lambda *a, **k: None,
+            apply_banish=False)
+        self.assertEqual(r['banished_urls'], [])
+
+
 
 class TestTableGesture(_BanishCase):
     """The master table's own 🗑️ Status — the second surface."""
@@ -1310,7 +1368,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0601(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -1322,6 +1380,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('confirmation gate', text.lower())
         self.assertIn('## [0.60.1]', text)
         self.assertIn('body', text.lower())
+        self.assertIn('## [0.60.2]', text)
+        self.assertIn('prune', text.lower())
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')

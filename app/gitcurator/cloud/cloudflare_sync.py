@@ -38,6 +38,28 @@ from pathlib import Path
 
 
 # ========================================
+# v0.60.2 — THE CHANNEL'S OWN NAME (the 1010 law)
+# ========================================
+# The owner's report chain (v0.60.0 → v0.60.1): the banish-gate ask
+# never reached Telegram even though the scan grammar was proven by
+# 17 tests. Two stacked causes, found from a REAL run against the live
+# worker: (1) the desktop had never completed /pair (the worker's
+# desktop_installs table was EMPTY — CloudflareSync.is_enabled() is
+# False, make_telegram_confirm returns None, the gate defers), and
+# (2) even a paired install could not talk: every request this module
+# sends rode urllib's default signature ``Python-urllib/3.x``, and
+# Cloudflare's edge answers that with **error 1010 — "banned browser
+# signature"** (a 403 that never reaches the Worker's own code — no
+# HMAC check, no route, nothing). Replayed with any other name
+# (``GitCurator/…``, curl, a browser UA) the identical request passes.
+# So the channel now introduces itself on EVERY leg — pair, the HMAC
+# API, health — as the app it is; the honest identity passes the edge,
+# the banned one never did. Keep this in sync with VERSION at release
+# time (the string only needs to not be a banned signature).
+HTTP_USER_AGENT = "GitCurator/0.60.2 (+https://github.com/assadigit/GitCurator)"
+
+
+# ========================================
 # Configuration keys (stored in config.json)
 # ========================================
 
@@ -108,7 +130,11 @@ class CloudflareSync:
             req = urllib.request.Request(
                 url,
                 data=body,
-                headers={'Content-Type': 'application/json'},
+                headers={'Content-Type': 'application/json',
+                         # v0.60.2 — the 1010 law: urllib's default
+                         # signature is banned at Cloudflare's edge; the
+                         # pairing leg must introduce itself too.
+                         'User-Agent': HTTP_USER_AGENT},
                 method='POST'
             )
 
@@ -195,7 +221,13 @@ class CloudflareSync:
             'X-Auth-Install': self.install_id,
             'X-Auth-Timestamp': timestamp,
             'X-Auth-Signature': signature,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            # v0.60.2 — the 1010 law (the ask-never-arrived chain's
+            # second cause): urllib's default ``Python-urllib/3.x``
+            # signature is banned at Cloudflare's edge — every HMAC
+            # request died with error 1010 before the Worker ever saw
+            # it. The channel introduces itself as the app instead.
+            'User-Agent': HTTP_USER_AGENT
         }
 
     def _make_request(self, method: str, path: str, body: dict = None) -> Tuple[int, dict]:
@@ -511,7 +543,11 @@ class CloudflareSync:
         """Check Worker health (no auth required)."""
         try:
             url = f"{self.worker_url}/health"
-            req = urllib.request.Request(url, method='GET')
+            # v0.60.2 — the 1010 law: health checks wear the app's name
+            # too (urllib's default signature is edge-banned).
+            req = urllib.request.Request(
+                url, method='GET',
+                headers={'User-Agent': HTTP_USER_AGENT})
             # Bypass proxy for workers.dev
             proxy_handler = urllib.request.ProxyHandler({})
             opener = urllib.request.build_opener(proxy_handler)

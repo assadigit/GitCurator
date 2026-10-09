@@ -354,9 +354,11 @@ class TestRetryMasterWaiting(_MasterCase):
         results = pipe2.retry_master_waiting()
         self.assertEqual([r['outcome'] for r in results], ['processed'])
         self.assertEqual(fetch2.calls, [_URL])   # really fetched again
-        # 3. the ledger agrees: retry row gone, row stamped stored
+        # 3. the ledger agrees: retry row gone; v0.60.2 — the compact
+        # table: the stored row LEAVES (the note in the vault is the
+        # record now, not a table row):
         self.assertIsNone(self.db.retry_row(_CANON))
-        self.assertIn('📁 stored', self.table_text())
+        self.assertNotIn(_URL, self.table_text())
         self.assertIn("every ' - ' fetch row got its retry",
                       self.all_logs())
 
@@ -455,14 +457,19 @@ class TestStampStoredRows(_MasterCase):
 
     def test_the_refresh_stamps_via_the_batch(self):
         # the full circle: refresh_master_table (every batch's last
-        # move) stamps the stale row — the waiting set stays honest
+        # move) stamps the stale row — and v0.60.2 prunes it the same
+        # pass (a stored link is TERMINAL: its note in the vault is
+        # the record, the table keeps only what still needs the owner)
         self.db.mark_processed(_CANON,
                                os.path.join(self.vault, 'Design', 'n.md'),
                                'Design', '', 'full')
         self.write_table([(_URL, ' - ', 'old error')])
         wp.refresh_master_table(self.db, self.vault,
                                 log=lambda *a, **k: None)
-        self.assertIn('📁 stored', self.table_text())
+        self.assertNotIn(_URL, self.table_text())
+        # the honesty mechanism itself is unchanged (the unit law):
+        self.assertEqual(
+            wp.stamp_stored_rows(self.db, self.vault), 0)  # already gone
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +579,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0510(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_mentions_the_pass(self):
         text = self._read('CHANGELOG.md')

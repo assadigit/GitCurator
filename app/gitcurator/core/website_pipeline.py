@@ -1107,6 +1107,17 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   (the row is the record, nothing more to do).
 > Rows marked "auto" were retired by the fetcher's own verdict
 > (dead / paywalled / refused) — set ♻️ revived to disagree.
+> v0.60.2 — THE COMPACT TABLE: rows whose verdict is WRITTEN
+>   (confirmed / banished / stored / hand-delivered / auto) LEAVE this
+>   table after every batch — their records live in the state DB and
+>   .trash/banished, and this table keeps only the links that still
+>   need you. To REVIVE any retired link (bring it back to be fetched
+>   like new), add a row with ♻️ and its URL — any shape works:
+>
+>     | ♻️ | | https://the-link.example/its-path | | | | |
+>
+>   (indented here so it stays an instruction, not a row) — the next
+>   run reads your row and un-retires the link.
 > Auto-updated after every batch. Last updated: {now}
 
 | # | Date | URL | Domain | Source | Status | Notes |
@@ -2247,7 +2258,13 @@ def consume_decommission_table(state, vault_path: str,
     owner has not confirmed yet — the marks stay, the notes stay),
     while the dead/reviewed/hand passes run unchanged (those verdicts
     were already the owner's explicit hand; only the DESTRUCTIVE door
-    waits for the ask)."""
+    waits for the ask).
+
+    v0.60.2 — the hold holds in the TALLY too: ``banished_urls`` is
+    the list of verdicts WRITTEN this run (an ``apply_banish=False``
+    call answers ``[]`` — found in a REAL channel-verification run
+    whose timeout tally claimed removals that never happened while
+    every note sat untouched in the vault)."""
     log = log or (lambda *a, **k: None)
     report = {'dead': 0, 'reviewed': 0, 'banished': 0, 'revived': 0,
               'handed': 0, 'placeholders_swept': 0, 'notes_moved': 0,
@@ -2276,6 +2293,14 @@ def consume_decommission_table(state, vault_path: str,
     # COUNTED (pending_banish) — the owner has not confirmed, so the
     # marks and the notes stay exactly as they are. -----------------------
     banished_canonicals: List[str] = []
+    # v0.60.2 — the REAL-RUN honesty law: ``banished_urls`` is the list
+    # of verdicts WRITTEN this run (what actually left), never the mere
+    # presence of a 🗑 status. The live channel verification caught a
+    # timeout run whose table carried two banished-status rows (one
+    # pending gesture, one long-confirmed history) claiming "2
+    # website(s) removed this run" while the vault still held every
+    # note — the gate's hold must hold in the TALLY too.
+    banished_consumed: List[str] = []
     for row in rows:
         if not _status_is_banished(row['status']):
             continue
@@ -2287,6 +2312,7 @@ def consume_decommission_table(state, vault_path: str,
             report['pending_banish'] += 1
             continue    # the gate's hold — nothing consumed, nothing moved
         report['banished'] += 1
+        banished_consumed.append(canonical)
         note_path = _find_note_for_url(vault_path, canonical, state=state,
                                        log=log)
         b = _banish_url(state, vault_path, canonical, note_path,
@@ -2494,8 +2520,114 @@ def consume_decommission_table(state, vault_path: str,
         log(f"✅ Master table: {report['reviewed']} link(s) retired as "
             f"reviewed — dismissed, never fetched again (♻️ revived "
             f"brings any back)", "info")
-    report['banished_urls'] = list(banished_canonicals)
+    # v0.60.2 — the honesty law: only the verdicts WRITTEN this run
+    # ride the report's list (an apply_banish=False hold answers [];
+    # a confirmed history row re-consumed idempotently still counts —
+    # the same set the auto/confirmed path always carried).
+    report['banished_urls'] = list(banished_consumed)
     return report
+
+
+def _status_is_terminal(status: str) -> bool:
+    """v0.60.2 — a master-table row whose story is WRITTEN.
+
+    The owner's ask (session, verbatim): "Prune the decommissioned
+    table: remove links that reached a terminal verdict (stored
+    properly / blocked / banished) — keep only pending ones. I don't
+    need that old long table." A row is terminal when its verdict is
+    already enforced and its record lives elsewhere (the state DB's
+    dismissal row + .trash/banished + the run logs): every CONFIRMED
+    stamp (🗑️ banished — / 🪦 confirmed — decommissioned / ✅
+    confirmed — reviewed), the harvest's final green verdict
+    (✅ hand-delivered — fetched), the stored-properly stamp (📁
+    stored — the note is in the vault), and the fetcher's own
+    auto-verdict rows (🪦 auto — dead/paywalled/refused: the
+    "blocked" class). A PENDING gesture never matches — a fresh 🪦
+    dead or 🗑️ banish mark waits for its consume; a ♻️ revived row
+    stays while its revival is in flight (the undo door is never
+    furniture)."""
+    s = (status or '').strip().lower()
+    if not s:
+        return False
+    if _status_is_revived(s):
+        return False            # the undo door stays visible, in flight
+    if 'confirmed' in s:
+        return True             # every consume/harvest confirm stamp
+    if 'hand-delivered' in s:
+        return True             # the harvest's final green verdict
+    if 'stored' in s:
+        return True             # 📁 stored — the note is in the vault
+    if 'auto —' in s:
+        return True             # the fetcher's own verdict rows
+    return False
+
+
+def prune_decommission_table(vault_path: str,
+                             log: Optional[Callable] = None) -> Dict:
+    """v0.60.2 — the table keeps only what still needs the owner.
+
+    Every terminal row (:func:`_status_is_terminal` — verdicts already
+    written and enforced) LEAVES the table; the pending ones (waiting
+    " - " / unreviewed rows, fresh owner gestures not yet consumed,
+    🖐 hand-queued rows, ♻️ revivals in flight) stay. The verdicts'
+    records live on where they always did — the state DB's dismissal
+    rows, .trash/banished, the run logs — and the REVIVE door stays
+    open for every one of them: add a row with ♻️ and the URL (any
+    shape the parse reads — ``| ♻️ | | https://the-link | | | | |``)
+    and the next run's consume un-retires the link (the legend at the
+    top of the table says so). The header and its legend are never
+    touched; a table whose every row left keeps its header (the
+    legend is the revive-by-URL instruction). Pure file rewrite,
+    atomic + dry-run aware; never raises. Returns
+    ``{'pruned', 'kept', 'pruned_urls'}``."""
+    log = log or (lambda *a, **k: None)
+    out: Dict = {'pruned': 0, 'kept': 0, 'pruned_urls': []}
+    path = decommission_table_path(vault_path)
+    if not vault_path or not os.path.isfile(path):
+        return out
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        log(f"⚠️ Master-table prune skipped — the table could not be "
+            f"read: {e}", "warning")
+        return out
+    rows = _parse_decommission_rows(path)
+    if not rows:
+        return out            # nothing data-shaped — the legend stands
+    drop_lines: set = set()
+    for row in rows:
+        if _status_is_terminal(row['status'] or ''):
+            drop_lines.add(row['line'])
+            out['pruned'] += 1
+            out['pruned_urls'].append(
+                normalize_website_url(row['url']) or row['url'])
+        else:
+            out['kept'] += 1
+    if not out['pruned']:
+        return out            # a pending-only table is already the law
+    kept_lines = [ln for i, ln in enumerate(lines)
+                  if i not in drop_lines]
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    kept_lines = [f"> Auto-updated after every batch. Last updated: {now}"
+                  if ln.startswith('> Auto-updated after every batch.')
+                  else ln
+                  for ln in kept_lines]
+    try:
+        atomic_write_text(
+            path, '\n'.join(kept_lines).rstrip('\n') + '\n')
+    except Exception as e:
+        log(f"⚠️ Master-table prune could not be written: {e}",
+            "warning")
+        return {'pruned': 0, 'kept': out['kept'] + out['pruned'],
+                'pruned_urls': []}
+    if out['pruned']:
+        log(f"📋 Master table pruned: {out['pruned']} terminal "
+            f"row(s) left the table ({out['kept']} pending row(s) "
+            f"stay) — their verdicts live in the state DB and "
+            f".trash/banished; to revive any of them, add a row with "
+            f"♻️ and the URL (the legend above shows the shape)", "info")
+    return out
 
 
 # ===========================================================================
@@ -2514,10 +2646,19 @@ def refresh_master_table(state, vault_path: str,
     * every WAITING failure (the whole retry queue — attempts, last
       error) and every scanned ``_review`` placeholder whose state row
       was lost, as fresh 'unreviewed' rows with the last error in the
-      Notes column;
-    * every auto-verdict retirement (the fetcher's own dead / paywalled
-      / refused verdicts) as a '🪦 auto — <category>' row — visible,
-      revivable (♻️), and consumed by the next batch like any burial.
+      Notes column.
+
+    v0.60.2 — THE COMPACT TABLE (the owner's ask: "Prune the
+    decommissioned table: remove links that reached a terminal
+    verdict (stored properly / blocked / banished) — keep only
+    pending ones. I don't need that old long table"): terminal rows
+    leave at the end of every refresh
+    (:func:`prune_decommission_table` — confirmed stamps, stored
+    stamps, hand-delivered verdicts, auto-verdict rows), the
+    auto-verdict population is no longer written (the state DB and
+    the logs are their record), and every retired link stays
+    revivable BY URL: a row with ♻️ and the URL — the legend at the
+    top of the table shows the shape.
 
     v0.49.0 — the third population, the owner's report: "it currently
     only adds links like before in _review" — the links that wait for
@@ -2609,21 +2750,19 @@ def refresh_master_table(state, vault_path: str,
             retired_notes[u] = verdict
             report['retired'] += 1
 
+        # v0.60.2 — THE COMPACT TABLE: the auto-verdict rows are no
+        # longer WRITTEN (the owner's ask: "I don't need that old long
+        # table"). The verdict's record lives in the state DB and the
+        # run logs; the table keeps only what still needs the owner
+        # (the waiting rows below); a retired link comes back through
+        # the revive-by-URL row (the legend's instruction). Writing
+        # them here would also churn: the prune below removes them the
+        # same pass, and the next refresh (its table-dedupe now blind)
+        # would re-write every one — write-then-delete forever.
         n1 = write_decommission_candidates(
             vault_path, waiting_urls, source='waiting',
             log=None, notes=waiting_notes) if waiting_urls else 0
-        n2 = 0
-        if retired_urls:
-            by_status: Dict[str, List[str]] = {}
-            for u in retired_urls:
-                verdict = retired_notes.get(u, '')
-                cat = verdict.split(' —', 1)[0].strip() or 'retired'
-                by_status.setdefault(f"🪦 auto — {cat}", []).append(u)
-            for status, urls in by_status.items():
-                n2 += write_decommission_candidates(
-                    vault_path, urls, source='auto-verdict',
-                    log=None, notes=retired_notes, status=status)
-        report['written'] = n1 + n2
+        report['written'] = n1
         # v0.51.0 — the truth stamp: rows still marked " - " whose
         # retries have since SUCCEEDED are stamped '📁 stored' — the
         # waiting set stays honest, so the caught-up check (and the
@@ -2642,6 +2781,15 @@ def refresh_master_table(state, vault_path: str,
             harvest_hand_rows(state, vault_path, log=log)
         except Exception as e:  # bookkeeping never kills a batch
             log(f"⚠️ Hand-harvest pass skipped: {e}", "warning")
+        # v0.60.2 — THE PRUNE: terminal rows leave the table (the
+        # owner's compact-list ask) — the consume's confirm stamps, the
+        # stored stamps, the harvest's green verdicts, and any leftover
+        # auto-verdict rows from the v0.47–v0.60 era. The pending rows
+        # stay; the header and its revive-by-URL legend stay.
+        try:
+            prune_decommission_table(vault_path, log=log)
+        except Exception as e:  # bookkeeping never kills a batch
+            log(f"⚠️ Master-table prune skipped: {e}", "warning")
         if report['written']:
             log(f"📋 Master table refreshed: {report['waiting']} waiting "
                 f"(fetch failures + links parked in _review), "
@@ -2649,7 +2797,9 @@ def refresh_master_table(state, vault_path: str,
                 f"{report['written']} new row(s) in "
                 f"{DECOMMISSION_TABLE} (🪦 dead / ✅ reviewed retire; ♻️ "
                 f"revived re-fetches; 🖐 hand queues for the fourth "
-                f"door — your real Chrome)", "info")
+                f"door — your real Chrome; terminal rows leave the "
+                f"table — the state DB and .trash keep their records)",
+                "info")
     except Exception as e:  # bookkeeping never kills a batch
         log(f"⚠️ Master table refresh skipped: {e}", "warning")
     return report

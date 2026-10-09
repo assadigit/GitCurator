@@ -1197,7 +1197,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0550(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_has_the_v055_beat(self):
         text = self._read('CHANGELOG.md')
@@ -1228,7 +1228,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
                     'test_mastertable', 'test_autopip', 'test_fifthdoor',
                     'test_persistentdoor', 'test_bothdoors'):
             src = self._read('app', 'tests', f'{mod}.py')
-            self.assertIn('0.60.1', src,
+            self.assertIn('0.60.2', src,
                           f'{mod} must re-pin to 0.60.1')
 
 
