@@ -5,6 +5,46 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.61.0 deploy record — the 0.32.0 worker, LIVE and verified (LIVE ✅ · THE VAULT SCAN)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-9bdc-4b8e-9eb3-fc3f2cc24179`, deployed this
+> session with the owner's Workers deploy token —
+> `CLOUDFLARE_API_TOKEN=… ./node_modules/.bin/wrangler deploy` from
+> `app/cloudflare-bot/`). v0.61.0 is THE VAULT SCAN: the worker grows
+> the scan's Telegram round-trip — `/api/scan/propose|status|result`
+> (HMAC-signed like every desktop endpoint, the 1010-law UA included)
+> + the `scan_yes` / `scan_no` buttons over the webhook's
+> callback_query + the `scan_confirm:<id>` state row with the
+> supersede law (one live question at a time) + `activity_log`
+> 'scan_gate' events. The ask carries the WHOLE plan (the owner's
+> auto-delete marks + the LLM's filing proposal) and NOTHING is
+> deleted or moved until he answers; no answer in 300s = the safe
+> defer.
+>
+> **Verified live (this session):** `/health?cb=…` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.32.0"}`
+> ✓ · root → `200` in 0.25s ✓ · the REAL scan round-trip over the
+> live worker (the sandbox pairing from the v0.60.2 record): propose
+> at 22:53:58 → "🗂️ Vault scan review — 5 deletions · 1 move · 1 new
+> folder" in the owner's chat with the 🗂️ Apply / ✋ Keep buttons →
+> no answer in 300s → the timeout close at 22:59:01 (message edited
+> into the no-answer story; the D1 `scan_confirm:<id>` row +
+> `activity_log` entries the evidence; the vault untouched — the safe
+> defer held). Worker tests 59 → **68** (9 cases in
+> test/scan-gate.test.js — propose/status/result, the buttons, the
+> supersede law, HTML escaping, the HMAC law).
+>
+> Desktop release v0.61.0 (GitCurator-v0.61.0-windows.zip, 134 files,
+> 1,096,289 bytes, sha256
+> `560506696f51b6b26a763ba9efcfd9fcedc12e44c7219ba517725f2fb8ffa088`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.61.0 tag first try (runs 38001494123 + 38001494041 — 1780
+> tests, 88-module compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.60.2 deploy record — the unchanged 0.31.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE CHANNEL VERIFICATION)
 
 > **Live in production** at
