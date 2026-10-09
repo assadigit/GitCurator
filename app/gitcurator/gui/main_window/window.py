@@ -76,6 +76,7 @@ from gitcurator.gui.main_window.processing_control import ProcessingControlMixin
 from gitcurator.gui.main_window.telegram_ui import TelegramUiMixin
 
 from gitcurator.gui.main_window.test_connection_modal import TestConnectionModalMixin
+from gitcurator.gui.main_window.vault_scan_ui import VaultScanUiMixin
 
 from gitcurator.gui.main_window.theme import ThemeMixin
 
@@ -85,7 +86,7 @@ from gitcurator.gui.main_window.vaults_config import VaultConfigMixin
 
 from gitcurator.gui.processing_worker import TestWorker
 
-class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin, ProcessingControlMixin, TelegramUiMixin, InputProxyMixin, VaultConfigMixin, TestConnectionModalMixin, LinkingToolsMixin, LlamaCppMixin, ConnectionTestsMixin, HeroMixin, UiMixin, ThemeMixin, QMainWindow):
+class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin, ProcessingControlMixin, TelegramUiMixin, InputProxyMixin, VaultConfigMixin, TestConnectionModalMixin, VaultScanUiMixin, LinkingToolsMixin, LlamaCppMixin, ConnectionTestsMixin, HeroMixin, UiMixin, ThemeMixin, QMainWindow):
     # v0.15.1 — startup llama.cpp auto-detect: the detector daemon thread
     # hands its result to the GUI thread through this queued signal (the
     # owner: "the service is running on task manager, the app must

@@ -9,4 +9,4 @@
 // The app reads this from GET /health -> {"version": ...} and warns
 // when the deployed Worker is older than the app expects.
 
-export const WORKER_VERSION = '0.31.0';
+export const WORKER_VERSION = '0.32.0';
