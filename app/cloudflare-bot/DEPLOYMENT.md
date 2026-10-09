@@ -5,6 +5,52 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.60.2 deploy record — the unchanged 0.31.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE CHANNEL VERIFICATION)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `138c8730-7870-453a-971c-ebeaa8fafa52` — the v0.60.0
+> deployment; v0.60.2 is a DESKTOP-ONLY release: the session's REAL-RUN
+> verification — the pairing inserted into the live D1
+> `desktop_installs` in the exact `/pair` result shape (install
+> `5e503f6e…`, the desktop's own `CloudflareSync` HMAC law) — found the
+> ask-never-arrived chain's two stacked causes: (1) the desktop had
+> never completed `/pair` (the installs table was EMPTY — the gate
+> deferred every run), and (2) every channel request rode urllib's
+> default `Python-urllib/3.x` signature, which Cloudflare's EDGE bans
+> with **error 1010** — a 403 that dies before the Worker's own code
+> ever runs (replayed under `GitCurator/0.60.2` the identical request
+> passes). The channel now wears `HTTP_USER_AGENT` on every leg; the
+> round trip is PROVEN LIVE: propose at 21:57:11 → the 🗑️/✋ buttons
+> in the owner's chat → no answer in 300s → the timeout close at
+> 22:02:15 (message edited into the no-answer story, the D1
+> `banish_confirm:<id>` row + `activity_log` 'banish_gate' entries the
+> evidence). The same run caught the held gate's false tally (a
+> timeout claiming "2 website(s) removed" while every note sat
+> untouched — `banished_urls` is now the verdicts WRITTEN this run)
+> and paid for THE COMPACT TABLE (terminal rows leave
+> `DECOMMISSIONED.md`; revive-by-URL is the undo door). All desktop
+> Python; `git diff v0.60.1..v0.60.2 -- app/cloudflare-bot/src/` is
+> EMPTY (only this DEPLOYMENT.md record differs), so the live
+> deployment serves the identical code — no re-deploy needed.
+>
+> **The owner's one remaining move:** send `/pair` to @githubfetcherbot
+> and enter the code in the app's Cloudflare tab — THE DESKTOP'S OWN
+> pairing (the sandbox's verification install is the proof the channel
+> works; the owner's install is the one that persists).
+>
+> **Verified live (this session):** `/health` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.31.0"}`
+> ✓ · root → `200` in 0.26s ✓ · the live round trip above ✓. Desktop
+> release v0.60.2 (GitCurator-v0.60.2-windows.zip, 130 files, 1,078,972
+> bytes, sha256
+> `22eae2790b55563820f2742c3c97c5074a2a7f4aa8f8411aa431398f581b5ad6`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.60.2 tag first try (runs 37999112948 + 37999112977 — 1758 tests,
+> 86-module compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.60.1 deploy record — the unchanged 0.31.0 worker, LIVE and verified (LIVE ✅ · desktop-only release)
 
 > **Live in production** at
