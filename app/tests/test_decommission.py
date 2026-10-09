@@ -520,6 +520,132 @@ class TestNeverFetchAgain(_GraveyardCase):
         self.assertIn('🪦 Master table:', self.all_logs())
 
 
+class TestThePrune(_GraveyardCase):
+    """v0.60.2 — THE COMPACT TABLE (the owner's ask, verbatim: "Prune
+    the decommissioned table: remove links that reached a terminal
+    verdict (stored properly / blocked / banished) — keep only pending
+    ones. Keep the ♻️ revive flow working (compact list or
+    revive-by-URL). I don't need that old long table")."""
+
+    def test_every_terminal_verdict_leaves_pending_stays(self):
+        self.write_table([
+            ('https://t.example/banished', '🗑️ banished — confirmed 2026-09-02'),
+            ('https://t.example/dead', '🪦 confirmed — decommissioned 2026-09-03'),
+            ('https://t.example/reviewed', '✅ confirmed — reviewed 2026-09-04'),
+            ('https://t.example/hand', '✅ hand-delivered — fetched 2026-09-05'),
+            ('https://t.example/stored', '📁 stored — 2026-09-06'),
+            ('https://t.example/auto', '🪦 auto — refused'),
+            ('https://p.example/waiting', ' - '),
+            ('https://p.example/unreviewed', 'unreviewed'),
+            ('https://p.example/fresh-dead', '🪦 dead'),
+            ('https://p.example/fresh-banish', '🗑️ banished'),
+            ('https://p.example/hand-queued', '🖐 hand — queued 2026-10-01'),
+            ('https://p.example/revived', '♻️ revived'),
+        ])
+        self.logs.clear()
+        r = wp.prune_decommission_table(self.vault,
+                                        log=lambda m, l='info':
+                                        self.logs.append((l, m)))
+        self.assertEqual(r['pruned'], 6)
+        self.assertEqual(r['kept'], 6)
+        text = self.table_text()
+        for gone in ('t.example/banished', 't.example/dead',
+                     't.example/reviewed', 't.example/hand',
+                     't.example/stored', 't.example/auto'):
+            self.assertNotIn(gone, text)
+        for stays in ('p.example/waiting', 'p.example/unreviewed',
+                      'p.example/fresh-dead', 'p.example/fresh-banish',
+                      'p.example/hand-queued', 'p.example/revived'):
+            self.assertIn(stays, text)
+        # the header + the legend (the revive-by-URL instruction) stay:
+        self.assertIn('Review Master Table', text)
+        self.assertIn('♻️', text)
+        # one honest line speaks the prune:
+        self.assertIn('Master table pruned: 6 terminal row(s)',
+                      self.all_logs())
+
+    def test_the_prune_is_idempotent(self):
+        self.write_table([
+            ('https://t.example/banished', '🗑️ banished — confirmed 2026-09-02'),
+            ('https://p.example/waiting', ' - '),
+        ])
+        wp.prune_decommission_table(self.vault, log=lambda *a, **k: None)
+        text_after_first = self.table_text()
+        r2 = wp.prune_decommission_table(self.vault,
+                                         log=lambda *a, **k: None)
+        self.assertEqual(r2['pruned'], 0)
+        self.assertEqual(r2['kept'], 1)
+        self.assertEqual(self.table_text(), text_after_first)
+
+    def test_a_pending_only_table_is_untouched(self):
+        self.write_table([('https://p.example/waiting', ' - ')])
+        before = self.table_text()
+        r = wp.prune_decommission_table(self.vault,
+                                        log=lambda *a, **k: None)
+        self.assertEqual(r['pruned'], 0)
+        self.assertEqual(self.table_text(), before)
+
+    def test_the_legend_example_is_not_a_row(self):
+        # the legend's revive-by-URL example must stay an INSTRUCTION:
+        # a fresh table's parse sees only the intended data rows.
+        self.write_table([('https://p.example/waiting', ' - ')])
+        rows = wp._parse_decommission_rows(
+            wp.decommission_table_path(self.vault))
+        self.assertEqual([r['url'] for r in rows],
+                         ['https://p.example/waiting'])
+        # and the legend carries the instruction itself:
+        self.assertIn('REVIVE any retired link', self.table_text())
+
+    def test_revive_by_url_after_the_prune(self):
+        # the owner's flow, end to end: a banished link's terminal row
+        # left the table — the DB dismissal + .trash/banished hold the
+        # record — and the legend's revive-by-URL row brings it back:
+        url = 'https://r.example/retired'
+        canonical = wp.normalize_website_url(url)
+        self.db.dismiss(canonical, 'banished by owner — the prune test')
+        self.write_table([
+            (url, '🗑️ banished — confirmed 2026-09-02')])
+        wp.prune_decommission_table(self.vault, log=lambda *a, **k: None)
+        self.assertNotIn(url, self.table_text())
+        self.assertTrue(self.db.is_dismissed(canonical))
+        # the owner adds the legend's row (the trimmed hand shape — the
+        # URL may sit in any early cell):
+        path = wp.decommission_table_path(self.vault)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(f"\n| ♻️ | | {url} | | | | |\n")
+        wp.consume_decommission_table(self.db, self.vault,
+                                      log=lambda *a, **k: None)
+        self.assertFalse(self.db.is_dismissed(canonical))
+
+    def test_dry_run_prunes_nothing(self):
+        self.write_table([
+            ('https://t.example/banished', '🗑️ banished — confirmed 2026-09-02'),
+            ('https://p.example/waiting', ' - '),
+        ])
+        before = self.table_text()
+        dryrun.enable()
+        try:
+            r = wp.prune_decommission_table(self.vault,
+                                            log=lambda *a, **k: None)
+        finally:
+            dryrun.disable()
+        self.assertEqual(self.table_text(), before)   # rehearsed only
+
+    def test_refresh_prunes_terminal_rows(self):
+        # the refresh (every batch's end) is where the prune rides:
+        self.db.enqueue_retry('https://p.example/waiting', 'HTTP 403')
+        self.write_table([
+            ('https://t.example/old', '🪦 auto — dead'),
+            ('https://t.example/banished', '🗑️ banished — confirmed 2026-09-02'),
+        ])
+        wp.refresh_master_table(self.db, self.vault,
+                                log=lambda *a, **k: None)
+        text = self.table_text()
+        self.assertNotIn('t.example/old', text)
+        self.assertNotIn('t.example/banished', text)
+        self.assertIn('https://p.example/waiting', text)
+
+
 class TestReleaseBookkeeping(unittest.TestCase):
     """The house source-contract tests (the test_bothdoors pattern)."""
 
@@ -533,7 +659,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0440(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

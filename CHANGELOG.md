@@ -1,3 +1,73 @@
+## [0.60.2] — The channel's own name + the honest tally + the compact table — 2026-10-10
+
+The session's REAL-RUN verification (the pairing inserted into the
+live Worker's D1 in the exact `/pair` result shape, the production
+`WebsitePipeline` gate run against the live bot) found why the
+deletion review never reached Telegram — and what the timeout run
+lied about while it waited. Three repairs, one release. Desktop
+release only (the Worker is untouched — 0.31.0 stays). Suite grows
+**1740 → 1758** (8 cases join tests/test_channelua.py, 4 join
+tests/test_banishment.py, 7 join tests/test_decommission.py —
+test_mastertable and test_masterretry and test_handharvest re-assert
+the compact-table law on their old rows).
+
+**The channel's own name (the 1010 law).** The ask-never-arrived
+chain had TWO stacked causes, both invisible from the grammar's 17
+green tests. First, the desktop had never completed `/pair` — the
+Worker's `desktop_installs` table was EMPTY, so
+`CloudflareSync.is_enabled()` answered False, `make_telegram_confirm`
+returned None, and the gate took the safe defer every run. Second —
+the one a REAL pairing exposed — every request the channel sent rode
+urllib's default signature `Python-urllib/3.x`, and Cloudflare's edge
+answers exactly that signature with **error 1010, "banned browser
+signature"**: a 403 that dies before the Worker's own code ever runs
+(no HMAC check, no route, nothing). Replayed byte-identically under
+any other name — `GitCurator/…`, curl, a browser UA — the request
+passes. So `cloudflare_sync` now introduces itself on EVERY leg
+(pair, the HMAC API, health) as `GitCurator/0.60.2
+(+https://github.com/assadigit/GitCurator)`, and the round trip is
+proven live: the deletion review proposed at 21:57, the buttons sat
+in the owner's chat, the timeout closed the message at 22:02 — the
+message edited into the no-answer story, nothing deleted, the marks
+kept for the next ask. tests/test_channelua.py pins the law
+hermetically (a scripted opener captures every request — pair,
+pending, propose, status, result, health — and each one must wear
+the app's name, never urllib's).
+
+**The honest tally.** The same real run caught the gate's hold lying
+in the summary: a timeout verdict whose master table carried two
+banished-status rows (one pending gesture, one long-confirmed
+history) answered "🗑️ Run tally: 2 website(s) removed this run" while
+every note sat untouched in the vault —
+`consume_decommission_table` filled `banished_urls` from the mere
+PRESENCE of banish statuses even under `apply_banish=False`. The list
+is now the verdicts WRITTEN this run (`banished_consumed` — the
+auto/confirmed path answers the same set it always did; a held gate
+answers `[]`, and the tally speaks the KEPT line instead). Four cases
+join tests/test_banishment.py, including the exact live-run shape
+(pending gesture + confirmed history) asserting zero.
+
+**The compact table.** The owner's ask, verbatim: "Prune the
+decommissioned table: remove links that reached a terminal verdict
+(stored properly / blocked / banished) — keep only pending ones. Keep
+the ♻️ revive flow working (compact list or revive-by-URL). I don't
+need that old long table." `prune_decommission_table` rides every
+refresh (every batch's end): confirmed stamps, 📁 stored rows,
+hand-delivered verdicts, and the fetcher's own `🪦 auto —` rows LEAVE
+(their records live in the state DB and `.trash/banished`); waiting
+`" - "`/unreviewed rows, fresh owner gestures not yet consumed,
+hand-queued rows, and in-flight ♻️ revivals stay. The auto-verdict
+population is no longer WRITTEN either — write-then-prune would churn
+forever (the refresh's table-dedupe goes blind once the rows are
+gone). The revive door stays open for every retired link BY URL: the
+table's own legend now teaches the shape — add a row with ♻️ and the
+URL (indented in the legend so it stays an instruction, not a
+parseable row), and the next run's consume un-retires the link. Seven
+cases join tests/test_decommission.py; the full-circle test walks the
+owner's flow end to end — dead-domain retirement spoken but never
+written, future paste skipped, the hand-added ♻️ row bringing it
+back.
+
 ## [0.60.1] — The body tags + the honest count — 2026-10-10
 
 Owner report (session, verbatim): "I tried the new version, Even

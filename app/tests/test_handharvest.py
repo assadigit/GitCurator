@@ -502,8 +502,11 @@ class TestHarvestCatchUp(_HarvestCase):
         self.write_table([(_URL, ' - ', 'old error')])
         wp.refresh_master_table(self.db, self.vault,
                                 log=lambda *a, **k: None)
+        # v0.60.2 — the compact table: a stored link's row LEAVES at
+        # the refresh's prune (terminal verdict — the note in the vault
+        # is the record); it is never retired as hand-delivered:
         table = self.table_text()
-        self.assertIn('📁 stored', table)
+        self.assertNotIn(_URL, table)
         self.assertNotIn('✅ hand-delivered', table)
 
 
@@ -639,7 +642,9 @@ class TestHarvestDelivery(_HarvestCase):
 
     def test_run_ends_with_the_refresh_harvest(self):
         # the belt-and-braces half: the batch's last move retires the
-        # row even if the step-7 hook was somehow skipped
+        # row even if the step-7 hook was somehow skipped — and
+        # v0.60.2's prune then carries the terminal verdict away (the
+        # table keeps only what still needs the owner)
         proper = self.write_proper_note(_URL)
         self.db.mark_processed(
             _CANON, proper, 'Design', '', 'full')
@@ -647,7 +652,8 @@ class TestHarvestDelivery(_HarvestCase):
         other = 'https://fresh.example.net/page'
         pipe = self.make_pipeline(fetch=_FakeFetch())
         pipe.run([other])
-        self.assertIn('✅ hand-delivered', self.table_text())
+        self.assertIn('retired to the green checkbox', self.all_logs())
+        self.assertNotIn(_URL, self.table_text())
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +735,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_pin(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_beat(self):
         changelog = self._read('CHANGELOG.md')

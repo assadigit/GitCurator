@@ -162,6 +162,19 @@ class _MasterCase(unittest.TestCase):
         with open(self.table_path(), encoding='utf-8') as f:
             return f.read()
 
+    def write_table_rows(self, rows):
+        """v0.60.2 — hand-write data rows into the master table (the
+        owner's own editing shape: URL + Status)."""
+        from urllib.parse import urlparse
+        lines = [wp._GRAVEYARD_HEADER.format(now='2026-10-09 12:00')]
+        for url, status in rows:
+            domain = urlparse(url).netloc or 'unknown'
+            lines.append(f"| - | 2026-10-09 | {url} | {domain} "
+                         f"| test | {status} | |")
+        with open(self.table_path(), 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        return self.table_path()
+
 
 class TestMarkerLaw(unittest.TestCase):
 
@@ -322,14 +335,25 @@ class TestRefresh(_MasterCase):
         # but it IS listed as retired:
         self.assertEqual(report['retired'], 1)
 
-    def test_auto_verdict_rows_carry_their_category(self):
+    def test_auto_verdicts_stay_out_of_the_compact_table(self):
+        # v0.60.2 — the owner's compact-list law: auto-verdict rows
+        # are no longer WRITTEN ("I don't need that old long table") —
+        # the retired count is still spoken, the record lives in the
+        # state DB, and nothing terminal ever lands in the table:
         self.db.dismiss('https://c.example.net/3',
                         'auto-verdict: dead — the domain itself is dead')
         report = wp.refresh_master_table(self.db, self.vault)
-        self.assertEqual(report['retired'], 1)
-        text = self.table_text()
-        self.assertIn('🪦 auto — dead', text)
-        self.assertIn('the domain itself is dead', text)
+        self.assertEqual(report['retired'], 1)   # still spoken
+        self.assertEqual(report['written'], 0)   # never written
+        self.assertFalse(os.path.exists(self.table_path()))
+        row = self.db.dismissed_row('https://c.example.net/3')
+        self.assertIn('the domain itself is dead', row['reason'])
+        # and a leftover auto row from the v0.47–v0.60 era still leaves
+        # at the next refresh's prune:
+        self.write_table_rows([
+            ('https://old.example.net/9', '🪦 auto — dead')])
+        wp.refresh_master_table(self.db, self.vault)
+        self.assertNotIn('https://old.example.net/9', self.table_text())
 
     def test_lost_row_placeholder_is_waiting(self):
         self.write_placeholder('https://d.example.net/4', 'lost.md')
@@ -428,11 +452,12 @@ class TestPipelineHooks(_MasterCase):
 
 
 class TestTheFullCircle(_MasterCase):
-    """The owner's exact story, end to end: a dead-domain link fails,
-    the ladder names it, the auto-verdict retires it, the refresh lists
-    it as a 🪦 auto row, the notice stops showing it, the consume
-    confirms the row and sweeps the placeholder — and it is never
-    fetched again (until ♻️ revived)."""
+    """The owner's exact story, end to end (v0.60.2 — the compact
+    edition): a dead-domain link fails, the ladder names it, the
+    auto-verdict retires it, the refresh speaks the retirement but
+    writes NO row (the state DB is the record), the notice stops
+    showing it, the dismissal is the never-fetch gate — and the
+    revive-by-URL row (the legend's instruction) brings it back."""
 
     def test_dead_domain_link_full_circle(self):
         url = 'https://gone.example.net/dead'
@@ -449,40 +474,27 @@ class TestTheFullCircle(_MasterCase):
         # 1. retired by the auto-verdict, retry row never scheduled:
         self.assertTrue(self.db.is_dismissed(canonical))
         self.assertIsNone(self.db.retry_row(canonical))
-        # 2. the refresh listed it as a 🪦 auto — dead row:
-        text = self.table_text()
-        self.assertIn(url, text)
-        self.assertIn('🪦 auto — dead', text)
+        # 2. v0.60.2 — the compact table: the retirement is SPOKEN
+        # (the report counts it) but NO row is written; the record is
+        # the state DB's dismissal row:
+        self.assertFalse(os.path.exists(self.table_path()))
+        row = self.db.dismissed_row(canonical)
+        self.assertTrue(row['reason'].startswith('auto-verdict:'))
         # 3. the notice/backlog scan no longer shows it:
         items = wp.scan_review_backlog(
             self.vault, is_dismissed=self.db.is_dismissed)
         self.assertEqual(items, [])
-        # 4. the next batch's consume confirms the row and sweeps the
-        # placeholder (the table row is the record now):
-        self.db.mark_processed(
-            canonical,
-            os.path.join(self.vault, '_review', 'gone_example_net_dead.md'),
-            '', '', 'failed')
+        # 4. never fetched again — a future paste is skipped:
         pipe2 = self.make_pipeline(fetch=_FakeFetch(
-            fail_paths=['/dead'], fail_reason='HTTP 404', 
+            fail_paths=['/dead'], fail_reason='HTTP 404',
             fail_category='dead'))
-        # re-create the placeholder so the sweep has something real:
-        placeholder = self.write_placeholder(url, 'gone.md')
-        self.db.mark_processed(canonical, placeholder, '', '', 'failed')
-        report = wp.consume_decommission_table(self.db, self.vault)
-        self.assertGreaterEqual(report['dead'], 1)
-        self.assertFalse(os.path.exists(placeholder))
-        self.assertIn('confirmed', self.table_text())
-        # 5. never fetched again — a future paste is skipped:
         results = pipe2.run([url])
         self.assertEqual(results[0]['outcome'], 'skipped')
         self.assertIn('never fetched', results[0]['error'])
-        # 6. ...until ♻️ revived:
-        path = self.table_path()
-        with open(path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(text.replace('🪦', '♻️'))
+        # 5. ...until the revive-by-URL row (the legend's instruction —
+        # the compact table's answer to a pruned verdict):
+        self.write_table_rows([
+            (url, '♻️ revived')])
         wp.consume_decommission_table(self.db, self.vault)
         self.assertFalse(self.db.is_dismissed(canonical))
 
@@ -500,7 +512,7 @@ class TestSourceContracts(unittest.TestCase):
             return f.read()
 
     def test_version_is_0470(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.2')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
