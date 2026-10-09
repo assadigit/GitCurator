@@ -1364,13 +1364,13 @@ class UiMixin:
         # 200ms GUI-state mirror, hero._sync_run_button).
         self._hero_state = 'sync'   # sync | fetching | process | running
         # v0.34 (follow-up review): the CTA band is ONE balanced group —
-        # both buttons share the 56px height (the old 40px Test Connection
-        # bottom-aligned beside the tall hero read as mismatched), and
-        # they FILL the row: SYNC takes two-thirds of the card's width
-        # (Fitts's Law — the primary action owns the room), Test
-        # Connection the remaining third, so the right half of the card
-        # is never empty. The fill contrast still marks ONE primary
-        # action (accent fill vs outline — Hick's Law kept).
+        # every button shares the 56px height (the old 40px Test
+        # Connection bottom-aligned beside the tall hero read as
+        # mismatched), and they FILL the row: SYNC takes the room it
+        # needs (Fitts's Law — the primary action owns the room), Scan
+        # and Test Connection share the rest, so the right half of the
+        # card is never empty. The fill contrast still marks ONE
+        # primary action (accent fill vs outline — Hick's Law kept).
         self.start_btn = QPushButton("SYNC")
         self.start_btn.setFixedHeight(56)
         self.start_btn.setMinimumWidth(220)
@@ -1388,6 +1388,37 @@ class UiMixin:
         cta_row = QHBoxLayout()
         cta_row.setSpacing(10)
         cta_row.addWidget(self.start_btn, 2)   # two-thirds of the row
+
+        # v0.61.0 — THE VAULT SCAN joins the CTA band (the owner's ask,
+        # verbatim: "New CTA row: [Fetch] [Scan] [Test Connection]").
+        # The scan reads the whole vault (the folder walk + note
+        # contents), finds the owner's auto-delete marks (the v0.60.1
+        # grammar — ONE grammar), asks the LLM for filing proposals
+        # (orphaned / uncategorized / too-broad notes), and takes the
+        # WHOLE plan to Telegram BEFORE anything is deleted or moved
+        # (the banish-gate round-trip template — 300s without an answer
+        # is a safe defer, nothing done). Outline style: it is a
+        # librarian's pass, not the primary action (Hick's Law kept).
+        self.scan_btn = QPushButton("Scan")
+        self.scan_btn.setFixedHeight(56)
+        self.scan_btn.setMinimumWidth(120)
+        self.scan_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.scan_btn.setToolTip(
+            "🔍 Vault scan — the librarian's pass over the whole vault:\n"
+            "① your auto-delete marks (🗑️ / delete / auto_delete — the\n"
+            "   same grammar the deletion review uses) are found;\n"
+            "② the LLM proposes folders and moves for the orphaned /\n"
+            "   uncategorized / too-broadly-filed notes;\n"
+            "③ the WHOLE plan goes to your Telegram — nothing is\n"
+            "   deleted or moved until you confirm (🗂️ Apply / ✋ Keep);\n"
+            "   no answer in 300s = nothing done.\n"
+            "Moves never rewrite a note — files only change folders."
+        )
+        self.scan_btn.setAccessibleName("Scan the vault")
+        self._style_btn(self.scan_btn, 'hero_secondary')
+        self.scan_btn.clicked.connect(self._start_vault_scan)
+        cta_row.addWidget(self.scan_btn, 1)
 
         self.test_btn = QPushButton("Test Connection")
         self.test_btn.setFixedHeight(56)

@@ -418,3 +418,206 @@ def _quick_detect_job(provider, config, log_signal):
     except Exception as e:  # noqa: BLE001 — the probe must never raise
         out['detail'] = f'{type(e).__name__}: {e}'
     return out
+
+
+def _scan_llm_call(config: dict, log) -> Optional[Any]:
+    """v0.61.0 — the scan's LLM router (the website phase's router,
+    minimal): ollama / cloud / llama.cpp over the shared llm_client
+    helpers, JSON mode, the wall-clock timeout. Returns None when no
+    provider is configured (the scan still runs — the deletions and
+    the inventory need no LLM; the filing pass simply proposes
+    nothing)."""
+    try:
+        provider = str(config.get('llm_provider', 'ollama') or 'ollama')
+        timeout_s = float(config.get('llm_timeout_s', 300) or 300)
+        _num_ctx = int(config.get(
+            'llm_num_ctx', _llm_client.DEFAULT_NUM_CTX) or 0) or None
+
+        def _warn(m):
+            log(f"⚠️ {m}", "warning")
+
+        if provider == 'cloud':
+            model = _llm_client.resolve_task_model(
+                config, 'vaultscan', config.get('cloud_model', ''))
+
+            def _call(messages, task=None):
+                return _llm_client.cloud_chat(
+                    config.get('cloud_api_url', ''),
+                    config.get('cloud_api_key', ''),
+                    model, messages, timeout_s,
+                    json_mode=True, num_ctx=_num_ctx, on_warn=_warn)
+            return _call
+        if provider == 'llamacpp':
+            model = _llm_client.resolve_task_model(
+                config, 'vaultscan',
+                str(config.get('llamacpp_model', '') or ''))
+
+            def _call(messages, task=None):
+                return _llm_client.cloud_chat(
+                    _llm_client.normalize_llamacpp_api_url(
+                        config.get('llamacpp_api_url', '')),
+                    config.get('llamacpp_api_key', ''),
+                    model, messages, timeout_s,
+                    json_mode=True, num_ctx=_num_ctx, on_warn=_warn)
+            return _call
+        # ollama (the default)
+        base = str(config.get('ollama', {}).get('base_url')
+                   or 'http://localhost:11434').rstrip('/')
+        model = _llm_client.resolve_task_model(
+            config, 'vaultscan',
+            str((config.get('ollama', {}) or {}).get('model')
+                or ''))
+
+        def _call(messages, task=None):
+            import ollama
+            client = ollama.Client(host=base)
+            return _llm_client.ollama_chat(
+                client, model, messages, timeout_s,
+                json_mode=True, num_ctx=_num_ctx, on_warn=_warn)
+        return _call
+    except Exception as e:  # noqa: BLE001 — a broken router never kills the scan
+        log(f"⚠️ The scan's LLM router could not be built: {e} — the "
+            f"filing pass is skipped this run (the deletions still "
+            f"run)", "warning")
+        return None
+
+
+def _vault_scan_job(config: dict, log_signal) -> Dict:
+    """v0.61.0 — THE VAULT SCAN (the [Scan] CTA's background job).
+
+    The owner's ask (verbatim): "The Scan run: LLM scans the vault
+    (folder walk + note contents → LLM analysis); Detects notes I
+    manually tagged 'auto-delete' — REUSE the v0.60.1 grammar exactly;
+    Suggests folder/subfolder creation for orphaned / not-categorized
+    / too-broad-category websites, and which notes should move where;
+    Confirms with me on Telegram BEFORE deleting or moving anything."
+
+    The whole story, one thread (never the GUI thread): the inventory
+    walk → the plan (deletions = scan_pending_banishments — ONE
+    grammar; filing = the LLM's validated proposal) → the Telegram ask
+    (make_scan_confirm — the banish-gate round-trip template; 300s no
+    answer = safe defer) → on CONFIRM: apply_scan_plan (folders +
+    byte-identical moves + the banishment machinery) and the closing
+    report; on DECLINE/TIMEOUT/DEFER: nothing is touched. Never
+    raises (the TestWorker contract); returns the story dict."""
+    from gitcurator.core import vault_scan as _vault_scan
+    from gitcurator.integrations import scan_confirm as _scan_confirm
+
+    def log(msg, level='info'):
+        try:
+            log_signal.emit(msg, level)
+        except Exception:
+            pass
+
+    cfg = dict(config or {})
+    vault = str(cfg.get('website_vault_path') or '').strip()
+    if not vault or not os.path.isdir(vault):
+        log("⚠️ Vault scan: no Websites vault is set (Settings → 📁 "
+            "Vault) — nothing to scan.", "warning")
+        return {'success': False, 'error': 'no vault'}
+    log(f"{_vault_scan.SCAN_PREFIX} reading the vault — the folder "
+        f"walk, your auto-delete marks, and the LLM's filing eyes…",
+        "info")
+    # the state DB rides the dry-run shadow-cache law (a rehearsal
+    # records nothing):
+    if _dryrun.is_enabled():
+        state = _website_pipeline.WebsiteStateDB(
+            db_path=_dryrun.shadow_cache_path(
+                os.path.join(APP_DIR, 'cache.db')))
+    else:
+        state = _website_pipeline.WebsiteStateDB()
+    out: Dict = {'success': True, 'verdict': 'defer', 'deletions': 0,
+                 'moves': 0, 'new_folders': 0, 'applied': 0,
+                 'moved': 0, 'folders_created': 0}
+    try:
+        llm_call = _scan_llm_call(cfg, log)
+        plan = _vault_scan.build_scan_plan(
+            vault, llm_call=llm_call, log=log, config=cfg) or {}
+        out['deletions'] = len(plan.get('deletions') or [])
+        out['moves'] = len(plan.get('moves') or [])
+        out['new_folders'] = len(plan.get('new_folders') or [])
+        inv = plan.get('inventory') or {}
+        log(f"{_vault_scan.SCAN_PREFIX} the vault holds "
+            f"{inv.get('total_notes', 0)} note(s) in "
+            f"{inv.get('folder_count', 0)} folder(s) — "
+            f"{inv.get('root_notes', 0)} orphaned, "
+            f"{inv.get('uncategorized_notes', 0)} uncategorized",
+            "info")
+        has_deletions = out['deletions'] > 0
+        has_filing = (out['moves'] + out['new_folders']) > 0
+        if not has_deletions and not has_filing:
+            log(f"{_vault_scan.SCAN_PREFIX} the library is clean — no "
+                f"auto-delete marks, no filing to propose. Nothing to "
+                f"ask, nothing to do.", "info")
+            out['verdict'] = 'clean'
+            return out
+        if has_deletions:
+            log(f"🗑️ {out['deletions']} note(s) carry your delete mark "
+                f"(the v0.60.1 grammar — frontmatter + body tags)",
+                "info")
+        if has_filing:
+            for nf in (plan.get('new_folders') or []):
+                log(f"📁 New folder proposed: {nf}", "info")
+            for m in (plan.get('moves') or []):
+                log(f"📦 Move proposed: {m.get('note')} — "
+                    f"{m.get('from')} → {m.get('to')}"
+                    f"{(' (' + m['reason'] + ')') if m.get('reason') else ''}",
+                    "info")
+        # ---- the gate: nothing moves or deletes without the owner ----
+        channel = None
+        try:
+            channel = _scan_confirm.make_scan_confirm(cfg, log=log)
+        except Exception as _e:
+            log(f"⚠️ Scan gate channel unavailable: {_e}", "warning")
+        if channel is None:
+            if has_deletions:
+                log(f"⚠️ The Telegram worker is not paired/enabled — "
+                    f"NOTHING is deleted or moved (the safe defer: the "
+                    f"marks and the notes stay; I'll ask again on the "
+                    f"next scan)", "warning")
+            else:
+                log(f"⚠️ The Telegram worker is not paired/enabled — "
+                    f"the filing plan is dropped (the safe defer: "
+                    f"nothing moves)", "warning")
+            out['verdict'] = 'defer'
+            return out
+        res = channel(plan, ask_log=log) or {}
+        verdict = str(res.get('verdict') or 'defer')
+        out['verdict'] = verdict
+        if verdict != 'confirmed':
+            _why = {'declined': "you said keep everything",
+                    'timeout': "no answer in time",
+                    'defer': "the channel could not reach Telegram"
+                             }.get(verdict, verdict)
+            log(f"👌 Vault scan: nothing moved, nothing deleted "
+                f"({_why}) — the vault stays exactly as it is", "info")
+            return out
+        log(f"✅ You confirmed the plan — applying it now (nothing is "
+            f"rewritten, only moved)", "info")
+        rep = _vault_scan.apply_scan_plan(
+            plan, vault, state, log=log) or {}
+        out['applied'] = int(rep.get('banished') or 0)
+        out['moved'] = int(rep.get('notes_moved') or 0)
+        out['folders_created'] = int(rep.get('folders_created') or 0)
+        log(f"{_vault_scan.SCAN_PREFIX} done — {out['applied']} "
+            f"note(s) removed (resting in .trash/banished, never to be "
+            f"fetched again), {out['moved']} note(s) re-filed, "
+            f"{out['folders_created']} new folder(s) created",
+            "info")
+        report = res.get('report')
+        if report is not None:
+            try:
+                report(out['applied'], out['moved'],
+                       out['folders_created'])
+            except Exception:
+                pass    # best-effort — never fails the scan
+    except Exception as e:  # noqa: BLE001 — the TestWorker contract
+        log(f"💥 Vault scan failed: {type(e).__name__}: {e}", "error")
+        out.update({'success': False, 'error': f'{type(e).__name__}: {e}',
+                    'verdict': 'error'})
+    finally:
+        try:
+            state.close()
+        except Exception:
+            pass
+    return out

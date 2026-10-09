@@ -1,3 +1,76 @@
+## [0.61.0] — The vault scan — 2026-10-10
+
+The owner's ask (session, verbatim): "HEADLINE — build the VAULT SCAN
+mechanism (v0.61.0). New CTA row: [Fetch] [Scan] [Test Connection].
+The Scan run: LLM scans the vault (folder walk + note contents → LLM
+analysis); Detects notes I manually tagged 'auto-delete' — REUSE the
+v0.60.1 grammar exactly (frontmatter list + body inline tags, both
+auto_delete/auto-delete spellings, 🗑️, BANISH_WORDs) — do not invent a
+second grammar; Suggests folder/subfolder creation for orphaned /
+not-categorized / too-broad-category websites, and which notes should
+move where; Confirms with me on Telegram BEFORE deleting or moving
+anything — the v0.60.0 banish-gate round-trip is the template (ask →
+buttons → act; no response in 300s → safe defer, nothing done). The
+dashboard tells the Scan story too." Both halves shipped: the desktop
+(22 cases join tests/test_vaultscan.py — suite **1758 → 1780**) and
+the Worker (9 cases join test/scan-gate.test.js — **59 → 68**, the
+worker grows 0.31.0 → **0.32.0**: the /api/scan round-trip +
+scan_yes/scan_no buttons).
+
+**The scan's own eyes.** `gitcurator/core/vault_scan.py` (pure stdlib,
+no Qt): the inventory walk (every folder, every note — its title,
+source, domain, category, ownership; dot-folders and `_inbox`
+invisible; `_review`/`_moc` seen but never move candidates — the
+machinery owns them; hand-written notes counted, never moved), and
+`build_scan_plan`: **ONE grammar** — the deletions ARE
+`scan_pending_banishments` (both doors, deduped — the v0.60.1 law,
+no second grammar exists in this module), plus the LLM's filing
+proposal over a new prompt (`prompts/s01_vaultscan.txt`): the folder
+tree with `[TOO BROAD]` marks (config `scan_too_broad_threshold`,
+default 40) and the move-candidate digests (orphaned /
+Uncategorized / too-broad — app-owned only) →
+`{"new_folders", "moves", "summary"}`. The guest is VALIDATED before
+the owner ever sees it: only listed candidates move, destinations are
+existing folders or parented sanitized new ones (never `_review`,
+`_moc`, dot-folders, the vault root, or a traversal), one note one
+destination, `Uncategorized` is never a destination — anything the
+validation rejects is dropped with a log line, never a crash (a
+broken or unparseable LLM answer is an empty plan and a warning).
+
+**The gate before anything moves.** `integrations/scan_confirm.py`
+(the banish-gate template, verbatim law): propose → poll → report
+over `CloudflareSync`'s new `propose_scan`/`scan_status`/
+`report_scan_result` (the 1010 UA rides every leg). The Worker's
+`/api/scan/propose|status|result` trio keeps the ask in
+`scan_confirm:<id>` with the supersede law and one-live-question
+discipline; the Telegram message carries the whole plan — the
+deletions with their markers, the moves with their reasons, the
+counts, the LLM's summary — and the two buttons 🗂️ Apply plan /
+✋ Keep everything (`scan_yes`/`scan_no` over the webhook). No answer
+in 300s (config `scan_confirm_timeout_s`) = the safe defer: the
+message becomes the no-answer story, the vault stays byte-for-byte as
+it was.
+
+**The confirmed plan's hands.** `apply_scan_plan`: the new folders
+are created; every move is a FILE move — `dryrun.move`, bytes read
+from the old path and landed verbatim at the new one (the
+existing-notes-are-never-rewritten law), never overwriting a note
+that already lives at the destination; the state row is re-pointed
+(the folder is the category — the vault's own convention); the
+deletions ride the banishment's own machinery
+(`consume_decommission_table` + `banish_marked_notes` — the same
+passes a confirmed batch runs). Dry-run rehearses the whole story.
+
+**The CTA.** The row the owner asked for: **[SYNC] [Scan] [Test
+Connection]** — the scan button between the hero and the check
+(`gui/main_window/vault_scan_ui.py` + the CTA band in `ui.py`), its
+job in a `TestWorker` thread (`gui/worker_jobs._vault_scan_job` —
+the same lightweight pattern Test Connection uses): the walk, the
+plan, the ask, the apply — the log telling the whole story, the
+button re-arming when it ends. A clean library answers "nothing to
+ask, nothing to do"; an unpaired worker answers the safe defer with
+the honest warning.
+
 ## [0.60.2] — The channel's own name + the honest tally + the compact table — 2026-10-10
 
 The session's REAL-RUN verification (the pairing inserted into the

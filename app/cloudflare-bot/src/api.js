@@ -49,7 +49,8 @@ export async function handleApi(request, env, url) {
     '/api/gdrive/backup_status',
     '/api/pair',
     '/api/backfill',
-    '/api/banish'
+    '/api/banish',
+    '/api/scan'
   ];
 
   if (desktopEndpoints.some(ep => path.startsWith(ep))) {
@@ -98,6 +99,18 @@ export async function handleApi(request, env, url) {
     }
     if (path === '/api/banish/result' && method === 'POST') {
       return handleBanishResult(request, env);
+    }
+    // v0.61.0 — THE VAULT SCAN's round-trip (the banish trio's twin:
+    // the scan's plan — deletions + moves + new folders — asked over
+    // the same Telegram gate; nothing moves until the owner answers)
+    if (path === '/api/scan/propose' && method === 'POST') {
+      return handleScanPropose(request, env);
+    }
+    if (path === '/api/scan/status' && method === 'GET') {
+      return handleScanStatus(request, env, url);
+    }
+    if (path === '/api/scan/result' && method === 'POST') {
+      return handleScanResult(request, env);
     }
 
     return jsonResponse({ error: 'Method not allowed' }, 405);
@@ -546,6 +559,175 @@ async function handleBanishResult(request, env) {
   }
   await activityLog(env.DB, 'banish_gate', null,
     `Deletion review closed (${outcome}): ${deleted || 0} removed`);
+
+  return jsonResponse({ success: true, status: obj.status });
+}
+
+// ========================================
+// v0.61.0 — THE VAULT SCAN's round-trip (the banish trio's twin)
+//
+// The desktop's scan asks the owner over Telegram before ANY note is
+// deleted or moved: the ask carries the whole plan (the deletions the
+// owner's own marks asked for + the LLM's filing proposal) and the two
+// buttons (scan_yes / scan_no — webhook.js); the desktop polls
+// /api/scan/status and closes with /api/scan/result. Nothing moves
+// until the owner answers; the 300s default is a safe defer.
+// ========================================
+
+const SCAN_CONFIRM_PREFIX = 'scan_confirm:';
+const SCAN_ACTIVE_KEY = 'scan_active_confirm';
+
+async function _scanConfirmGet(db, id) {
+  const raw = await stateGet(db, SCAN_CONFIRM_PREFIX + String(id));
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+async function _scanConfirmSet(db, id, obj) {
+  await stateSet(db, SCAN_CONFIRM_PREFIX + String(id), JSON.stringify(obj));
+}
+
+async function handleScanPropose(request, env) {
+  const body = await request.json();
+  const { deletions, moves, new_folders, items, summary, timeout_s } = body || {};
+  if (!Array.isArray(items) || !items.length) {
+    return jsonResponse({ error: 'Missing items' }, 400);
+  }
+  const allowed = (env.ALLOWED_USER_IDS || '').split(',')[0].trim();
+  if (!allowed) {
+    return jsonResponse({ error: 'No allowed chat configured' }, 400);
+  }
+  const chatId = parseInt(allowed, 10);
+
+  // one live scan ask at a time (the banish gate's supersede law)
+  const prevId = await stateGet(env.DB, SCAN_ACTIVE_KEY);
+  if (prevId) {
+    const prev = await _scanConfirmGet(env.DB, prevId);
+    if (prev && prev.status === 'pending') {
+      prev.status = 'superseded';
+      prev.resolved_at = now();
+      await _scanConfirmSet(env.DB, prevId, prev);
+      try {
+        await editMessage(env, prev.chat_id, prev.message_id,
+          `⌛ <b>Superseded</b> — a newer vault scan review replaced this ` +
+          `ask. Nothing was applied from it.`);
+      } catch (err) {
+        console.error('scan supersede edit error:', err);
+      }
+    }
+  }
+
+  const nDel = parseInt(deletions, 10) || 0;
+  const nMove = parseInt(moves, 10) || 0;
+  const nFolder = parseInt(new_folders, 10) || 0;
+  const shown = items.slice(0, 20).map((it, i) => {
+    const kind = it.kind === 'move' ? '📦 move' : '🗑️ delete';
+    return `${i + 1}. ${kind} — <b>${_escapeHtml(it.title || '')}</b>\n` +
+      `   <code>${_escapeHtml(it.detail || '')}</code>` +
+      (it.marker ? `\n   <i>${_escapeHtml(String(it.marker).slice(0, 120))}</i>` : '');
+  });
+  if (items.length > 20) {
+    shown.push(`… +${items.length - 20} more`);
+  }
+  const parts = [];
+  if (nDel) parts.push(`<b>${nDel}</b> note${nDel === 1 ? '' : 's'} marked for deletion`);
+  if (nMove) parts.push(`<b>${nMove}</b> move suggestion${nMove === 1 ? '' : 's'}`);
+  if (nFolder) parts.push(`<b>${nFolder}</b> new folder${nFolder === 1 ? '' : 's'}`);
+  const text =
+    `🗂️ <b>Vault scan review</b>\n\n` +
+    `The scan read your vault and proposes: ${parts.join(' · ') || 'nothing'}.\n\n` +
+    (summary ? `<i>${_escapeHtml(String(summary).slice(0, 300))}</i>\n\n` : '') +
+    shown.join('\n') +
+    `\n\nApply, and the deletions leave for <code>.trash/banished</code> ` +
+    `(never fetched again) and the moves re-file the notes — nothing is ` +
+    `rewritten, only moved.\n` +
+    `Keep everything, and the vault stays byte-for-byte as it is.`;
+  const id = uuid();
+  const keyboard = inlineKeyboard([[
+    { text: `🗂️ Apply plan`, callback_data: `scan_yes:${id}` },
+    { text: `✋ Keep everything`, callback_data: `scan_no:${id}` }
+  ]]);
+  const msg = await sendMessage(env, chatId, text, {
+    reply_markup: keyboard, disable_web_page_preview: true });
+  if (!msg) {
+    return jsonResponse({ error: 'Telegram send failed' }, 502);
+  }
+  await _scanConfirmSet(env.DB, id, {
+    status: 'pending',
+    deletions: nDel, moves: nMove, new_folders: nFolder,
+    items: items.map(it => ({
+      kind: it.kind, title: it.title, detail: it.detail, marker: it.marker })),
+    summary: String(summary || '').slice(0, 400),
+    timeout_s: timeout_s || 300,
+    chat_id: chatId,
+    message_id: msg.message_id,
+    created_at: now()
+  });
+  await stateSet(env.DB, SCAN_ACTIVE_KEY, id);
+  await activityLog(env.DB, 'scan_gate', null,
+    `Vault scan review proposed: ${nDel} deletion(s), ${nMove} move(s), ` +
+    `${nFolder} new folder(s) awaiting the owner's confirmation`);
+
+  return jsonResponse({ success: true, id, message_id: msg.message_id });
+}
+
+async function handleScanStatus(request, env, url) {
+  const id = url.searchParams.get('id');
+  if (!id) {
+    return jsonResponse({ error: 'Missing id' }, 400);
+  }
+  const obj = await _scanConfirmGet(env.DB, id);
+  if (!obj) {
+    return jsonResponse({ error: 'Unknown confirmation id' }, 404);
+  }
+  return jsonResponse({
+    success: true, id,
+    status: obj.status || 'pending',
+    deletions: obj.deletions || 0, moves: obj.moves || 0,
+    new_folders: obj.new_folders || 0
+  });
+}
+
+async function handleScanResult(request, env) {
+  const body = await request.json();
+  const { id, outcome, applied, moved, folders } = body || {};
+  if (!id || !outcome) {
+    return jsonResponse({ error: 'Missing id or outcome' }, 400);
+  }
+  const obj = await _scanConfirmGet(env.DB, id);
+  if (!obj) {
+    return jsonResponse({ error: 'Unknown confirmation id' }, 404);
+  }
+  let text;
+  if (outcome === 'applied') {
+    const n = parseInt(applied, 10) || 0;
+    const m = parseInt(moved, 10) || 0;
+    const f = parseInt(folders, 10) || 0;
+    text =
+      `🗂️ <b>Plan applied</b> — ${n} note${n === 1 ? '' : 's'} removed ` +
+      `(resting in .trash/banished, never to be fetched again), ` +
+      `${m} note${m === 1 ? '' : 's'} re-filed, ${f} new folder${f === 1 ? '' : 's'} ` +
+      `created. Nothing was rewritten — moves only.`;
+    obj.status = 'done';
+  } else if (outcome === 'timeout') {
+    text =
+      `⌛ <b>No answer in time</b> — nothing moved, nothing deleted. ` +
+      `The vault stays exactly as it is; I'll ask again on the next scan.`;
+    obj.status = 'timeout';
+  } else {
+    text = `👌 <b>Kept everything</b> — nothing moved, nothing deleted. The vault stays as it is.`;
+    obj.status = obj.status === 'pending' ? 'declined' : obj.status;
+  }
+  obj.resolved_at = obj.resolved_at || now();
+  await _scanConfirmSet(env.DB, id, obj);
+  try {
+    await editMessage(env, obj.chat_id, obj.message_id, text);
+  } catch (err) {
+    console.error('scan result edit error:', err);
+  }
+  await activityLog(env.DB, 'scan_gate', null,
+    `Vault scan review closed (${outcome}): ${applied || 0} removed, ` +
+    `${moved || 0} moved, ${folders || 0} folder(s)`);
 
   return jsonResponse({ success: true, status: obj.status });
 }

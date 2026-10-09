@@ -229,6 +229,56 @@ async function handleCallbackQuery(callbackQuery, env) {
       break;
     }
 
+    // v0.61.0 — THE VAULT SCAN's two buttons: the owner answers the
+    // scan's filing review right here (the banish gate's twin — the
+    // ask lives in scan_confirm:<id> — api.js wrote it on propose; the
+    // answer flips its status and edits the message; the desktop's
+    // status poll sees the verdict and applies (or drops) the plan).
+    case 'scan_yes':
+    case 'scan_no': {
+      const id = param;
+      const raw = await stateGet(env.DB, `scan_confirm:${id}`);
+      if (!raw) {
+        await answerCallbackQuery(env, callbackQuery.id,
+          "This ask is gone (unknown id)", true);
+        break;
+      }
+      let obj;
+      try { obj = JSON.parse(raw); } catch { obj = null; }
+      if (!obj) {
+        await answerCallbackQuery(env, callbackQuery.id,
+          "This ask is unreadable", true);
+        break;
+      }
+      if (obj.status !== 'pending') {
+        await answerCallbackQuery(env, callbackQuery.id,
+          obj.status === 'confirmed'
+            ? "Already confirmed — applying"
+            : "Already answered", false);
+        break;
+      }
+      const yes = action === 'scan_yes';
+      obj.status = yes ? 'confirmed' : 'declined';
+      obj.resolved_at = now();
+      await stateSet(env.DB, `scan_confirm:${id}`, JSON.stringify(obj));
+      if (yes) {
+        await editMessage(env, chatId, messageId,
+          `✅ <b>Confirmed</b> — applying the scan's plan now: ` +
+          `${obj.deletions || 0} deletion(s), ${obj.moves || 0} move(s), ` +
+          `${obj.new_folders || 0} new folder(s)… (the closing line ` +
+          `follows when the scan finishes)`);
+        await answerCallbackQuery(env, callbackQuery.id,
+          `🗂️ Applying the plan`, false);
+      } else {
+        await editMessage(env, chatId, messageId,
+          `👌 <b>Kept everything</b> — nothing moved, nothing deleted. ` +
+          `The vault stays as it is.`);
+        await answerCallbackQuery(env, callbackQuery.id,
+          "Kept — nothing changed", false);
+      }
+      break;
+    }
+
     case 'treat_same':
       // GitHub redirect: treat as same repo (Layer 11)
       await answerCallbackQuery(env, callbackQuery.id, "Linked to existing note", false);

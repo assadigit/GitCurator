@@ -56,7 +56,7 @@ from pathlib import Path
 # API, health — as the app it is; the honest identity passes the edge,
 # the banned one never did. Keep this in sync with VERSION at release
 # time (the string only needs to not be a banned signature).
-HTTP_USER_AGENT = "GitCurator/0.60.2 (+https://github.com/assadigit/GitCurator)"
+HTTP_USER_AGENT = "GitCurator/0.61.0 (+https://github.com/assadigit/GitCurator)"
 
 
 # ========================================
@@ -412,6 +412,73 @@ class CloudflareSync:
         with self._lock:
             status, data = self._make_request(
                 'POST', '/api/banish/result', body)
+        return status == 200 and bool(data.get('success'))
+
+    # ========================================
+    # v0.61.0 — THE VAULT SCAN's round-trip (the banish trio's twin)
+    # ========================================
+
+    def propose_scan(self, deletions: int, moves: int, new_folders: int,
+                     items: List[Dict[str, Any]],
+                     summary: str = '',
+                     timeout_s: float = 300.0
+                     ) -> Tuple[Optional[str], str]:
+        """v0.61.0 — ask the owner to confirm the VAULT SCAN plan.
+
+        POSTs ``/api/scan/propose`` (HMAC-signed like every desktop
+        endpoint — the 1010 law's UA included): the Worker sends the
+        Telegram message with the plan's counts and the two buttons
+        (🗂️ Apply plan / ✋ Keep everything) and keeps the ask in its
+        state table (``scan_confirm:<id>``). Returns ``(id, '')`` or
+        ``(None, reason)``."""
+        if not self.is_enabled():
+            return None, 'not enabled'
+        body = {'install_id': self.install_id,
+                'deletions': int(deletions or 0),
+                'moves': int(moves or 0),
+                'new_folders': int(new_folders or 0),
+                'items': list(items or []),
+                'summary': str(summary or '')[:400],
+                'timeout_s': float(timeout_s or 300.0)}
+        with self._lock:
+            status, data = self._make_request(
+                'POST', '/api/scan/propose', body)
+        if status == 200 and data.get('success') and data.get('id'):
+            return str(data.get('id')), ''
+        return None, str(data.get('error') or f'HTTP {status}')
+
+    def scan_status(self, confirm_id: str) -> Optional[str]:
+        """v0.61.0 — poll the scan ask's status ('pending' /
+        'confirmed' / 'declined' / 'timeout' / 'superseded'); None when
+        the Worker could not answer (the caller keeps polling until its
+        own deadline)."""
+        if not self.is_enabled() or not confirm_id:
+            return None
+        with self._lock:
+            status, data = self._make_request(
+                'GET', f'/api/scan/status?id={confirm_id}')
+        if status == 200 and data.get('success'):
+            return str(data.get('status') or 'pending')
+        return None
+
+    def report_scan_result(self, confirm_id: str, outcome: str,
+                           applied: int = 0, moved: int = 0,
+                           folders: int = 0) -> bool:
+        """v0.61.0 — close the scan ask: outcome 'applied' (the counts
+        that actually landed — deletions, moves, folders — the Worker
+        edits the message into the closing line) or 'timeout' (the
+        no-answer story). Best-effort: a failed report never fails the
+        run."""
+        if not self.is_enabled() or not confirm_id:
+            return False
+        body = {'install_id': self.install_id,
+                'id': confirm_id, 'outcome': str(outcome or ''),
+                'applied': int(applied or 0),
+                'moved': int(moved or 0),
+                'folders': int(folders or 0)}
+        with self._lock:
+            status, data = self._make_request(
+                'POST', '/api/scan/result', body)
         return status == 200 and bool(data.get('success'))
 
     # ========================================
