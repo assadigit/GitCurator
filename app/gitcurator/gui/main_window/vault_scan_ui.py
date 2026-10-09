@@ -51,8 +51,19 @@ class VaultScanUiMixin:
             self.scan_btn.setText("Scanning…")
         except Exception:
             pass
-        self._scan_worker = TestWorker(
-            _vault_scan_job, 'vault_scan', snapshot)
+        # v0.61.1 — Fix: the job takes (config, log_signal); the raw call
+        # crashed with TypeError on EVERY Scan click (the owner's run,
+        # 2026-10-10: "_vault_scan_job() missing 1 required positional
+        # argument: 'log_signal'"). Re-bind to a closure that feeds the
+        # worker's own log_message signal in — the exact pattern Test
+        # Connection's battery uses (worker._fn = _job).
+        worker = TestWorker(_vault_scan_job, 'vault_scan', snapshot)
+
+        def _job(cfg):
+            return _vault_scan_job(cfg, worker.log_message)
+        worker._fn = _job
+
+        self._scan_worker = worker
         self._scan_worker.log_message.connect(
             lambda m, l: self.log_message(m, l))
         self._scan_worker.finished_signal.connect(

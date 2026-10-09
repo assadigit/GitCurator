@@ -33,6 +33,7 @@ import json
 import os
 import shutil
 import tempfile
+import types
 import unittest
 import urllib.request
 from unittest import mock
@@ -531,13 +532,9 @@ class TestReleaseBookkeeping(unittest.TestCase):
                   encoding='utf-8') as f:
             return f.read()
 
-    def test_version_is_0610(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.61.0')
-
-    def test_changelog_has_the_beat(self):
-        text = self._read('CHANGELOG.md')
-        self.assertIn('## [0.61.0]', text)
-        self.assertIn('vault scan', text.lower())
+    def test_version_is_0611(self):
+        # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
+        self.assertEqual(self._read('VERSION').strip(), '0.61.1')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
@@ -550,6 +547,131 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('tests.test_vaultscan', ci)
         agents = self._read('AGENTS.md')
         self.assertIn('tests.test_vaultscan', agents)
+
+    def test_changelog_has_the_fix(self):
+        text = self._read('CHANGELOG.md')
+        self.assertIn('## [0.61.1]', text)
+        self.assertIn('log_signal', text)
+        # the history stays: the 0.61.0 beat is still told.
+        self.assertIn('## [0.61.0]', text)
+        self.assertIn('vault scan', text.lower())
+
+
+# ---------------------------------------------------------------------------
+# v0.61.1 — the Scan CTA's worker wiring (the owner's crash, 2026-10-10)
+# ---------------------------------------------------------------------------
+
+try:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    _QAPP = QApplication.instance() or QApplication([])
+    from gitcurator.gui.main_window.vault_scan_ui import VaultScanUiMixin
+    from gitcurator.gui.processing_worker import TestWorker
+    _HAS_QT = True
+except Exception:  # pragma: no cover — CI installs PyQt6
+    _HAS_QT = False
+
+
+@unittest.skipUnless(_HAS_QT, "PyQt6 unavailable")
+class TestScanCtaWiring(unittest.TestCase):
+    """v0.61.1 — Fix: the Scan button crashed on EVERY click.
+
+    The owner's run (v0.61.0, 2026-10-10): "💥 Worker 'vault_scan'
+    crashed: TypeError: _vault_scan_job() missing 1 required positional
+    argument: 'log_signal'" — the mixin built TestWorker(_vault_scan_job,
+    'vault_scan', snapshot) and run() calls fn(*args): the signal was
+    never fed in. The fix re-binds worker._fn to a closure passing
+    worker.log_message — the exact pattern Test Connection's battery
+    uses. These tests pin that law so it can never regress silently
+    again (the v0.61.0 suite was green while the button was dead)."""
+
+    def _window(self):
+        win = VaultScanUiMixin()
+        win.logs = []
+        win.worker = None
+        win.config = {'website_vault_path': '/tmp/vault'}
+        win.website_vault_input = types.SimpleNamespace(
+            text=lambda: '')
+        win._btn_calls = []
+
+        def _set_enabled(b):
+            win._btn_calls.append(('enabled', b))
+
+        def _set_text(t):
+            win._btn_calls.append(('text', t))
+        win.scan_btn = types.SimpleNamespace(
+            setEnabled=_set_enabled, setText=_set_text)
+
+        def _log(msg, level='info'):
+            win.logs.append((level, msg))
+        win.log_message = _log
+        return win
+
+    def test_the_bound_fn_takes_only_the_snapshot_and_feeds_the_signal(self):
+        """THE regression: fn(snapshot) must run without TypeError and
+        hand the job (config, worker.log_message) — a live signal whose
+        emissions land in the window's log."""
+        from gitcurator.gui.main_window import vault_scan_ui as _vsui
+        win = self._window()
+        seen = {}
+
+        def _fake_job(cfg, log_signal):
+            seen['cfg'] = cfg
+            seen['signal'] = log_signal
+            return {'success': True, 'verdict': 'clean'}
+
+        with mock.patch.object(_vsui, '_vault_scan_job', _fake_job), \
+                mock.patch.object(TestWorker, 'start',
+                                  lambda self: None):  # wiring, not threads
+            win._start_vault_scan()
+            w = win._scan_worker
+            self.assertIsInstance(w, TestWorker)
+            # THE LAW: the re-bound fn is callable with the snapshot
+            # alone — the v0.61.0 bug raised TypeError right here.
+            result = w._fn(dict(win.config))
+        self.assertEqual(result.get('verdict'), 'clean')
+        self.assertEqual(seen['cfg'].get('website_vault_path'),
+                         '/tmp/vault')
+        # PyQt re-binds the signal on every attribute access, so object
+        # identity can't be asserted — the LIVE-EMISSION proof below is
+        # the real law: the fed signal reaches the window's log.
+        self.assertIn('log_message', repr(seen['signal']))
+        seen['signal'].emit("the pipe works", "info")
+        self.assertIn(('info', 'the pipe works'), win.logs)
+
+    def test_the_start_story_and_the_re_arm(self):
+        """The CTA speaks its opening line, disables the button, and the
+        finished routing re-arms it + speaks the verdict."""
+        from gitcurator.gui.main_window import vault_scan_ui as _vsui
+        win = self._window()
+        with mock.patch.object(_vsui, '_vault_scan_job',
+                               lambda cfg, sig: {
+                                   'success': True, 'verdict': 'clean'}), \
+                mock.patch.object(TestWorker, 'start',
+                                  lambda self: None):
+            win._start_vault_scan()
+        self.assertIn('enabled', [c[0] for c in win._btn_calls])
+        self.assertIn(('text', 'Scanning…'), win._btn_calls)
+        self.assertTrue(any('Vault scan started' in m
+                            for _l, m in win.logs))
+        win._vault_scan_finished('vault_scan', {'verdict': 'clean'})
+        self.assertIn(('text', 'Scan'), win._btn_calls)
+        self.assertTrue(any('library is clean' in m
+                            for _l, m in win.logs))
+
+    def test_the_v0610_shape_is_dead_forever(self):
+        """The old wiring — fn IS the raw job, args=(snapshot,) — is the
+        bug. Pin that _fn is a re-bound wrapper, never the job itself."""
+        from gitcurator.gui.main_window import vault_scan_ui as _vsui
+        from gitcurator.gui import worker_jobs as _wjobs
+        win = self._window()
+        with mock.patch.object(TestWorker, 'start', lambda self: None):
+            win._start_vault_scan()
+        w = win._scan_worker
+        self.assertIsNot(w._fn, _wjobs._vault_scan_job)
+        # and calling the wrapper with the old single arg still works:
+        r = w._fn({'website_vault_path': '/tmp/vault'})
+        self.assertIsInstance(r, dict)
 
 
 if __name__ == '__main__':

@@ -1,3 +1,50 @@
+## [0.61.1] — The Scan button works — 2026-10-10
+
+**The bug the owner found at home (the first real v0.61.0 run on his
+own desktop, 2026-10-10, screenshot 4.png):** EVERY click of the new
+[Scan] CTA died instantly —
+
+```
+💥 Worker 'vault_scan' crashed: TypeError: _vault_scan_job()
+  missing 1 required positional argument: "log_signal"
+```
+
+The mixin built `TestWorker(_vault_scan_job, 'vault_scan', snapshot)`
+and `TestWorker.run()` calls `fn(*args)` — but the job's signature is
+`_vault_scan_job(config, log_signal)`. The signal was never fed in.
+The whole 22-case vault-scan suite was green while the button was
+dead, because the tests exercised the job directly with a proper
+signal — never the GUI's call site. The scan mechanism itself (walk →
+plan → Telegram gate → apply) was never reached.
+
+**The fix** (one wiring, the house pattern): `vault_scan_ui.py` now
+creates the worker and re-binds `worker._fn` to a closure that passes
+`worker.log_message` in as `log_signal` — the exact pattern Test
+Connection's battery has used since v0.23.0. The log pipe is proven
+live end-to-end: an emission through the fed signal lands in the
+window's log well.
+
+**The regression wall** (`TestScanCtaWiring`, 3 cases in
+tests/test_vaultscan.py — suite **1780 → 1783**): (1) THE regression —
+the bound fn is callable with the snapshot alone (the v0.61.0 bug
+raised TypeError right at that call), hands the job
+`(config, worker.log_message)`, and the signal is LIVE (an emission
+reaches the window's log); (2) the start story + the re-arm (opening
+line, button disabled, finished routing restores "Scan" + speaks the
+verdict); (3) the v0.61.0 shape is dead forever — `_fn` is a re-bound
+wrapper, never the raw job. No core scan code changed; the worker
+stays at 0.32.0; the UA string rides along to 0.61.1.
+
+Also in the box: `HTTP_USER_AGENT` → `GitCurator/0.61.1` (the channel
+identity law — keep in sync with VERSION at release time).
+
+> For the owner's home run: the Test Connection "2/4 subsystems — 1
+> error, 1 warning" in the same screenshot is environmental (LLM/GitHub
+> legs depend on what's running locally; the Telegram leg — the scan's
+> gate — was green). And remember the one-time `/pair` (v0.60.2's
+> record): the scan's Telegram ask needs the desktop paired with the
+> worker, else it safely defers and asks again next scan.
+
 ## [0.61.0] — The vault scan — 2026-10-10
 
 The owner's ask (session, verbatim): "HEADLINE — build the VAULT SCAN
