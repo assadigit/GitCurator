@@ -5,6 +5,32 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.60.1 deploy record — the unchanged 0.31.0 worker, LIVE and verified (LIVE ✅ · desktop-only release)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `138c8730-7870-453a-971c-ebeaa8fafa52` — the v0.60.0
+> deployment; v0.60.1 is a DESKTOP-ONLY release: the owner's two
+> reports — "I tagged one note as 'auto-delete' but it didn't detect"
+> (the gate's eyes now read the note BODY's own inline tags, the
+> same exact-word grammar) and "it still counts decomissioned links
+> as unprocessed, then skip them in process" (the verdicts leave the
+> batch's count BEFORE processing — `split_dismissed_links`). Both
+> repairs live entirely in the desktop's Python; `git diff
+> v0.60.0..v0.60.1 -- app/cloudflare-bot/` is EMPTY, so the live
+> deployment serves the identical code — no re-deploy needed.
+>
+> **Verified live (this session):** `/health?cb=…` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.31.0"}`
+> ✓ · root → `200` in 0.31s ✓. Desktop release v0.60.1
+> (GitCurator-v0.60.1-windows.zip, 130 files, sha256
+> `b773b491cd65d9f383553982830667e5471d15e27fbf31f7bc5279a218a374d1`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.60.1 tag first try (runs 37984927569 + 37984928398 — 1740
+> tests, 86-module compile gate, offline golden 30/30).
+
+---
+
 ## 📦 v0.58.0 deploy record — the unchanged 0.30.0 worker, LIVE and verified (LIVE ✅ · desktop-only release)
 
 > **Live in production** at
