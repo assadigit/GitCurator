@@ -1,3 +1,69 @@
+## [0.60.1] — The body tags + the honest count — 2026-10-10
+
+Owner report (session, verbatim): "I tried the new version, Even
+didn't show me the tag, I tagged one note as 'auto-delete' but it
+didn't detect. Also it still counts decomissioned links as
+unprocessed, then skip them in process." Two repairs, one release:
+the gate's eyes learn the note BODY's own inline tags, and the
+verdicts leave the batch's count before processing starts. Desktop
+release only (the Worker is untouched — 0.31.0 stays). Suite grows
+**1721 → 1740** (17 cases join tests/test_banishment.py, 1 joins
+tests/test_websitesqueuefix.py, 1 joins tests/test_phase2.py).
+
+**The body tags — why the ask never came.** The owner "tags" a note
+the Obsidian-natural way: typing `#auto-delete` in the note TEXT.
+That tag lives in the body — the frontmatter `tags:` list is the
+PROPERTIES panel's storage, and v0.58–v0.60 only read that one. The
+report proves it: the mark was written, the scan was blind to it.
+`_note_body_banish_tag` gives the eyes the second surface: the SAME
+exact-word grammar on the body's `#tag` tokens — a token is `#` + a
+non-space run (Obsidian's own law: a heading's `# word` and `##word`
+never parse) at a line start / after whitespace / after an opening
+bracket; it counts when it contains 🗑️ or IS a banish word exactly.
+So `#auto-delete`, `#auto_delete`, `#delete`, `#purge`, `#banish`,
+`#blacklist`, `#🗑️` all fire now — and `#deleted-files`,
+`#delete-me`, `#auto-deleted`, `C#delete` (mid-word), a URL's
+`#fragment`, a fenced code block's `#purge` comment never do. The
+frontmatter door stays FIRST (its marker wins when both are
+present); the app's own hint lines spell the words bare, never as
+`#` tokens, so no note is ever born marked for deletion; and the
+confirmation gate remains the false-positive net — a scraped
+hashtag can only ride the ask, never delete on its own. The hints in
+every built note now teach both surfaces: "Tag this note 🗑️ or
+delete / auto_delete — typed inline anywhere in the note (Obsidian's
+own tag syntax) or added in the tags property."
+
+**The honest count — why "unprocessed" lied.** The bot-queue fetch
+and the websites phase counted EVERY non-GitHub link as work, then
+`process_link` skipped the decommissioned/banished ones one by one —
+the bar said 25, the run did 20, five lines of "skipped" explained
+the gap. Now the verdict leaves the count BEFORE the work:
+`split_dismissed_links(state, urls)` (pure, guarded — a broken probe
+never hides a link) splits the batch into kept/dismissed by the SAME
+gate `process_link` enforces; the websites phase runs it AFTER the
+pipeline init (so this run's freshly-consumed table verdicts count
+too), drops the dismissed links from the bar's denominator, marks
+them `skipped` in the manifest, and speaks one honest line —
+
+> 🪦 2 link(s) already have their verdict (decommissioned /
+> banished / auto-retired) — excluded from the run's count before
+> processing: never fetched again, never counted as unprocessed
+> (♻️ in the master table revives any of them)
+
+`run_due_retries` splits its own due list the same way ("🔁
+Retrying N" counts only what will actually run), and the bot-queue
+classification (both the worker thread and the GUI fallback) now
+checks `is_dismissed` BEFORE the vault index — a dismissed link
+whose un-swept placeholder still sits in the vault is DISMISSED,
+never pending, never "already in vault". The per-link gate in
+`process_link` stays exactly as it was — the last line of defense
+for every other entry path (hand delivery, backlog retries, the
+master-table waiting pass).
+
+Also: the phase summary gains `excluded_verdicts` (the count that
+left the batch), and the release pins re-point (0.60.1 across the
+15 pin files).
+
 ## [0.60.0] — The confirmation gate — 2026-10-10
 
 Owner ask (session, verbatim): "I want to add this, when system is

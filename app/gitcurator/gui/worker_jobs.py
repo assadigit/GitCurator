@@ -265,6 +265,14 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                     elif self_domains and _links.domain_is_self(
                             url, self_domains):
                         web_self += 1
+                    elif state is not None and state.is_dismissed(canonical):
+                        # v0.60.1 — the verdict outranks the vault: a
+                        # dismissed link whose note still sits in the
+                        # index (an un-swept placeholder, an
+                        # auto-retired note) is NOT pending and NOT
+                        # "in vault" — the owner's report: "it still
+                        # counts decommissioned links as unprocessed".
+                        web_dismissed += 1
                     elif wvi.has_url(url):
                         # In the vault. A failed-fetch _review placeholder
                         # with retries remaining is PENDING (upgrade path);
@@ -280,8 +288,6 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                             pending_web.append(url)
                         else:
                             web_in_vault += 1
-                    elif state is not None and state.is_dismissed(canonical):
-                        web_dismissed += 1
                     elif state is not None and state.is_processed(canonical):
                         web_done += 1
                     else:

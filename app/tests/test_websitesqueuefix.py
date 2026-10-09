@@ -263,6 +263,24 @@ class TestQueueWebsiteClassification(QueueFixBase):
         self.assertEqual(res.get("pending_website_urls"), ["https://flaky.org/"])
         self.assertEqual(res.get("websites_in_vault_count"), 0)
 
+    def test_dismissed_outranks_the_vault_index(self):
+        """v0.60.1 — a dismissed link whose note STILL sits in the vault
+        index (an un-swept placeholder, an auto-retired note) is
+        DISMISSED — never pending, never "already in vault" (the
+        owner's report: decommissioned links were counted as
+        unprocessed)."""
+        self._seed_state()
+        # the dismissed URL gets a note on disk AFTER the verdict —
+        # exactly the un-swept shape the reorder must survive:
+        os.makedirs(self.web_vault, exist_ok=True)
+        with open(os.path.join(self.web_vault, "deleted.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_note("https://deleted.com/"))
+        res = self._run_job(["https://deleted.com/"])
+        self.assertEqual(res.get("pending_website_urls"), [])
+        self.assertEqual(res.get("websites_dismissed_count"), 1)
+        self.assertEqual(res.get("websites_in_vault_count"), 0)
+
     def test_pipeline_off_hint(self):
         """Websites pipeline OFF → no pending websites + the hint flag."""
         res = self._run_job(["https://newsite.com/article"],

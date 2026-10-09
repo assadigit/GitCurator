@@ -1,19 +1,19 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 86 audited
-# Python modules and runs the full 1721-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1740-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
-# 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
+# 78 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
-# 49 intakefix + 38 sealfix + 30 v0230 + 24 refactor_surface + 22
+# 49 intakefix + 38 sealfix + 30 v0230 + 24 refactor_surface + 23
 # websitesqueuefix + 11 swotfix + 10 webnote_v2 + 22 lawfix + 29
 # importbatch + 27 socialomit + 17 resyncfix + 21 reconfix + 24
 # batchfinish + 30 soundsettings + 15 reviewretry + 21 bothdoors +
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
 # 30 masterretry + 44 persistentdoor + 67 realdoor + 44 handharvest +
-# 48 noteredo + 43 banishment — v0.60.0: 12 confirmation-gate cases
-# join, the ask-before-delete law).
+# 48 noteredo + 60 banishment — v0.60.1: the body-tag door + the
+# honest count join, the owner's two reports repaired).
 # v0.57.0 — THE NOTE IS THE SUCCESS: the owner's report — "I've
 # noticed that chrome still fetches a new session, moreover it
 # correctly loads the websites, and websites gets loaded on those
@@ -533,4 +533,4 @@ jobs:
 
       - name: Test summary
         if: always()
-        run: "echo \"Gate: 85 compiles + 1709 tests + worker 50 + offline golden run (v0.59.0). Mirrors the removed dashboard's POST /api/verify one-to-one.\""
+        run: "echo \"Gate: 85 compiles + 1740 tests + worker 59 + offline golden run (v0.60.1). Mirrors the removed dashboard's POST /api/verify one-to-one.\""

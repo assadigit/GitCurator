@@ -260,6 +260,31 @@ class WorkerWebsitePhaseMixin:
                     note_state_db=note_state_db,
                     banish_confirm=_banish_fn)
 
+                # v0.60.1 — the bar's own honesty (the owner's report,
+                # verbatim: "it still counts decommissioned links as
+                # unprocessed, then skip them in process"): links whose
+                # verdict is already written (graveyard / banishment /
+                # auto-verdict — the same gate process_link enforces)
+                # leave the batch BEFORE the count — the pipeline init
+                # above has already consumed the table and the gate, so
+                # this run's fresh verdicts count too. The dropped links
+                # get their own honest line and a manifest 'skipped'
+                # mark: never "unprocessed", never a skip pile.
+                _pre_kept, _pre_dropped = \
+                    _website_pipeline.split_dismissed_links(
+                        state, links, log=self.log_message.emit)
+                if _pre_dropped:
+                    links = _pre_kept
+                    if self.link_tracker:
+                        for _u in _pre_dropped:
+                            try:
+                                self.link_tracker.mark_skipped(
+                                    _u, 'already decommissioned/banished '
+                                       '(excluded before processing — '
+                                       'never fetched again)')
+                            except Exception:
+                                pass
+
                 due = state.due_retries()
                 # v0.37.0 — the phase owns its slice of the bar: re-base
                 # the denominator on what will ACTUALLY run (the law-banned
@@ -441,6 +466,7 @@ class WorkerWebsitePhaseMixin:
                            'banished': len(_banished),
                            'banished_urls': _banished,
                            'banish_gate': _gate,
+                           'excluded_verdicts': len(_pre_dropped),
                            'vault': website_vault}
                 self._website_summary = summary
                 c = pipeline.counters
