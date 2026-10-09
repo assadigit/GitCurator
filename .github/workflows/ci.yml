@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
-# Every push to main, every tag, and every PR compiles the 85 audited
-# Python modules and runs the full 1709-case suite (34 core + 11 e2e +
+# Every push to main, every tag, and every PR compiles the 86 audited
+# Python modules and runs the full 1721-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 77 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -12,7 +12,8 @@
 # 26 decommission + 26 thirddoor + 66 ladder + 23 autopip + 27
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
 # 30 masterretry + 44 persistentdoor + 67 realdoor + 44 handharvest +
-# 48 noteredo + 31 banishment).
+# 48 noteredo + 43 banishment — v0.60.0: 12 confirmation-gate cases
+# join, the ask-before-delete law).
 # v0.57.0 — THE NOTE IS THE SUCCESS: the owner's report — "I've
 # noticed that chrome still fetches a new session, moreover it
 # correctly loads the websites, and websites gets loaded on those
@@ -502,6 +503,7 @@ jobs:
           gitcurator/integrations/telethon_fetcher.py
           gitcurator/integrations/backfill_manager.py
           gitcurator/integrations/subprocess_runner.py
+          gitcurator/integrations/banish_confirm.py
           gitcurator/cloud/cloudflare_sync.py
           gitcurator/cli.py
           gitcurator/cli_terminal.py

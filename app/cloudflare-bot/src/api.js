@@ -12,11 +12,11 @@ import {
   deadLetterGetAll,
   errorGetRecent, errorGetUnackCount, errorAcknowledgeAll,
   gdriveGetRecent,
-  activityGetRecent,
+  activityGetRecent, activityLog,
   installGet, installInsert, installUpdateLastSeen
 } from './db.js';
 import { cacheGetPairingCode, cacheSetPairingCode, cacheDeletePairingCode } from './kv.js';
-import { sendMessage } from './telegram.js';
+import { sendMessage, editMessage, inlineKeyboard } from './telegram.js';
 import { handleDashboardApi } from './dashboard-api.js';
 
 // ========================================
@@ -48,7 +48,8 @@ export async function handleApi(request, env, url) {
     '/api/errors',
     '/api/gdrive/backup_status',
     '/api/pair',
-    '/api/backfill'
+    '/api/backfill',
+    '/api/banish'
   ];
 
   if (desktopEndpoints.some(ep => path.startsWith(ep))) {
@@ -87,6 +88,16 @@ export async function handleApi(request, env, url) {
     }
     if (path === '/api/backfill' && method === 'POST') {
       return handleBackfill(request, env);
+    }
+    // v0.60.0 — THE CONFIRMATION GATE (desktop <-> owner over Telegram)
+    if (path === '/api/banish/propose' && method === 'POST') {
+      return handleBanishPropose(request, env);
+    }
+    if (path === '/api/banish/status' && method === 'GET') {
+      return handleBanishStatus(request, env, url);
+    }
+    if (path === '/api/banish/result' && method === 'POST') {
+      return handleBanishResult(request, env);
     }
 
     return jsonResponse({ error: 'Method not allowed' }, 405);
@@ -377,6 +388,166 @@ async function handleDecommission(request, env) {
   await decommissionInsert(env.DB, url_normalized, 'desktop', reason, details, null);
 
   return jsonResponse({ success: true, decommissioned: true });
+}
+
+// ========================================
+// v0.60.0 — THE CONFIRMATION GATE endpoints
+// ========================================
+// The desktop's banish gate asks the owner over Telegram before any
+// 🗑-marked note is removed (the owner's ask: "it must show 'X number
+// of notes should be deleted' do you confirm?"). The ask lives in the
+// state table under `banish_confirm:<id>`; the buttons answer over the
+// webhook's callback_query (banish_yes / banish_no — webhook.js);
+// the desktop polls /status and closes with /result.
+
+const BANISH_CONFIRM_PREFIX = 'banish_confirm:';
+const BANISH_ACTIVE_KEY = 'banish_active_confirm';
+
+function _escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function _banishConfirmGet(db, id) {
+  const raw = await stateGet(db, BANISH_CONFIRM_PREFIX + String(id));
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+async function _banishConfirmSet(db, id, obj) {
+  await stateSet(db, BANISH_CONFIRM_PREFIX + String(id), JSON.stringify(obj));
+}
+
+async function handleBanishPropose(request, env) {
+  const body = await request.json();
+  const { count, items, timeout_s } = body || {};
+  if (!count || !Array.isArray(items) || !items.length) {
+    return jsonResponse({ error: 'Missing count or items' }, 400);
+  }
+  const allowed = (env.ALLOWED_USER_IDS || '').split(',')[0].trim();
+  if (!allowed) {
+    return jsonResponse({ error: 'No allowed chat configured' }, 400);
+  }
+  const chatId = parseInt(allowed, 10);
+
+  // v0.60.0 — supersede the previous pending ask (one live question at
+  // a time; a stale ask's message says so, its buttons answer 'expired')
+  const prevId = await stateGet(env.DB, BANISH_ACTIVE_KEY);
+  if (prevId) {
+    const prev = await _banishConfirmGet(env.DB, prevId);
+    if (prev && prev.status === 'pending') {
+      prev.status = 'superseded';
+      prev.resolved_at = now();
+      await _banishConfirmSet(env.DB, prevId, prev);
+      try {
+        await editMessage(env, prev.chat_id, prev.message_id,
+          `⌛ <b>Superseded</b> — a newer deletion review replaced this ask. ` +
+          `Nothing was deleted from it.`);
+      } catch (err) {
+        console.error('banish supersede edit error:', err);
+      }
+    }
+  }
+
+  const n = parseInt(count, 10) || items.length;
+  const shown = items.slice(0, 20).map((it, i) =>
+    `${i + 1}. <b>${_escapeHtml(it.title || it.url)}</b>\n` +
+    `   <code>${_escapeHtml(it.url)}</code>`);
+  if (items.length > 20) {
+    shown.push(`… +${items.length - 20} more`);
+  }
+  const text =
+    `🗑️ <b>Deletion review — ${n} note${n === 1 ? '' : 's'} marked for deletion</b>\n\n` +
+    `The vault scan found <b>${n}</b> note${n === 1 ? '' : 's'} carrying your ` +
+    `delete mark (🗑️ / delete / auto_delete):\n\n` +
+    shown.join('\n') +
+    `\n\nConfirm, and they leave your vault and the GitHub backup — ` +
+    `and never get fetched again.\n` +
+    `Keep them, and the marks stay for the next run.`;
+  const id = uuid();
+  const keyboard = inlineKeyboard([[
+    { text: `🗑️ Delete all ${n}`, callback_data: `banish_yes:${id}` },
+    { text: `✋ Keep all ${n}`, callback_data: `banish_no:${id}` }
+  ]]);
+  const msg = await sendMessage(env, chatId, text, {
+    reply_markup: keyboard, disable_web_page_preview: true });
+  if (!msg) {
+    return jsonResponse({ error: 'Telegram send failed' }, 502);
+  }
+  await _banishConfirmSet(env.DB, id, {
+    status: 'pending',
+    count: n,
+    items: items.map(it => ({
+      url: it.url, title: it.title, marker: it.marker, door: it.door })),
+    timeout_s: timeout_s || 300,
+    chat_id: chatId,
+    message_id: msg.message_id,
+    created_at: now()
+  });
+  await stateSet(env.DB, BANISH_ACTIVE_KEY, id);
+  await activityLog(env.DB, 'banish_gate', null,
+    `Deletion review proposed: ${n} note(s) awaiting the owner's confirmation`);
+
+  return jsonResponse({ success: true, id, message_id: msg.message_id });
+}
+
+async function handleBanishStatus(request, env, url) {
+  const id = url.searchParams.get('id');
+  if (!id) {
+    return jsonResponse({ error: 'Missing id' }, 400);
+  }
+  const obj = await _banishConfirmGet(env.DB, id);
+  if (!obj) {
+    return jsonResponse({ error: 'Unknown confirmation id' }, 404);
+  }
+  return jsonResponse({
+    success: true, id,
+    status: obj.status || 'pending',
+    count: obj.count || 0
+  });
+}
+
+async function handleBanishResult(request, env) {
+  const body = await request.json();
+  const { id, outcome, deleted } = body || {};
+  if (!id || !outcome) {
+    return jsonResponse({ error: 'Missing id or outcome' }, 400);
+  }
+  const obj = await _banishConfirmGet(env.DB, id);
+  if (!obj) {
+    return jsonResponse({ error: 'Unknown confirmation id' }, 404);
+  }
+  let text;
+  if (outcome === 'deleted') {
+    // the owner's example wording: "10 Websites Removed and will never
+    // fetch again because you …"
+    const n = parseInt(deleted, 10) || 0;
+    text =
+      `🗑️ <b>${n} website${n === 1 ? '' : 's'} removed — never to be ` +
+      `fetched again.</b> You confirmed the deletion; the notes rest in ` +
+      `.trash/banished (recoverable by hand), the URLs are blacklisted, ` +
+      `and the record rows (♻️ undo) are in the master table.`;
+    obj.status = 'done';
+  } else if (outcome === 'timeout') {
+    text =
+      `⌛ <b>No answer in time</b> — nothing deleted. The ${obj.count} ` +
+      `mark(s) stay; I'll ask again on the next run.`;
+    obj.status = 'timeout';
+  } else {
+    text = `👌 <b>Kept</b> — nothing deleted. The marks stay; I'll ask again on the next run.`;
+    obj.status = obj.status === 'pending' ? 'declined' : obj.status;
+  }
+  obj.resolved_at = obj.resolved_at || now();
+  await _banishConfirmSet(env.DB, id, obj);
+  try {
+    await editMessage(env, obj.chat_id, obj.message_id, text);
+  } catch (err) {
+    console.error('banish result edit error:', err);
+  }
+  await activityLog(env.DB, 'banish_gate', null,
+    `Deletion review closed (${outcome}): ${deleted || 0} removed`);
+
+  return jsonResponse({ success: true, status: obj.status });
 }
 
 // ========================================

@@ -16,6 +16,22 @@ again because you blah blah'" — so ``auto_delete`` / ``auto-delete``
 join the banish words (the editor's suggested tag is obeyed), and the
 run tally speaks every run (the zero run answers too).
 
+v0.60.0 (same file, same law): THE CONFIRMATION GATE — the owner's
+ask (verbatim): "when system is scanning my vault and fetching from
+telegram bot, it must show ' X number of notes should be deleted '
+do you confirm? … At the beginning of every run, system scans vault,
+find what I've marked to delete, system detects them, show me them
+their numbers, so I ensure that system successfully detected them, I
+confirm deletation, then they will get deleted from both vaults and
+never be fetched again. also deleted from github." — so the run now
+OPENS with the detection scan (scan_pending_banishments — both doors,
+deduped, hand-written marks counted but never asked), the count is
+spoken and ASKED over the injected channel, and nothing is removed
+until the verdict: confirmed -> both doors enforce + the twins sweep
+of the other vault; declined / timeout / no-channel -> the marks and
+the notes stay, the next run asks again ("banish_confirm": false in
+config restores the old auto-delete reflex).
+
 Covered here (zero network — an injected fetch_fn and a fake LLM, the
 house pattern):
 
@@ -191,7 +207,8 @@ class _BanishCase(unittest.TestCase):
         self.db.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def make_pipeline(self, llm=None, fetch=None, config=None):
+    def make_pipeline(self, llm=None, fetch=None, config=None,
+                      banish_confirm=None):
         cfg = {'website_vault_path': self.vault,
                'web_domain_delay_s': 0}
         cfg.update(config or {})
@@ -199,7 +216,8 @@ class _BanishCase(unittest.TestCase):
             config=cfg, llm_call=llm or _FakeLLM(),
             vault_index_has=lambda u: u in self.in_vault,
             state=self.db, fetch_fn=fetch or _FakeFetch(),
-            log=lambda m, l='info': self.logs.append((l, m)))
+            log=lambda m, l='info': self.logs.append((l, m)),
+            banish_confirm=banish_confirm)
 
     def store_proper_note(self, url):
         """Run a link through the pipeline: a real, categorized note."""
@@ -530,9 +548,12 @@ class TestTheLoopClosed(_BanishCase):
         canonical, note_path = self.store_proper_note(
             'https://example.com/site')
         _tag_note(note_path)
-        # months later, a fresh batch arrives with the same URL:
+        # months later, a fresh batch arrives with the same URL (the
+        # owner answers the gate's ask with 🗑️ Delete — v0.60.0):
         fetch = _FakeFetch()
-        pipe = self.make_pipeline(fetch=fetch)   # __init__ banishes
+        pipe = self.make_pipeline(
+            fetch=fetch,
+            banish_confirm=lambda i, l: 'confirmed')   # confirmed ask
         self.assertFalse(os.path.exists(note_path))
         results = pipe.run(['https://example.com/site'])
         self.assertEqual(results[0]['outcome'], 'skipped')
@@ -548,12 +569,15 @@ class TestTheLoopClosed(_BanishCase):
 
     def test_auto_delete_tag_closes_the_loop(self):
         # the autocomplete word closes the exact same loop (v0.59.0 —
-        # the tag the owner's editor puts under his thumb works):
+        # the tag the owner's editor puts under his thumb works; the
+        # v0.60.0 gate confirms it like any other mark):
         canonical, note_path = self.store_proper_note(
             'https://example.com/site')
         _tag_note(note_path, marker='auto_delete')
         fetch = _FakeFetch()
-        pipe = self.make_pipeline(fetch=fetch)   # __init__ banishes
+        pipe = self.make_pipeline(
+            fetch=fetch,
+            banish_confirm=lambda i, l: 'confirmed')   # confirmed ask
         self.assertFalse(os.path.exists(note_path))
         results = pipe.run(['https://example.com/site'])
         self.assertEqual(results[0]['outcome'], 'skipped')
@@ -565,7 +589,9 @@ class TestTheLoopClosed(_BanishCase):
             'https://example.com/site')
         _tag_note(note_path)
         fetch = _FakeFetch()
-        self.make_pipeline(fetch=fetch)          # __init__ banishes
+        self.make_pipeline(
+            fetch=fetch,
+            banish_confirm=lambda i, l: 'confirmed')   # confirmed ask
         self.db.rearm_retries()                  # any later re-arm
         self.assertNotIn(canonical, self.db.due_retries())
         r = self.make_pipeline(fetch=fetch).process_link(
@@ -578,7 +604,8 @@ class TestTheLoopClosed(_BanishCase):
         canonical, note_path = self.store_proper_note(
             'https://example.com/site')
         _tag_note(note_path)
-        self.make_pipeline()                     # construction alone
+        self.make_pipeline(
+            banish_confirm=lambda i, l: 'confirmed')  # confirmed ask
         self.assertFalse(os.path.exists(note_path))
         self.assertIn('🗑️', self.all_logs())
 
@@ -587,7 +614,9 @@ class TestTheLoopClosed(_BanishCase):
             'https://example.com/site')
         _tag_note(note_path)
         fetch = _FakeFetch()
-        pipe = self.make_pipeline(fetch=fetch)
+        pipe = self.make_pipeline(
+            fetch=fetch,
+            banish_confirm=lambda i, l: 'confirmed')   # confirmed ask
         r = pipe.process_link('https://example.com/site')
         self.assertEqual(r['outcome'], 'skipped')
         self.assertIn('banished by owner', r['error'])
@@ -621,12 +650,15 @@ class TestTheTally(_BanishCase):
     def test_tally_line_names_the_count_and_the_contract(self):
         # both doors in one run: a note tagged 🗑️ AND a table row
         # marked delete — the tally speaks ONCE, with the count:
+        # (v0.60.0 — the gate is confirmed by the injected channel, the
+        # tally's contract is unchanged)
         a, note_a = self.store_proper_note('https://a.example/x')
         b, note_b = self.store_proper_note('https://b.example/y')
         _tag_note(note_a)                       # the note's own door
         self.write_table([('https://b.example/y', 'delete')])
         self.logs.clear()
-        pipe = self.make_pipeline()             # __init__ banishes
+        pipe = self.make_pipeline(             # __init__ asks, owner confirms
+            banish_confirm=lambda items, log: 'confirmed')
         tally = self._tally_lines()
         self.assertEqual(len(tally), 1)         # once per run
         self.assertIn('2 website(s) removed', tally[0])
@@ -652,7 +684,8 @@ class TestTheTally(_BanishCase):
         _tag_note(note_path)
         self.write_table([('https://example.com/site', '🗑️')])
         self.logs.clear()
-        pipe = self.make_pipeline()
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'confirmed')
         self.assertEqual(pipe.banished_urls, [canonical])
         tally = self._tally_lines()
         self.assertEqual(len(tally), 1)
@@ -798,6 +831,231 @@ class TestReviveDoor(_BanishCase):
         self.assertIn('https://example.com/site', fetch.calls)
 
 
+class TestTheConfirmationGate(_BanishCase):
+    """v0.60.0 — the owner's ask (verbatim): "when system is scanning
+    my vault and fetching from telegram bot, it must show ' X number
+    of notes should be deleted ' do you confirm? … I confirm
+    deletation, then they will get deleted from both vaults and never
+    be fetched again. also deleted from github."
+
+    The gate's law: the run OPENS with the detection scan, the count
+    is spoken and ASKED, and nothing is removed until the verdict.
+    The channel here is an injected lambda (the real one is the
+    Telegram round-trip — integrations/banish_confirm.py + the
+    worker's /api/banish endpoints; hermetic tests never touch the
+    network)."""
+
+    def _gate_lines(self):
+        return [m for (_, m) in self.logs
+                if m.startswith('🗑️ Vault scan:')]
+
+    def _tally_lines(self):
+        return [m for (_, m) in self.logs
+                if m.startswith('🗑️ Run tally:')]
+
+    def test_scan_counts_both_doors_deduped(self):
+        # the gate's eyes: 2 app-owned marked notes + 1 table row that
+        # duplicates one of them + 1 hand-written mark -> 2 pending
+        # items (deduped), 1 hand-written (counted, never asked):
+        a, note_a = self.store_proper_note('https://a.example/x')
+        b, note_b = self.store_proper_note('https://b.example/y')
+        _tag_note(note_a)
+        _tag_note(note_b)
+        self.write_table([('https://a.example/x', '🗑️')])
+        _write_note(self.vault, 'hand.md', 'https://hand.example/z',
+                    tags='[delete]', managed='a-human')
+        scan = wp.scan_pending_banishments(self.vault)
+        self.assertEqual(len(scan['items']), 2)
+        self.assertEqual(scan['kept_handwritten'], 1)
+        self.assertEqual({i['canonical'] for i in scan['items']}, {a, b})
+        # the duplicate gesture (note + table) is ONE item — the note's
+        # door wins (it carries the path):
+        self.assertEqual({i['door'] for i in scan['items']},
+                         {'note tag'})
+        # the item carries what the Telegram ask shows:
+        first = scan['items'][0]
+        self.assertIn('title', first)
+        self.assertIn('marker', first)
+
+    def test_confirmed_verdict_deletes_and_reports(self):
+        # THE golden path: scan -> ask (count + list) -> confirm ->
+        # both doors enforce -> the closing report carries the count:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        seen_items, reports = [], []
+        self.logs.clear()
+
+        def confirm(items, log):
+            seen_items.extend(items)
+            return {'verdict': 'confirmed',
+                    'report': lambda deleted: reports.append(deleted)}
+
+        pipe = self.make_pipeline(banish_confirm=confirm)
+        # the ask carried the count and the list (what Telegram shows):
+        self.assertEqual(len(seen_items), 1)
+        self.assertEqual(seen_items[0]['canonical'], a)
+        self.assertIn('1 note(s) marked for deletion', self.all_logs())
+        self.assertIn('asking you to confirm', self.all_logs())
+        # the number goes FIRST — "so I ensure that system
+        # successfully detected them":
+        self.assertEqual(len(self._gate_lines()), 1)
+        self.assertTrue(self._gate_lines()[0].startswith(
+            '🗑️ Vault scan: 1 note(s) marked for deletion'))
+        self.assertIn('✅ You confirmed the deletion', self.all_logs())
+        # the deletion happened — the full v0.58 contract, now gated:
+        self.assertEqual(pipe.banished_urls, [a])
+        self.assertFalse(os.path.exists(note_a))
+        self.assertTrue(os.path.isfile(os.path.join(
+            self.vault, wp.BANISH_QUARANTINE_RELPATH,
+            os.path.basename(note_a))))
+        self.assertTrue(self.db.is_dismissed(a))
+        self.assertIsNone(self.db.processed_row(a))
+        # the closing report was called with the count that left:
+        self.assertEqual(reports, [1])
+        # the gate's verdict rides the summary:
+        self.assertEqual(pipe.banish_gate['verdict'], 'confirmed')
+        self.assertEqual(pipe.banish_gate['pending'], 1)
+        self.assertEqual(pipe.banish_gate['banished'], 1)
+
+    def test_declined_verdict_keeps_everything(self):
+        # "✋ Keep all" — the marks and the notes stay, no blacklist:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        self.logs.clear()
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'declined')
+        self.assertEqual(pipe.banished_urls, [])
+        self.assertTrue(os.path.exists(note_a))
+        self.assertFalse(self.db.is_dismissed(a))
+        self.assertIn('👌 You kept them', self.all_logs())
+        self.assertIn('1 marked note(s) KEPT (you said keep',
+                      self.all_logs())
+        self.assertEqual(pipe.banish_gate['verdict'], 'declined')
+        self.assertEqual(pipe.banish_gate['pending'], 1)
+
+    def test_timeout_verdict_keeps_and_names_the_reason(self):
+        # no answer in the window — same hold, different story:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        self.logs.clear()
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'timeout')
+        self.assertEqual(pipe.banished_urls, [])
+        self.assertTrue(os.path.exists(note_a))
+        self.assertFalse(self.db.is_dismissed(a))
+        self.assertIn('⌛ No answer in time', self.all_logs())
+        self.assertIn('KEPT (no answer in time', self.all_logs())
+
+    def test_no_channel_defers_by_default(self):
+        # THE CONTRACT CHANGE (v0.60.0): marked notes are no longer
+        # auto-deleted. No channel + no opt-out -> the SAFE default —
+        # the marks stay, the next run asks again:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        self.logs.clear()
+        pipe = self.make_pipeline()          # no banish_confirm injected
+        self.assertEqual(pipe.banished_urls, [])
+        self.assertTrue(os.path.exists(note_a))
+        self.assertFalse(self.db.is_dismissed(a))
+        self.assertIn('no confirmation channel is reachable',
+                      self.all_logs())
+        self.assertIn('KEPT (no confirmation channel', self.all_logs())
+        self.assertEqual(pipe.banish_gate['verdict'], 'defer')
+
+    def test_config_optout_restores_auto(self):
+        # "banish_confirm": false -> the v0.58/v0.59 reflex, explicit:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        pipe = self.make_pipeline(config={'banish_confirm': False})
+        self.assertEqual(pipe.banished_urls, [a])
+        self.assertFalse(os.path.exists(note_a))
+        self.assertEqual(pipe.banish_gate['verdict'], 'auto')
+
+    def test_the_gate_holds_the_table_door_not_the_dead(self):
+        # apply_banish=False holds ONLY the destructive door: the 🗑
+        # row waits, the 🪦 dead verdict (the owner's explicit hand,
+        # not a deletion) still retires:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        b, note_b = self.store_proper_note('https://b.example/y')
+        self.write_table([('https://a.example/x', 'delete'),
+                          ('https://b.example/y', '🪦 dead')])
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'declined')
+        # the 🗑 row's note stays, no dismissal:
+        self.assertTrue(os.path.exists(note_a))
+        self.assertFalse(self.db.is_dismissed(a))
+        # the dead row retired as always:
+        self.assertTrue(self.db.is_dismissed(b))
+        self.assertIn('🪦 confirmed', self.table_text())
+        self.assertIn('confirmed', self.table_text())
+        self.assertEqual(pipe.banish_gate['verdict'], 'declined')
+
+    def test_confirmed_table_rows_are_not_re_asked(self):
+        # history, not a pending ask — a confirmed row never re-opens
+        # the question:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        self.write_table([('https://a.example/x',
+                           '🗑️ banished — confirmed 2026-10-09')])
+        scan = wp.scan_pending_banishments(self.vault)
+        self.assertEqual(scan['items'], [])
+        self.assertEqual(scan['kept_handwritten'], 0)
+
+    def test_bare_string_verdict_from_a_simple_channel(self):
+        # a channel that answers with a bare string is honored too
+        # (the dict shape is the rich one — report + all):
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        pipe = self.make_pipeline(
+            banish_confirm=lambda items, log: 'confirmed')
+        self.assertEqual(pipe.banished_urls, [a])
+        self.assertFalse(os.path.exists(note_a))
+
+    def test_twins_leave_the_other_vault_on_confirm(self):
+        # "deleted from both vaults": a twin note in the OTHER vault
+        # (config vault_path — the GitHub-projects vault) leaves on
+        # the confirm too; GitHub itself is the next seal's job:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        other = os.path.join(self.tmp, 'ghvault')
+        twin = _write_note(other, 'Library/twin.md', 'https://a.example/x')
+        self.logs.clear()
+        pipe = self.make_pipeline(
+            config={'vault_path': other},
+            banish_confirm=lambda items, log: 'confirmed')
+        self.assertEqual(pipe.banished_urls, [a])
+        self.assertFalse(os.path.exists(twin))
+        self.assertTrue(os.path.isfile(os.path.join(
+            other, wp.BANISH_QUARANTINE_RELPATH, 'twin.md')))
+        self.assertIn('Both vaults', self.all_logs())
+
+    def test_a_broken_channel_defers_safely(self):
+        # the channel that raises mid-ask answers nothing — the SAFE
+        # default (defer), never a crash:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+
+        def broken(items, log):
+            raise RuntimeError('telegram unreachable')
+
+        pipe = self.make_pipeline(banish_confirm=broken)
+        self.assertEqual(pipe.banished_urls, [])
+        self.assertTrue(os.path.exists(note_a))
+        self.assertIn('Banish confirmation failed', self.all_logs())
+        self.assertEqual(pipe.banish_gate['verdict'], 'defer')
+
+    def test_the_same_vault_is_never_swept_as_the_other(self):
+        # vault_path == website_vault_path (a single-vault setup) —
+        # the twins sweep must not double-process the one vault:
+        a, note_a = self.store_proper_note('https://a.example/x')
+        _tag_note(note_a)
+        pipe = self.make_pipeline(
+            config={'vault_path': self.vault},
+            banish_confirm=lambda items, log: 'confirmed')
+        self.assertEqual(pipe.banished_urls, [a])
+        self.assertEqual(len(os.listdir(os.path.join(
+            self.vault, wp.BANISH_QUARANTINE_RELPATH))), 1)
+
+
 class TestReleaseBookkeeping(unittest.TestCase):
     """The house source-contract tests (the test_bothdoors pattern)."""
 
@@ -811,7 +1069,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0590(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.59.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -819,6 +1077,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('banish', text.lower())
         self.assertIn('## [0.59.0]', text)
         self.assertIn('tally', text.lower())
+        self.assertIn('## [0.60.0]', text)
+        self.assertIn('confirmation gate', text.lower())
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')
@@ -835,6 +1095,9 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('banish_marked_notes', text)
         self.assertIn('BANISH_TALLY_PREFIX', text)   # v0.59.0 — the
         self.assertIn('banished_urls', text)         # tally + reports
+        self.assertIn('BANISH_GATE_PREFIX', text)    # v0.60.0 — the
+        self.assertIn('scan_pending_banishments', text)  # confirmation
+        self.assertIn('banish_twins_in_other_vault', text)  # gate + twins
 
 
 if __name__ == '__main__':
