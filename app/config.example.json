@@ -99,6 +99,8 @@
   ],
   "verify_ssl": false,
   "summary_keep_last": 10,
+  "banish_confirm": true,
+  "banish_confirm_timeout_s": 300,
   "telegram_user_id": "92788333",
   "cloudflare_api_email": "YOUR_CLOUDFLARE_API_EMAIL_HERE",
   "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",

@@ -402,7 +402,10 @@ class TestConsume(_GraveyardCase):
         self.assertEqual(len([n for n in os.listdir(
             os.path.join(self.vault, '_review')) if n.endswith('.md')]), 2)
         self.assertIn('🪦 dead', self.table_text())
-        self.assertNotIn('confirmed', self.table_text())
+        # v0.60.0 — the header's prose now TEACHES the gate ("on your
+        # confirm…"), so the assertion targets the STAMP shape
+        # ("confirmed —"), not the bare word:
+        self.assertNotIn('confirmed —', self.table_text())
 
     def test_missing_table_is_a_no_op(self):
         report = wp.consume_decommission_table(self.db, self.vault,
@@ -410,14 +413,16 @@ class TestConsume(_GraveyardCase):
         # v0.48.0 — the report gained 'handed' (the fourth door's
         # queue gesture count); v0.58.0 — 'banished' + 'notes_moved'
         # (the 🗑️ removal pass); v0.59.0 — 'banished_urls' (the run
-        # tally's list); still all zeros/empty when the table is
+        # tally's list); v0.60.0 — 'pending_banish' (the confirmation
+        # gate's held rows); still all zeros/empty when the table is
         # missing.
         self.assertEqual(report, {'dead': 0, 'reviewed': 0, 'banished': 0,
                                   'revived': 0, 'handed': 0,
                                   'placeholders_swept': 0,
                                   'notes_moved': 0,
                                   'rows_confirmed': 0,
-                                  'banished_urls': []})
+                                  'banished_urls': [],
+                                  'pending_banish': 0})
 
 
 class TestNeverFetchAgain(_GraveyardCase):
@@ -528,7 +533,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0440(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.59.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

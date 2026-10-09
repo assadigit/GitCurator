@@ -37,6 +37,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 from gitcurator.constants import (
     APP_DIR, MANAGED_BY_GITCURATOR, NOTE_SCHEMA_VERSION, OWNERSHIP_BANNER,
@@ -207,8 +208,9 @@ prompt_version: "{WEBSITE_PROMPT_VERSION}"
 *Source: [{url}]({url})*
 
 *Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
-this note — the next run removes it from the library and never fetches
-this site again (v0.58.0).*
+this note — the next run counts it, asks you to confirm on Telegram,
+and on your 🗑️ Delete it leaves the library and never fetches this
+site again (v0.60.0).*
 """
 
 
@@ -252,8 +254,9 @@ it is never lost; it will be retried automatically.
 *Source: [{url}]({url})*
 
 *Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
-this note — the next run removes it and never fetches this site again
-(v0.58.0).*
+this note — the next run counts it, asks you to confirm on Telegram,
+and on your 🗑️ Delete it leaves the library and never fetches this
+site again (v0.60.0).*
 """
 
 
@@ -512,6 +515,23 @@ BANISH_QUARANTINE_RELPATH = os.path.join(".trash", "banished")
 #: The dismissal reason prefix the skip gate reads (process_link names
 #: the door so the log tells a banishment from a graveyard burial).
 BANISH_REASON_PREFIX = "banished by owner"
+#: v0.60.0 — THE CONFIRMATION GATE: the banishment no longer fires on
+#: detection alone. Every run opens with the vault scan counting the
+#: marked notes, the number goes to the owner (the Telegram ask), and
+#: NOTHING is removed until he answers (the owner's ask, verbatim:
+#: "At the beginning of every run, system scans vault, find what I've
+#: marked to delete, system detects them, show me them their numbers,
+#: so I ensure that system successfully detected them, I confirm
+#: deletion, then they will get deleted"). The verdicts: 'confirmed'
+#: (delete now), 'declined' (keep, ask again next run), 'timeout' (no
+#: answer in the window — keep, ask again), 'auto' (the old v0.58/v0.59
+#: behavior, config ``banish_confirm: false``), 'defer' (marks exist
+#: but no confirmation channel was reachable/injected — the safe
+#: default: keep everything, ask again next run).
+BANISH_GATE_PREFIX = "🗑️ Vault scan:"
+#: v0.60.0 — the state-table row the worker keeps the ask in
+#: (``banish_confirm:<id>`` — pending/confirmed/declined/timeout).
+BANISH_GATE_ENDPOINT = "/api/banish"
 
 
 def decommission_table_path(vault_path: str) -> str:
@@ -1051,10 +1071,13 @@ _GRAVEYARD_HEADER = """# Review Master Table — decommission or approve
 >   (recoverable in .trash/banished) AND the URL is blacklisted,
 >   never fetched again. ♻️ revived undoes it. You can also set
 >   this verdict INSIDE the note itself: open any note and add
->   the tag 🗑️ (or "delete" / "auto_delete") — the next run removes
->   it, blacklists the URL, and writes the record row here. Every
->   run answers with the tally line: how many were removed and
->   never fetched again because you marked them.
+>   the tag 🗑️ (or "delete" / "auto_delete") — the next run shows
+>   you the count and ASKS first (the Telegram deletion review:
+>   "N notes marked for deletion" — 🗑️ Delete / ✋ Keep); on your
+>   confirm it removes the note, blacklists the URL, and writes
+>   the record row here. Every run answers with the tally line:
+>   how many were removed and never fetched again because you
+>   confirmed them.
 > ♻️ revived (in place of a dead or ✅ Status) — the link is fetched
 >   like new again.
 > 🖐 hand — the fourth door's gesture, the fifth door's engine: set
@@ -1652,6 +1675,67 @@ def scan_banished_notes(vault_path: str,
     return out
 
 
+def scan_pending_banishments(vault_path: str,
+                             log: Optional[Callable] = None) -> Dict:
+    """v0.60.0 — THE GATE'S EYES: what WOULD be banished this run.
+
+    The detection half of the confirmation gate (the owner's ask,
+    verbatim: "At the beginning of every run, system scans vault, find
+    what I've marked to delete, system detects them, show me them
+    their numbers"). Both doors, one list, deduped by canonical URL (a
+    link marked on its note AND in the table is ONE pending deletion):
+    the note-tag door (:func:`scan_banished_notes` — app-owned marked
+    notes only; a hand-written marked note is the owner's to delete by
+    hand, counted separately) and the master-table door
+    (:func:`scan_decommission_table` — 🗑-marked rows that are not yet
+    confirmed-stamped; a ``🗑️ banished — confirmed <date>`` row is
+    history, not a pending ask). Pure file reads; no state DB, no
+    network; never raises. Returns ``{'items': [{'url', 'canonical',
+    'title', 'marker', 'door', 'path'}], 'kept_handwritten': int}``."""
+    log = log or (lambda *a, **k: None)
+    out: Dict = {'items': [], 'kept_handwritten': 0}
+    if not vault_path or not os.path.isdir(vault_path):
+        return out
+    seen: set = set()
+    for it in scan_banished_notes(vault_path, log=log):
+        if not it.get('app_owned'):
+            out['kept_handwritten'] += 1
+            continue
+        canonical = normalize_website_url(it.get('url') or '')
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        out['items'].append({
+            'url': it.get('url') or canonical, 'canonical': canonical,
+            'title': os.path.splitext(os.path.basename(
+                it.get('path') or ''))[0] or canonical,
+            'marker': it.get('marker') or 'delete mark',
+            'door': 'note tag', 'path': it.get('path') or ''})
+    try:
+        table = scan_decommission_table(vault_path)
+    except Exception as e:
+        log(f"⚠️ Banish-gate table scan skipped: {e}", "warning")
+        table = {}
+    for url, status in (table or {}).items():
+        if not _status_is_banished(status or ''):
+            continue
+        if 'confirmed' in (status or '').lower():
+            continue        # history, not a pending ask
+        canonical = normalize_website_url(url or '')
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        try:
+            domain = urlparse(canonical).netloc or canonical
+        except Exception:
+            domain = canonical
+        out['items'].append({
+            'url': url, 'canonical': canonical, 'title': domain,
+            'marker': status or '', 'door': 'master-table gesture',
+            'path': ''})
+    return out
+
+
 def _banish_note_file(vault_path: str, path: str,
                       log: Optional[Callable] = None) -> str:
     """v0.58.0 — move ONE note file into ``<vault>/.trash/banished/``
@@ -1897,8 +1981,64 @@ def banish_marked_notes(state, vault_path: str,
     return report
 
 
+def banish_twins_in_other_vault(other_vault: str, canonicals: List[str],
+                                log: Optional[Callable] = None) -> int:
+    """v0.60.0 — the "both vaults" promise of the confirmed deletion.
+
+    The owner's contract (session, verbatim): "then they will get
+    deleted from both vaults and never be fetched again. also deleted
+    from github." A banished link's note lives in the Websites vault —
+    but a twin may rest in the OTHER vault (a hand move, a mirror
+    copy). After the owner CONFIRMS the deletion, this sweep walks the
+    other vault (the config ``vault_path`` — the GitHub-projects vault)
+    for APP-OWNED notes whose ``source:`` normalizes into
+    ``canonicals`` and moves each to that vault's own
+    ``.trash/banished`` (the sacred law holds: hand-written notes are
+    never touched — the walk only ever moves notes the app wrote).
+    GitHub itself needs no sweep: VaultSeal pushes the vault with
+    ``git add -A`` and ``.trash/`` is gitignored — the next seal's
+    commit takes the deletion to the backup repo on its own. Dry-run
+    aware; never raises; returns the number of twin notes moved."""
+    log = log or (lambda *a, **k: None)
+    moved = 0
+    if not other_vault or not os.path.isdir(other_vault) or not canonicals:
+        return moved
+    wanted = {normalize_website_url(u or '') for u in canonicals}
+    wanted.discard('')
+    if not wanted:
+        return moved
+    for root, dirs, files in os.walk(other_vault):
+        dirs[:] = sorted(d for d in dirs
+                         if d != '_inbox' and not d.startswith('.'))
+        for name in sorted(files):
+            if not name.lower().endswith('.md'):
+                continue
+            p = os.path.join(root, name)
+            if not os.path.isfile(p):
+                continue
+            try:
+                fm = _parse_review_frontmatter(p)
+            except Exception:
+                fm = None
+            if not fm or fm.get('managed_by', '').lower() \
+                    != MANAGED_BY_GITCURATOR:
+                continue
+            if normalize_website_url(fm.get('source') or '') not in wanted:
+                continue
+            dst = _banish_note_file(other_vault, p, log=log)
+            if dst:
+                moved += 1
+                log(f"🗑️ {fm.get('source')}: twin note removed from the "
+                    f"other vault too ({os.path.basename(p)} → "
+                    f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')}) "
+                    f"— the confirmed deletion reaches both vaults",
+                    "info")
+    return moved
+
+
 def consume_decommission_table(state, vault_path: str,
-                               log: Optional[Callable] = None) -> Dict:
+                               log: Optional[Callable] = None,
+                               apply_banish: bool = True) -> Dict:
     """v0.44.0/v0.47.0 — enforce the owner's master-table decisions.
 
     v0.58.0 — pass 0 is THE BANISHMENT: every 🗑-marked row (🗑️ /
@@ -1973,11 +2113,19 @@ def consume_decommission_table(state, vault_path: str,
     never a batch killer). Returns ``{'dead', 'reviewed', 'banished',
     'revived', 'handed', 'placeholders_swept', 'notes_moved',
     'rows_confirmed', 'banished_urls'}`` — ``banished_urls`` is the
-    canonical list the run's 🗑️ tally counts (v0.59.0)."""
+    canonical list the run's 🗑️ tally counts (v0.59.0).
+
+    v0.60.0 — ``apply_banish=False`` is THE CONFIRMATION GATE's hold:
+    the 🗑 rows are counted into ``pending_banish`` and LEFT ALONE (the
+    owner has not confirmed yet — the marks stay, the notes stay),
+    while the dead/reviewed/hand passes run unchanged (those verdicts
+    were already the owner's explicit hand; only the DESTRUCTIVE door
+    waits for the ask)."""
     log = log or (lambda *a, **k: None)
     report = {'dead': 0, 'reviewed': 0, 'banished': 0, 'revived': 0,
               'handed': 0, 'placeholders_swept': 0, 'notes_moved': 0,
-              'rows_confirmed': 0, 'banished_urls': []}
+              'rows_confirmed': 0, 'banished_urls': [],
+              'pending_banish': 0}
     path = decommission_table_path(vault_path)
     if not vault_path or not os.path.isfile(path):
         return report
@@ -1996,7 +2144,10 @@ def consume_decommission_table(state, vault_path: str,
 
     # ---- pass 0 (v0.58.0): the banishments (🗑️ — the strongest
     # retirement; it runs FIRST so the removal intent wins over a
-    # dead/reviewed stamp on the same hand-edited row) ------------------
+    # dead/reviewed stamp on the same hand-edited row).
+    # v0.60.0 — THE GATE: with apply_banish=False the 🗑 rows are only
+    # COUNTED (pending_banish) — the owner has not confirmed, so the
+    # marks and the notes stay exactly as they are. -----------------------
     banished_canonicals: List[str] = []
     for row in rows:
         if not _status_is_banished(row['status']):
@@ -2005,6 +2156,9 @@ def consume_decommission_table(state, vault_path: str,
         if not canonical or canonical in banished_canonicals:
             continue
         banished_canonicals.append(canonical)
+        if not apply_banish:
+            report['pending_banish'] += 1
+            continue    # the gate's hold — nothing consumed, nothing moved
         report['banished'] += 1
         note_path = _find_note_for_url(vault_path, canonical, state=state,
                                        log=log)
@@ -2398,7 +2552,8 @@ class WebsitePipeline:
                  taxonomy: Optional[Taxonomy] = None,
                  note_state_db=None,
                  rate_limiter: Optional[_web_fetch.DomainRateLimiter] = None,
-                 fetch_fn=None):
+                 fetch_fn=None,
+                 banish_confirm: Optional[Callable] = None):
         from gitcurator.constants import resolve_taxonomy_path
         self.config = config or {}
         self.llm_call = llm_call
@@ -2473,21 +2628,113 @@ class WebsitePipeline:
         # (and the offline golden run) exercise it with the injected
         # fetcher; a vault without the table is a cheap no-op.
         self._graveyard_urls: set = set()
-        # v0.59.0 — THE TALLY: the run's own count of websites removed
-        # by the owner's 🗑️ verdicts (both doors), named once per run —
-        # the owner's ask (session, verbatim): "I want get a log of how
-        # many notes are wiped because of this method, every run …
-        # '10 Websites Removed and will never fetch again because you
-        # blah blah'". Both door reports carry their canonical lists;
-        # the roll-up below dedupes (a URL both marked on its note and
-        # in the table is ONE banishment) and the worker's summary
-        # reads it at the end of the run.
+        # v0.60.0 — THE CONFIRMATION GATE: the banishment no longer
+        # fires on detection alone. The run opens with the vault scan
+        # (scan_pending_banishments — both doors, one deduped list),
+        # the count is SPOKEN in the log and asked over the injected
+        # ``banish_confirm`` channel (the Telegram round-trip the GUI
+        # worker and the CLI both wire in — the owner's ask, verbatim:
+        # "At the beginning of every run, system scans vault, find what
+        # I've marked to delete, system detects them, show me them
+        # their numbers, so I ensure that system successfully detected
+        # them, I confirm deletion, then they will get deleted from
+        # both vaults and never be fetched again. also deleted from
+        # github"). NOTHING is removed until the owner answers:
+        # confirmed -> both doors enforce (the notes leave the vault,
+        # their twins leave the other vault, the URLs are blacklisted,
+        # the next VaultSeal push drops them from GitHub);
+        # declined / timeout -> the marks and the notes stay, the next
+        # run asks again; no channel at all -> the SAFE default: defer
+        # (config ``banish_confirm: false`` restores the v0.58/v0.59
+        # auto-delete for owners who want the old reflex). The verdict
+        # and the pending count ride ``self.banish_gate`` for the
+        # run's summary.
         self.banished_urls: List[str] = []
+        self.banish_gate: Dict = {'verdict': 'auto', 'pending': 0,
+                                  'banished': 0}
         _banished_run: List[str] = []
+        _gate_verdict = 'auto'
+        _gate_pending = 0
+        _gate_report = None
+        if self.vault_path and os.path.isdir(self.vault_path):
+            try:
+                _gate_scan = scan_pending_banishments(
+                    self.vault_path, log=self.log) or {}
+            except Exception as e:  # bookkeeping never kills a batch
+                self.log(f"⚠️ Banish-gate scan skipped: {e}", "warning")
+                _gate_scan = {}
+            _pending_items = list(_gate_scan.get('items') or [])
+            _gate_pending = len(_pending_items)
+            if _pending_items:
+                # the number goes FIRST — "so I ensure that system
+                # successfully detected them":
+                self.log(
+                    f"{BANISH_GATE_PREFIX} {_gate_pending} note(s) marked "
+                    f"for deletion (🗑️ / delete / auto_delete) — asking "
+                    f"you to confirm before anything is removed", "info")
+                if banish_confirm is not None:
+                    try:
+                        _gate_res = banish_confirm(_pending_items, self.log)
+                    except Exception as e:
+                        self.log(
+                            f"⚠️ Banish confirmation failed: {e} — nothing "
+                            f"deleted, the marks stay", "warning")
+                        _gate_res = None
+                    if isinstance(_gate_res, dict):
+                        _gate_verdict = str(
+                            _gate_res.get('verdict') or 'defer')
+                        _gate_report = _gate_res.get('report') or None
+                    elif isinstance(_gate_res, str) and _gate_res:
+                        _gate_verdict = _gate_res
+                    else:
+                        _gate_verdict = 'defer'
+                elif str(self.config.get('banish_confirm', True)).strip() \
+                        .lower() in ('false', '0', 'no', 'off'):
+                    _gate_verdict = 'auto'    # the owner's explicit opt-out
+                else:
+                    # no channel injected and no opt-out — the SAFE
+                    # default: the marks stay, the next run asks again.
+                    _gate_verdict = 'defer'
+                    self.log(
+                        f"⚠️ {_gate_pending} marked note(s) found, but no "
+                        f"confirmation channel is reachable (the Telegram "
+                        f"worker is not paired/enabled) — nothing deleted; "
+                        f"the marks stay, I'll ask again next run (config "
+                        f"\"banish_confirm\": false restores the old "
+                        f"auto-delete)", "warning")
+                if _gate_verdict == 'confirmed':
+                    self.log(
+                        f"✅ You confirmed the deletion — the "
+                        f"{_gate_pending} marked note(s) leave the vault "
+                        f"now (twins in the other vault too, if any); "
+                        f"GitHub drops them on the next seal", "info")
+                elif _gate_verdict == 'declined':
+                    self.log(
+                        f"👌 You kept them — the {_gate_pending} marked "
+                        f"note(s) stay in the vault; the marks stay too, "
+                        f"I'll ask again next run", "info")
+                elif _gate_verdict == 'timeout':
+                    self.log(
+                        f"⌛ No answer in time — the {_gate_pending} marked "
+                        f"note(s) stay; the marks stay, I'll ask again "
+                        f"next run", "info")
+        # v0.44.0 — the graveyard: consume the owner's burial decisions
+        # from <vault>/_review/DECOMMISSIONED.md BEFORE anything fetches
+        # (dead links leave the retry queue and the processed ledger, their
+        # placeholders are swept, they are dismissed — the never-fetch gate
+        # process_link already honors). Not gated on fetch_fn: the tests
+        # (and the offline golden run) exercise it with the injected
+        # fetcher; a vault without the table is a cheap no-op.
+        # v0.60.0 — the table's own 🗑 pass 0 rides the GATE: dead /
+        # reviewed / hand verdicts are the owner's explicit hand and run
+        # unchanged; the DESTRUCTIVE door waits for the confirmation
+        # (apply_banish below — the gate's hold).
         if self.vault_path and os.path.isdir(self.vault_path):
             try:
                 _consume_report = consume_decommission_table(
-                    self.state, self.vault_path, log=self.log) or {}
+                    self.state, self.vault_path, log=self.log,
+                    apply_banish=(_gate_verdict in ('auto', 'confirmed'))
+                ) or {}
                 _banished_run.extend(
                     _consume_report.get('banished_urls') or [])
                 for _u, _st in scan_decommission_table(
@@ -2508,16 +2755,47 @@ class WebsitePipeline:
         # above (pass 0). Not gated on fetch_fn: a pure file+DB pass
         # (the hermetic law — the tests exercise it with the injected
         # fetcher); a vault with no marked notes is a cheap walk.
-        if self.vault_path and os.path.isdir(self.vault_path):
+        # v0.60.0 — THE GATE owns this door now: the pass runs only when
+        # the owner confirmed (or opted into auto); a declined/timeout/
+        # deferred run leaves the marked notes and their marks alone.
+        if _gate_verdict in ('auto', 'confirmed') \
+                and self.vault_path and os.path.isdir(self.vault_path):
             try:
                 _note_report = banish_marked_notes(
                     self.state, self.vault_path, log=self.log) or {}
                 _banished_run.extend(_note_report.get('urls') or [])
             except Exception as e:  # bookkeeping never kills a batch
                 self.log(f"⚠️ Banishment pass skipped: {e}", "warning")
+            # v0.60.0 — the "both vaults" promise: the confirmed (or
+            # auto) banishment sweeps the OTHER vault (config
+            # vault_path — the GitHub-projects vault) for twin notes
+            # of the banished links and moves them to its own
+            # .trash/banished; GitHub itself is the next seal's job
+            # (git add -A + .trash/ ignored — the deletion commits
+            # and pushes away).
+            if _banished_run:
+                _other = str(self.config.get('vault_path') or '').strip()
+                if _other and os.path.isdir(_other) \
+                        and os.path.realpath(_other) != os.path.realpath(
+                            self.vault_path):
+                    try:
+                        _twins = banish_twins_in_other_vault(
+                            _other, _banished_run, log=self.log)
+                        if _twins:
+                            self.log(
+                                f"🗑️ Both vaults: {_twins} twin note(s) "
+                                f"removed from the other vault; GitHub "
+                                f"drops them on the next seal", "info")
+                    except Exception as e:
+                        self.log(f"⚠️ Twin sweep skipped: {e}", "warning")
         # v0.59.0 — THE TALLY, spoken every run (the zero run answers
-        # too — "how many were wiped" is a number, and 0 is one):
+        # too — "how many were wiped" is a number, and 0 is one).
+        # v0.60.0 — the KEPT run answers with its reason (the gate's
+        # story belongs in the same line):
         self.banished_urls = list(dict.fromkeys(_banished_run))
+        self.banish_gate = {'verdict': _gate_verdict,
+                            'pending': _gate_pending,
+                            'banished': len(self.banished_urls)}
         if self.banished_urls:
             self.log(
                 f"{BANISH_TALLY_PREFIX} {len(self.banished_urls)} "
@@ -2527,10 +2805,31 @@ class WebsitePipeline:
                 f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')}, the "
                 f"URLs are blacklisted, and ♻️ revived on the record row "
                 f"undoes any of them", "info")
+        elif _gate_pending and _gate_verdict != 'auto':
+            _why = {'declined': "you said keep",
+                    'timeout': "no answer in time",
+                    'defer': "no confirmation channel"}.get(
+                        _gate_verdict, _gate_verdict)
+            self.log(
+                f"{BANISH_TALLY_PREFIX} 0 websites removed this run — "
+                f"{_gate_pending} marked note(s) KEPT ({_why}; the marks "
+                f"stay, I'll ask again next run)", "info")
         else:
             self.log(
                 f"{BANISH_TALLY_PREFIX} 0 websites removed this run — no "
                 f"🗑️ / delete / auto_delete marks in the library", "info")
+        # v0.60.0 — the gate's answer to Telegram: the confirmed ask
+        # gets its closing line (the count that ACTUALLY left — the
+        # owner's example: "10 Websites Removed and will never fetch
+        # again because you …"). Decline/timeout already edited their
+        # own message at the answer; nothing to report here.
+        if _gate_verdict == 'confirmed' and _gate_report is not None:
+            try:
+                _gate_report(len(self.banished_urls))
+            except Exception as e:
+                self.log(
+                    f"⚠️ Banish confirmation report failed: {e}",
+                    "warning")
         self.taxonomy_path = resolve_taxonomy_path(self.config)
         # v0.20.0 — blocked domains (the X fix): these links are already
         # addressed as rows in the _inbox platform tables; the pipeline

@@ -37,6 +37,7 @@ from gitcurator.core import website_pipeline as _website_pipeline
 from gitcurator.core import connection_check as _connection_check
 from gitcurator.integrations import vaultseal as _vaultseal
 from gitcurator.integrations import goodrepos as _goodrepos
+from gitcurator.integrations import banish_confirm as _banish_confirm
 from gitcurator.gui.telegram_lock import TelegramLockManager
 from gitcurator.gui import icons as _icons
 from gitcurator.integrations.subprocess_runner import (
@@ -236,13 +237,28 @@ class WorkerWebsitePhaseMixin:
                     json_mode=True, num_ctx=_num_ctx, on_warn=_warn)
 
             try:
+                # v0.60.0 — THE CONFIRMATION GATE's channel: the Telegram
+                # round-trip (propose -> the bot's 🗑️ Delete / ✋ Keep
+                # buttons -> poll -> verdict) the pipeline asks over.
+                # None when the worker isn't paired/enabled — the
+                # pipeline then defers (marks stay, nothing deleted,
+                # the log says so) — the SAFE default.
+                _banish_fn = None
+                try:
+                    _banish_fn = _banish_confirm.make_telegram_confirm(
+                        self.config, log=self.log_message.emit)
+                except Exception as _gate_err:
+                    self.log_message.emit(
+                        f"⚠️ Banish gate channel unavailable: "
+                        f"{_gate_err}", "warning")
                 pipeline = _website_pipeline.WebsitePipeline(
                     config=self.config,
                     llm_call=_llm_call,
                     vault_index_has=index.has_url,
                     state=state,
                     log=self.log_message.emit,
-                    note_state_db=note_state_db)
+                    note_state_db=note_state_db,
+                    banish_confirm=_banish_fn)
 
                 due = state.due_retries()
                 # v0.37.0 — the phase owns its slice of the bar: re-base
@@ -414,19 +430,29 @@ class WorkerWebsitePhaseMixin:
                 # v0.59.0 — the banished tally rides the run's summary
                 # (the pipeline's own 🗑️ Run tally line spoke at start;
                 # the done line repeats the number so the end of the run
-                # answers the owner's "how many were wiped" too):
+                # answers the owner's "how many were wiped" too).
+                # v0.60.0 — the gate's verdict and the pending count ride
+                # along (a run that KEPT N marks says so at the end too).
                 _banished = list(
                     getattr(pipeline, 'banished_urls', None) or [])
+                _gate = dict(getattr(pipeline, 'banish_gate', None) or {})
                 summary = {'counters': dict(pipeline.counters),
                            'results': list(pipeline.last_results),
                            'banished': len(_banished),
                            'banished_urls': _banished,
+                           'banish_gate': _gate,
                            'vault': website_vault}
                 self._website_summary = summary
                 c = pipeline.counters
                 _tally = (f" 🗑️ {len(_banished)} banished — removed "
-                          f"and never fetched again (you marked them)."
+                          f"and never fetched again (you confirmed)."
                           if _banished else "")
+                _kept = (_gate.get('pending') or 0)
+                _verdict = str(_gate.get('verdict') or 'auto')
+                if not _banished and _kept and _verdict != 'auto':
+                    _tally = (f" 🗑️ {_kept} marked note(s) KEPT — "
+                              f"waiting on your confirmation "
+                              f"(I'll ask again next run).")
                 self.log_message.emit(
                     f"🌐 Websites done: {c['processed']} processed, "
                     f"{c['review']} to review, {c['skipped']} skipped, "

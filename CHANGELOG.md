@@ -1,3 +1,87 @@
+## [0.60.0] — The confirmation gate — 2026-10-10
+
+Owner ask (session, verbatim): "I want to add this, when system is
+scanning my vault and fetching from telegram bot, it must show
+' X number of notes should be deleted ' do you confirm? (mind the ux
+writing yourself). Objective: At the beginning of every run, system
+scans vault, find what I've marked to delete, system detects them,
+show me them their numbers, so I ensure that system successfully
+detected them, I confirm deletation, then they will get deleted from
+both vaults and never be fetched again. also deleted from github."
+Desktop release v0.60.0 **+ Worker 0.30.0 → 0.31.0** (the gate's
+Telegram round-trip lives in the Worker). Suite grows **1709 → 1721**
+(12 cases join tests/test_banishment.py) and the Worker suite grows
+**50 → 59** (test/banish-gate.test.js, zero-network).
+
+**THE LAW CHANGE: nothing is deleted until the owner confirms.**
+Since v0.58.0 the banishment fired on detection — the next run after
+marking a note swept it away automatically. v0.60.0 makes the ask
+explicit, exactly as the owner drew it. Every run now OPENS with the
+detection scan (`scan_pending_banishments` — both doors, one deduped
+list; a hand-written marked note is counted, never asked; a
+`🗑️ banished — confirmed <date>` table row is history, not a
+pending ask), the count is spoken into the log FIRST —
+
+> 🗑️ Vault scan: 3 note(s) marked for deletion (🗑️ / delete /
+> auto_delete) — asking you to confirm before anything is removed
+
+— and asked over Telegram. **The ask (the bot's message):** "🗑️
+Deletion review — 3 notes marked for deletion", the list (title +
+URL per note, up to 20 shown), the contract line ("Confirm, and they
+leave your vault and the GitHub backup — and never get fetched
+again. Keep them, and the marks stay for the next run."), and two
+buttons: **🗑️ Delete all 3** / **✋ Keep all 3**. The ask rests in
+the Worker's state table (`banish_confirm:<id>`; a newer ask
+supersedes an older pending one — one live question at a time);
+the desktop polls `/api/banish/status` (3s cadence, window
+`banish_confirm_timeout_s`, default 300s) and the buttons answer
+over the webhook's `callback_query`.
+
+**The verdicts.** *Confirmed* → both doors enforce (the notes leave
+for `.trash/banished`, the URLs are blacklisted, the record rows are
+written — ♻️ revivable), **the twins sweep** removes the same links'
+app-owned notes from the OTHER vault (config `vault_path` — "deleted
+from both vaults"), and the closing line lands in Telegram in the
+owner's own shape: "🗑️ **3 websites removed — never to be fetched
+again.** You confirmed the deletion; …" — the count that ACTUALLY
+left, not the count that was asked. *Keep* → "👌 Kept — nothing
+deleted. The marks stay; I'll ask again on the next run." *Timeout*
+→ "⌛ No answer in time — nothing deleted…" — same hold, the next
+run asks again. *No channel at all* (Worker not paired/enabled) →
+the SAFE default: defer, nothing deleted, a loud log line, and the
+tally answers `0 websites removed this run — N marked note(s) KEPT
+(no confirmation channel; the marks stay, I'll ask again next run)`.
+The old reflex stays available for owners who want it: config
+`"banish_confirm": false` restores v0.58/v0.59's auto-delete.
+
+**The gate holds only the DESTRUCTIVE door.** The master table's
+🪦 dead / ✅ reviewed verdicts (and the 🖐 hand queue) are the owner's
+explicit hand — they retire exactly as before; only the 🗑 rows wait
+(`consume_decommission_table(..., apply_banish=False)` counts them
+into `pending_banish` and leaves them untouched). GitHub needs no
+new machinery: VaultSeal already pushes both vaults with
+`git add -A` while `.trash/` is gitignored — the confirmed deletion
+commits and pushes away on the next seal, which is "also deleted
+from github" made literal.
+
+**The plumbing, one round-trip:** desktop `CloudflareSync` gains
+`propose_banish` / `banish_status` / `report_banish_result`
+(HMAC-signed like every desktop endpoint); the Worker gains
+`POST /api/banish/propose`, `GET /api/banish/status`,
+`POST /api/banish/result` and the `banish_yes` / `banish_no`
+callback handlers (idempotent — a second press answers "Already
+answered"; HTML-escaped titles; every ask and close is logged to
+the activity feed). The GUI worker and the CLI (headless) wire the
+channel in (`integrations/banish_confirm.py` →
+`make_telegram_confirm(config)`); the pipeline takes it as the
+`banish_confirm` callable — pure core, no network, the hermetic law
+intact. The run's summary gains `banish_gate` (verdict + pending +
+banished) and the "🌐 Websites done:" line now ends with either
+"🗑️ N banished — … (you confirmed)" or "🗑️ N marked note(s) KEPT —
+waiting on your confirmation". Config example documents
+`banish_confirm` + `banish_confirm_timeout_s`; the master table's
+own header and the notes' retire hint now teach the ask-first law.
+
 ## [0.59.0] — The tally — 2026-10-09
 
 Owner ask (session): "When i write "delete" tag, it autocompletes to

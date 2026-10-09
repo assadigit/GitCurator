@@ -325,6 +325,64 @@ class CloudflareSync:
             return False
 
     # ========================================
+    # v0.60.0 — THE CONFIRMATION GATE (banish round-trip)
+    # ========================================
+
+    def propose_banish(self, count: int, items: List[Dict[str, Any]],
+                       timeout_s: float = 300.0) -> Tuple[Optional[str], str]:
+        """v0.60.0 — ask the owner to confirm the pending deletions.
+
+        POSTs ``/api/banish/propose`` (HMAC-signed like every desktop
+        endpoint): the Worker sends the Telegram message with the count
+        and the two buttons (🗑️ Delete all N / ✋ Keep all N) and keeps
+        the ask in its state table. Returns ``(id, '')`` on success —
+        the id the status polling and the result report both address —
+        or ``(None, reason)`` when the ask could not be placed."""
+        if not self.is_enabled():
+            return None, 'not enabled'
+        body = {'install_id': self.install_id,
+                'count': int(count or 0),
+                'items': list(items or []),
+                'timeout_s': float(timeout_s or 300.0)}
+        with self._lock:
+            status, data = self._make_request(
+                'POST', '/api/banish/propose', body)
+        if status == 200 and data.get('success') and data.get('id'):
+            return str(data.get('id')), ''
+        return None, str(data.get('error') or f'HTTP {status}')
+
+    def banish_status(self, confirm_id: str) -> Optional[str]:
+        """v0.60.0 — poll the ask's status ('pending' / 'confirmed' /
+        'declined' / 'timeout' / 'superseded'); None when the Worker
+        could not answer (the caller treats it as still-pending and
+        keeps polling until its own deadline)."""
+        if not self.is_enabled() or not confirm_id:
+            return None
+        with self._lock:
+            status, data = self._make_request(
+                'GET', f'/api/banish/status?id={confirm_id}')
+        if status == 200 and data.get('success'):
+            return str(data.get('status') or 'pending')
+        return None
+
+    def report_banish_result(self, confirm_id: str, outcome: str,
+                             deleted: int = 0) -> bool:
+        """v0.60.0 — close the ask: outcome 'deleted' (the confirmed
+        run's final count — the Worker edits the Telegram message into
+        the closing line) or 'timeout' (the desktop's clock ran out —
+        the message becomes the no-answer story). Best-effort: a failed
+        report never fails the run."""
+        if not self.is_enabled() or not confirm_id:
+            return False
+        body = {'install_id': self.install_id,
+                'id': confirm_id, 'outcome': str(outcome or ''),
+                'deleted': int(deleted or 0)}
+        with self._lock:
+            status, data = self._make_request(
+                'POST', '/api/banish/result', body)
+        return status == 200 and bool(data.get('success'))
+
+    # ========================================
     # Push errors
     # ========================================
 

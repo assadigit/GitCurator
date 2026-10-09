@@ -7,7 +7,7 @@
 
 import { extractUrls, normalizeUrl, now } from './utils.js';
 import { sendMessage, editMessage, answerCallbackQuery, inlineKeyboard, isUserAllowed } from './telegram.js';
-import { stateSet, decommissionInsert, ledgerSetForgotten, ledgerGetByUrl, errorAcknowledgeAll } from './db.js';
+import { stateSet, stateGet, decommissionInsert, ledgerSetForgotten, ledgerGetByUrl, errorAcknowledgeAll } from './db.js';
 import { cacheSetDedup } from './kv.js';
 import { handleCommand } from './commands.js';
 
@@ -180,6 +180,54 @@ async function handleCallbackQuery(callbackQuery, env) {
       await editMessage(env, chatId, messageId, "✅ <b>All errors acknowledged.</b>");
       await answerCallbackQuery(env, callbackQuery.id, "✅ Cleared", false);
       break;
+
+    // v0.60.0 — THE CONFIRMATION GATE's two buttons: the owner answers
+    // the desktop's deletion review right here. The ask lives in the
+    // state table (banish_confirm:<id> — api.js wrote it on propose);
+    // the answer flips its status and edits the message; the desktop's
+    // status poll sees the verdict and enforces (or keeps) the marks.
+    case 'banish_yes':
+    case 'banish_no': {
+      const id = param;
+      const raw = await stateGet(env.DB, `banish_confirm:${id}`);
+      if (!raw) {
+        await answerCallbackQuery(env, callbackQuery.id,
+          "This ask is gone (unknown id)", true);
+        break;
+      }
+      let obj;
+      try { obj = JSON.parse(raw); } catch { obj = null; }
+      if (!obj) {
+        await answerCallbackQuery(env, callbackQuery.id,
+          "This ask is unreadable", true);
+        break;
+      }
+      if (obj.status !== 'pending') {
+        await answerCallbackQuery(env, callbackQuery.id,
+          obj.status === 'confirmed'
+            ? "Already confirmed — deleting" 
+            : "Already answered", false);
+        break;
+      }
+      const yes = action === 'banish_yes';
+      obj.status = yes ? 'confirmed' : 'declined';
+      obj.resolved_at = now();
+      await stateSet(env.DB, `banish_confirm:${id}`, JSON.stringify(obj));
+      if (yes) {
+        await editMessage(env, chatId, messageId,
+          `✅ <b>Confirmed</b> — removing ${obj.count} note(s) from the ` +
+          `vault now… (the closing line follows when the run finishes)`);
+        await answerCallbackQuery(env, callbackQuery.id,
+          `🗑️ Deleting ${obj.count} note(s)`, false);
+      } else {
+        await editMessage(env, chatId, messageId,
+          `👌 <b>Kept</b> — nothing deleted. The marks stay; ` +
+          `I'll ask again on the next run.`);
+        await answerCallbackQuery(env, callbackQuery.id,
+          "Kept — nothing deleted", false);
+      }
+      break;
+    }
 
     case 'treat_same':
       // GitHub redirect: treat as same repo (Layer 11)

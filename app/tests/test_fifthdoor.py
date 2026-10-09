@@ -1356,7 +1356,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0500(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.59.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.60.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
