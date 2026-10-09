@@ -353,7 +353,7 @@ class TestSourceContracts(unittest.TestCase):
         # again).
         with open(os.path.join(_REPO_ROOT, '..', 'VERSION'),
                   encoding='utf-8') as fh:
-            self.assertEqual(fh.read().strip(), '0.60.0')
+            self.assertEqual(fh.read().strip(), '0.60.1')
         with open(os.path.join(_REPO_ROOT, '..', 'CHANGELOG.md'),
                   encoding='utf-8', errors='replace') as fh:
             # v0.57.0 — the window widened (72000 → 120000): each new

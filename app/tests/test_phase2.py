@@ -1247,6 +1247,45 @@ class TestWorkerWebsites(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_dismissed_links_leave_the_count_before_processing(self):
+        """v0.60.1 — the count's own honesty (the owner's report:
+        "it still counts decommissioned links as unprocessed, then
+        skip them in process"): a batch with one dismissed link + one
+        fresh link counts ONE — the verdict left the batch before the
+        bar, with its own honest line, and the run never fetches it."""
+        tmp = tempfile.mkdtemp(prefix='p2worker601-')
+        try:
+            cfg = self._base_cfg(tmp)
+            # seed the verdict BEFORE the batch (a link the owner
+            # decommissioned in an earlier run):
+            _ws = wp.WebsiteStateDB(
+                db_path=os.path.join(tmp, 'cache.db'))
+            _ws.dismiss('https://dead.example/gone',
+                        'decommissioned by owner — test')
+            _ws.close()
+            events, _base = self._run_worker(
+                tmp, cfg,
+                urls=['https://github.com/o/not-a-real-repo'],
+                non_github=['/article', 'https://dead.example/gone'])
+            logs = ' '.join(str(a[0]) for _n, a in events if _n == 'log')
+            self.assertIn('already have their verdict', logs)
+            self.assertIn('excluded from the run', logs)
+            # the count line says ONE — the dismissed link never rode it:
+            self.assertIn('Websites pipeline: 1 link(s)', logs)
+            self.assertNotIn('Websites pipeline: 2 link(s)', logs)
+            # and the run itself answers with the honest done line:
+            self.assertIn('Websites done: 1 processed', logs)
+            web_vault = cfg['website_vault_path']
+            notes = [os.path.join(root, f)
+                     for root, dirs, files in os.walk(web_vault)
+                     for f in files if f.endswith('.md')]
+            site = [n for n in notes
+                    if os.path.basename(n) !=
+                    '000 📚 Website Directory.md']
+            self.assertEqual(len(site), 1, notes)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_websites_off_writes_inbox(self):
         """Websites OFF (the default): non-GitHub links keep going to the
         _inbox dead end — the pre-Phase-2 behavior is unchanged."""

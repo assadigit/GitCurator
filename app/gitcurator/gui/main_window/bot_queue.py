@@ -344,6 +344,13 @@ class BotQueueMixin:
                                     _websites_blocked += 1
                                 elif _links.domain_is_self(_u, _self_list):
                                     _websites_self += 1
+                                elif _wstate is not None and _wstate.is_dismissed(_canon):
+                                    # v0.60.1 — the verdict outranks the
+                                    # vault index (a dismissed link is
+                                    # never "pending" — the owner's
+                                    # report: decommissioned links were
+                                    # counted as unprocessed)
+                                    _websites_dismissed += 1
                                 elif _wvi.has_url(_u):
                                     _prior = None
                                     if _wstate is not None:
@@ -355,8 +362,6 @@ class BotQueueMixin:
                                         pending_websites.append(_u)
                                     else:
                                         _websites_in_vault += 1
-                                elif _wstate is not None and _wstate.is_dismissed(_canon):
-                                    _websites_dismissed += 1
                                 elif _wstate is not None and _wstate.is_processed(_canon):
                                     _websites_processed += 1
                                 else:

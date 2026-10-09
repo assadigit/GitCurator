@@ -75,6 +75,7 @@ No PyQt import at module level (the libEGL-less sandbox rule).
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import unittest
 
@@ -1056,6 +1057,246 @@ class TestTheConfirmationGate(_BanishCase):
             self.vault, wp.BANISH_QUARANTINE_RELPATH))), 1)
 
 
+def _body_tag(path, token):
+    """The owner's natural hand (v0.60.1): type an inline tag in the
+    note BODY — the Obsidian way, no properties panel."""
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+    text = text.rstrip('\n') + f"\n\n{token}\n"
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return path
+
+
+class TestBodyTags(_BanishCase):
+    """v0.60.1 — the body's own inline tags.
+
+    The owner's report (session, verbatim): "I tagged one note as
+    'auto-delete' but it didn't detect" — Obsidian's natural tagging
+    is typing ``#auto-delete`` in the note text; the frontmatter
+    ``tags:`` list is the properties panel's storage. The eyes learn
+    the body, with the SAME exact-word law."""
+
+    def test_owners_exact_report_body_auto_delete(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _body_tag(note_path, '#auto-delete')
+        found = wp.scan_banished_notes(self.vault)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['marker'], '#auto-delete')
+        self.assertTrue(found[0]['app_owned'])
+        # and the gate's eyes see it too:
+        pending = wp.scan_pending_banishments(self.vault)
+        self.assertEqual(len(pending['items']), 1)
+        self.assertEqual(pending['items'][0]['door'], 'note tag')
+
+    def test_the_body_tag_closes_the_loop_through_the_gate(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _body_tag(note_path, '#auto-delete')
+        fetch = _FakeFetch()
+        self.make_pipeline(
+            fetch=fetch,
+            banish_confirm=lambda i, l: 'confirmed')   # confirmed ask
+        self.assertFalse(os.path.exists(note_path))
+        self.assertTrue(self.db.is_dismissed(canonical))
+        r = self.make_pipeline(fetch=fetch).process_link(
+            'https://example.com/site')
+        self.assertEqual(r['outcome'], 'skipped')
+        self.assertNotIn('https://example.com/site', fetch.calls)
+        self.assertIn('🗑️ Run tally: 1 website(s) removed', self.all_logs())
+
+    def test_the_word_variants_fire(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        with open(note_path, 'r', encoding='utf-8') as f:
+            pristine = f.read()
+        for token in ('#auto_delete', '#DELETE', '#purge', '#banish',
+                      '#blacklist', '#delete.', '(#banish)',
+                      '#🗑️', '#Trash-me-🗑️-please'):
+            with self.subTest(token=token):
+                with open(note_path, 'w', encoding='utf-8') as f:
+                    f.write(pristine + f"\n{token}\n")
+                found = wp.scan_banished_notes(self.vault)
+                self.assertEqual(len(found), 1, token)
+        with open(note_path, 'w', encoding='utf-8') as f:
+            f.write(pristine)
+
+    def test_the_near_misses_never_fire(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        with open(note_path, 'r', encoding='utf-8') as f:
+            pristine = f.read()
+        for token in ('#deleted-files', '#delete-me', '#auto-deleted',
+                      '#deleter', '##delete', '# delete',
+                      'C#delete', '#automatic_delete'):
+            with self.subTest(token=token):
+                with open(note_path, 'w', encoding='utf-8') as f:
+                    f.write(pristine + f"\n{token}\n")
+                found = wp.scan_banished_notes(self.vault)
+                self.assertEqual(found, [], token)
+        with open(note_path, 'w', encoding='utf-8') as f:
+            f.write(pristine)
+
+    def test_a_code_fence_never_fires(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _body_tag(note_path, '#purge')        # control: fires
+        self.assertEqual(len(wp.scan_banished_notes(self.vault)), 1)
+        with open(note_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        text = text.replace(
+            '#purge', '```bash\n# purge the cache with care\nrm -rf x\n'
+                      '```\n\n~~~\n#banish a thing\n~~~')
+        with open(note_path, 'w', encoding='utf-8') as f:
+            f.write(text)
+        self.assertEqual(wp.scan_banished_notes(self.vault), [])
+
+    def test_a_url_fragment_never_fires(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _body_tag(note_path,
+                  'see https://example.com/docs/#delete and #delete')
+        # the fragment's # is mid-word — only the real trailing tag fires
+        found = wp.scan_banished_notes(self.vault)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['marker'], '#delete')
+
+    def test_frontmatter_marker_wins_when_both_present(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _tag_note(note_path, marker='delete')
+        _body_tag(note_path, '#purge')
+        found = wp.scan_banished_notes(self.vault)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['marker'], 'delete')
+
+    def test_the_app_hint_lines_never_fire(self):
+        # the app's own notes teach the door at the bottom — the words
+        # are spelled bare (never #tokens), so a fresh note is NEVER
+        # born marked for deletion (the self-firing trap):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        self.assertEqual(wp.scan_banished_notes(self.vault), [])
+        review = wp.build_review_note(
+            'https://example.com/walled', 'failed', 'HTTP 403')
+        path = os.path.join(self.vault, '_review', 'walled.md')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(review)
+        self.assertEqual(wp.scan_banished_notes(self.vault), [])
+
+    def test_a_hand_written_body_tag_is_kept(self):
+        path = _write_note(self.vault, 'Notes/hand.md',
+                           'https://example.com/hand', managed='human')
+        _body_tag(path, '#auto-delete')
+        found = wp.scan_banished_notes(self.vault)
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0]['app_owned'])
+        pending = wp.scan_pending_banishments(self.vault)
+        self.assertEqual(pending['items'], [])
+        self.assertEqual(pending['kept_handwritten'], 1)
+
+    def test_a_note_without_frontmatter_is_never_ours(self):
+        path = os.path.join(self.vault, 'loose.md')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('#auto-delete everywhere but no frontmatter\n')
+        self.assertEqual(wp.scan_banished_notes(self.vault), [])
+
+    def test_the_buried_note_is_never_refound(self):
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _body_tag(note_path, '#auto-delete')
+        self.make_pipeline(
+            banish_confirm=lambda i, l: 'confirmed')
+        # the buried copy still carries the body tag — dot-folders are
+        # never walked, so it can never re-fire:
+        self.assertEqual(wp.scan_banished_notes(self.vault), [])
+
+
+class TestVerdictCount(_BanishCase):
+    """v0.60.1 — the count's own honesty.
+
+    The owner's report (session, verbatim): "it still counts
+    decommissioned links as unprocessed, then skip them in process."
+    The verdicts leave the batch's count BEFORE processing — one
+    honest line instead of a skip pile."""
+
+    def _dismiss(self, url, reason='decommissioned by owner — test'):
+        self.db.dismiss(wp.normalize_website_url(url), reason)
+
+    def test_split_separates_the_verdicts(self):
+        self._dismiss('https://dead.example/')
+        kept, dropped = wp.split_dismissed_links(
+            self.db, ['https://dead.example/', 'https://fresh.example/'])
+        self.assertEqual(kept, ['https://fresh.example/'])
+        self.assertEqual(dropped, ['https://dead.example/'])
+
+    def test_split_with_no_state_keeps_everything(self):
+        kept, dropped = wp.split_dismissed_links(
+            None, ['https://a.example/', 'https://b.example/'])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+
+    def test_split_survives_a_broken_state(self):
+        class _Broken:
+            def is_dismissed(self, c):
+                raise sqlite3.OperationalError('probe broken')
+        kept, dropped = wp.split_dismissed_links(
+            _Broken(), ['https://a.example/'])
+        self.assertEqual(kept, ['https://a.example/'])
+        self.assertEqual(dropped, [])
+
+    def test_split_speaks_only_when_something_dropped(self):
+        logs = []
+        wp.split_dismissed_links(self.db, ['https://fresh.example/'],
+                                 log=lambda m, l='info': logs.append(m))
+        self.assertEqual(logs, [])
+        self._dismiss('https://dead.example/')
+        wp.split_dismissed_links(self.db, ['https://dead.example/'],
+                                 log=lambda m, l='info': logs.append(m))
+        self.assertEqual(len(logs), 1)
+        self.assertIn('excluded from the run', logs[0])
+        self.assertIn('never counted as unprocessed', logs[0])
+        self.assertIn('♻️', logs[0])
+
+    def test_due_retries_count_excludes_dismissed(self):
+        # a dead link and a live failed link, both due:
+        self._dismiss('https://dead.example/')
+        self.db.mark_processed('https://dead.example/', '', '', '',
+                               'failed')
+        self.db.enqueue_retry('https://dead.example/', 'test')
+        self.db.mark_processed('https://live.example/', '', '', '',
+                               'failed')
+        self.db.enqueue_retry('https://live.example/', 'test')
+        # make both due now:
+        self.db.rearm_retries()
+        fetch = _FakeFetch(fail_paths=[])
+        pipe = self.make_pipeline(fetch=fetch)
+        pipe.run_due_retries()
+        self.assertIn('https://live.example/', fetch.calls)
+        self.assertNotIn('https://dead.example/', fetch.calls)
+        self.assertIn(
+            "1 link(s) already have their verdict", self.all_logs())
+        self.assertIn(
+            '🔁 Retrying 1 fetch-failed website link(s)',
+            self.all_logs())
+
+    def test_the_gate_banished_then_pasted_is_excluded(self):
+        # THE LOOP with the count law: banish, then paste the URL in a
+        # fresh batch — the split keeps it out of the count before the
+        # per-link gate ever speaks:
+        canonical, note_path = self.store_proper_note(
+            'https://example.com/site')
+        _tag_note(note_path)
+        self.make_pipeline(
+            banish_confirm=lambda i, l: 'confirmed')
+        kept, dropped = wp.split_dismissed_links(
+            self.db, ['https://example.com/site'])
+        self.assertEqual(dropped, ['https://example.com/site'])
+        self.assertEqual(kept, [])
+
+
 class TestReleaseBookkeeping(unittest.TestCase):
     """The house source-contract tests (the test_bothdoors pattern)."""
 
@@ -1068,8 +1309,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
                   encoding='utf-8') as f:
             return f.read()
 
-    def test_version_is_0590(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.60.0')
+    def test_version_is_0601(self):
+        self.assertEqual(self._read('VERSION').strip(), '0.60.1')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')
@@ -1079,6 +1320,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('tally', text.lower())
         self.assertIn('## [0.60.0]', text)
         self.assertIn('confirmation gate', text.lower())
+        self.assertIn('## [0.60.1]', text)
+        self.assertIn('body', text.lower())
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')
@@ -1098,6 +1341,9 @@ class TestReleaseBookkeeping(unittest.TestCase):
         self.assertIn('BANISH_GATE_PREFIX', text)    # v0.60.0 — the
         self.assertIn('scan_pending_banishments', text)  # confirmation
         self.assertIn('banish_twins_in_other_vault', text)  # gate + twins
+        self.assertIn('_note_body_banish_tag', text)  # v0.60.1 — the
+        self.assertIn('split_dismissed_links', text)  # body tags + the
+        # count's honesty (the owner's two reports)
 
 
 if __name__ == '__main__':

@@ -207,10 +207,11 @@ prompt_version: "{WEBSITE_PROMPT_VERSION}"
 ---
 *Source: [{url}]({url})*
 
-*Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
-this note — the next run counts it, asks you to confirm on Telegram,
-and on your 🗑️ Delete it leaves the library and never fetches this
-site again (v0.60.0).*
+*Not useful anymore? Tag this note 🗑️ or delete / auto_delete —
+typed inline anywhere in the note (Obsidian's own tag syntax) or
+added in the tags property — the next run counts it, asks you to
+confirm on Telegram, and on your 🗑️ Delete it leaves the library and
+never fetches this site again (v0.60.0).*
 """
 
 
@@ -253,10 +254,11 @@ it is never lost; it will be retried automatically.
 ---
 *Source: [{url}]({url})*
 
-*Not useful anymore? Add the tag 🗑️ (or "delete" / "auto_delete") to
-this note — the next run counts it, asks you to confirm on Telegram,
-and on your 🗑️ Delete it leaves the library and never fetches this
-site again (v0.60.0).*
+*Not useful anymore? Tag this note 🗑️ or delete / auto_delete —
+typed inline anywhere in the note (Obsidian's own tag syntax) or
+added in the tags property — the next run counts it, asks you to
+confirm on Telegram, and on your 🗑️ Delete it leaves the library and
+never fetches this site again (v0.60.0).*
 """
 
 
@@ -498,6 +500,13 @@ HAND_DOOR_HINT = (" — the fourth door: 🖐 hand-deliver it (More ▸ "
 #: vault already knows, and the app must obey the word his editor
 #: puts under his thumb, not fight it. The hyphen twin rides along
 #: (``auto-delete``) — same word, the keyboard's other spelling.
+#: v0.60.1 — the words live in TWO places now: the frontmatter ``tags``
+#: list (the properties panel) AND the note body's own inline tags
+#: (``#auto-delete`` typed in the text — Obsidian's natural tagging,
+#: the owner's report: "I tagged one note as 'auto-delete' but it
+#: didn't detect"). Same exact-word law on both surfaces; the
+#: confirmation gate stays the net (a scraped hashtag can only ride
+#: the ask, never delete on its own).
 BANISH_EMOJI = "🗑️"
 BANISH_WORDS = ("delete", "banish", "blacklist", "purge",
                 "auto_delete", "auto-delete")
@@ -1634,6 +1643,78 @@ def _note_reads_banished(fm: Optional[Dict]) -> (bool, str):
     return False, ''
 
 
+#: v0.60.1 — the body-tag scan's stop set: an Obsidian inline tag ends
+#: at whitespace, another ``#``, or any of these (``#delete.`` is the
+#: tag ``delete`` plus sentence punctuation). A heading never parses
+#: (``# word`` has the space; ``##word`` starts with the ``#`` run).
+_BODY_TAG_STOPS = " \t\r\n,.;:!?)]}'\"»«…—>"
+
+
+def _note_body_banish_tag(path: str) -> str:
+    """v0.60.1 — the note BODY's own inline tags.
+
+    The owner's report (session, verbatim): "I tagged one note as
+    'auto-delete' but it didn't detect" — Obsidian's natural tagging
+    is typing ``#auto-delete`` in the note TEXT; the frontmatter
+    ``tags:`` list is the properties panel's storage, and v0.58–v0.60
+    only read that one. The eyes learn the body: a token counts when
+    it is ``#`` + a non-space run (Obsidian's own law — a tag has no
+    space between the ``#`` and the word; a heading's ``##`` or
+    ``# `` never parses) preceded by a line start, whitespace, or an
+    opening bracket, and the run contains 🗑️ or IS a banish word
+    exactly (``#deleted-files`` and ``#delete-me`` never fire — the
+    same tight match as the frontmatter door). The frontmatter block
+    and fenced code blocks are skipped (the app's own hint lines
+    spell the words in quotes, never as ``#`` tokens; a snippet's
+    ``#purge`` comment never fires). Pure string scan; never raises.
+    Returns the marker as typed (``#auto-delete``) or ``''``.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.read(200_000).splitlines()
+    except Exception:
+        return ''
+    if not lines:
+        return ''
+    # skip the frontmatter block (its own door already read it)
+    start = len(lines)             # unterminated block: all frontmatter
+    if lines[0].strip() == '---':
+        for i in range(1, len(lines)):
+            if lines[i].strip() == '---':
+                start = i + 1
+                break
+    in_fence = False
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped.startswith('```') or stripped.startswith('~~~'):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for i, ch in enumerate(line):
+            if ch != '#':
+                continue
+            if i + 1 >= len(line):
+                continue
+            nxt = line[i + 1]
+            if nxt in ' \t#':
+                continue        # "# word" (a heading) or "##" — never a tag
+            prev = line[i - 1] if i > 0 else ''
+            if prev and prev not in ' \t([':
+                continue        # mid-word (C#, a URL's #fragment) — not a tag
+            j = i + 1
+            while j < len(line) and line[j] not in _BODY_TAG_STOPS \
+                    and line[j] != '#':
+                j += 1
+            token = line[i + 1:j].strip()
+            if not token:
+                continue
+            low = token.lower()
+            if BANISH_EMOJI in low or low in BANISH_WORDS:
+                return '#' + token
+    return ''
+
+
 def scan_banished_notes(vault_path: str,
                         log: Optional[Callable] = None) -> List[Dict]:
     """v0.58.0 — every note in the library carrying the banish mark.
@@ -1665,6 +1746,15 @@ def scan_banished_notes(vault_path: str,
                 continue            # not a frontmattered note — a human's
             marked, marker = _note_reads_banished(fm)
             if not marked:
+                # v0.60.1 — the BODY's own inline tags: the owner's
+                # natural "tag the note" is typing #auto-delete in the
+                # text (Obsidian's inline tags — the report: "I tagged
+                # one note as 'auto-delete' but it didn't detect").
+                # The frontmatter door stays first (its marker wins
+                # when both are present); the body is the second read.
+                marker = _note_body_banish_tag(path)
+                marked = bool(marker)
+            if not marked:
                 continue
             url = (fm.get('source') or '').strip()
             if not url.lower().startswith(('http://', 'https://')):
@@ -1673,6 +1763,43 @@ def scan_banished_notes(vault_path: str,
                         'app_owned': fm.get('managed_by', '').lower()
                         == MANAGED_BY_GITCURATOR})
     return out
+
+
+def split_dismissed_links(state, urls: List[str],
+                          log: Optional[Callable] = None
+                          ) -> (List[str], List[str]):
+    """v0.60.1 — the batch count's own honesty.
+
+    The owner's report (session, verbatim): "it still counts
+    decommissioned links as unprocessed, then skip them in process."
+    Links whose verdict is already written — the graveyard's dead, the
+    banishment's blacklisted, the fetcher's own auto-verdicts, the
+    SAME gate :meth:`process_link` enforces link-by-link — leave the
+    batch's COUNT before processing starts, with one honest line
+    instead of a per-link skip pile. Returns ``(kept, dismissed)``;
+    the state probe is guarded (a broken DB never hides a link — the
+    worst case is the old behavior, the per-link gate); never raises.
+    """
+    log = log or (lambda *a, **k: None)
+    kept: List[str] = []
+    dropped: List[str] = []
+    for u in (urls or []):
+        try:
+            c = normalize_website_url(u)
+            if c and state is not None and state.is_dismissed(c):
+                dropped.append(u)
+                continue
+        except Exception:
+            pass        # a broken probe never hides a link
+        kept.append(u)
+    if dropped:
+        log(
+            f"🪦 {len(dropped)} link(s) already have their verdict "
+            f"(decommissioned / banished / auto-retired) — excluded "
+            f"from the run's count before processing: never fetched "
+            f"again, never counted as unprocessed (♻️ in the master "
+            f"table revives any of them)", "info")
+    return kept, dropped
 
 
 def scan_pending_banishments(vault_path: str,
@@ -3924,8 +4051,20 @@ class WebsitePipeline:
         """Retry fetch-failed links whose backoff elapsed (SPEC §4.3:
         "retried automatically up to 3 times over several days"). Called by
         the batch BEFORE the fresh links. ``on_progress`` (v0.37.0) has
-        the same per-link contract as :meth:`run`."""
+        the same per-link contract as :meth:`run`.
+
+        v0.60.1 — the count's honesty: a due link whose verdict was
+        already written (dismissed — the same gate process_link
+        enforces) leaves the count BEFORE the pass, with the one
+        honest line (:func:`split_dismissed_links`) instead of a
+        skip pile inside it."""
         due = self.state.due_retries()
+        if not due:
+            return []
+        _due_kept, _due_dropped = split_dismissed_links(
+            self.state, due, log=self.log)
+        if _due_dropped:
+            due = _due_kept
         if not due:
             return []
         self.log(f"🔁 Retrying {len(due)} fetch-failed website link(s) "
