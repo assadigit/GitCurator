@@ -5,6 +5,51 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.61.1 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only hotfix · THE SCAN BUTTON)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.61.1 is a
+> DESKTOP-ONLY hotfix: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The bug (the owner's own first run at home, 2026-10-10,
+> screenshot):** EVERY click of the new [Scan] CTA died instantly —
+> `TypeError: _vault_scan_job() missing 1 required positional
+> argument: "log_signal"`. The mixin built
+> `TestWorker(_vault_scan_job, 'vault_scan', snapshot)` and
+> `TestWorker.run()` calls `fn(*args)` — the signal was never fed in.
+> The whole 22-case v0.61.0 suite was green while the button was
+> dead: the tests exercised the job directly with a proper signal,
+> never the GUI's call site.
+>
+> **The fix:** `vault_scan_ui.py` re-binds `worker._fn` to a closure
+> passing `worker.log_message` — the exact pattern Test Connection's
+> battery has used since v0.23.0. Proven in a REAL run (offscreen,
+> the REAL TestWorker thread + the REAL job + an app-owned
+> `#auto-delete` fixture): the full story runs — the walk → 🗑️ the
+> mark detected (the v0.60.1 grammar) → the LLM leg degrades
+> gracefully when unconfigured → the gate safely defers unpaired →
+> the button re-arms. Evidence: `/home/z/real-run/cta-fix-run.log`.
+>
+> **The regression wall** (`TestScanCtaWiring`, 3 cases — suite
+> **1780 → 1783**, CI green on main + the tag first try, runs
+> 38006334875 / 38006334560): the bound fn is callable with the
+> snapshot alone; the fed signal is LIVE (an emission reaches the
+> window's log); the v0.61.0 wiring shape is dead forever. The
+> release: `GitCurator-v0.61.1-windows.zip` (134 files, sha256
+> `89a48efacf9d…`, GitHub release 408432115, download round-trip
+> byte-identical). The owner's home checklist: unzip → 1-INSTALL.bat
+> → Scan works; the one-time `/pair` reminder from the v0.60.2
+> record still applies (the scan's Telegram ask needs the pairing;
+> unpaired = the safe defer, nothing touched, asked again next
+> scan). The Test Connection "2/4 subsystems — 1 error, 1 warning"
+> in the same screenshot is environmental (LLM/GitHub legs depend on
+> what runs locally; the Telegram leg — the scan's gate — was
+> green).
+
+---
+
 ## 📦 v0.61.0 deploy record — the 0.32.0 worker, LIVE and verified (LIVE ✅ · THE VAULT SCAN)
 
 > **Live in production** at
