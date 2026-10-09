@@ -1446,3 +1446,53 @@ Once Worker + Dashboard are deployed and tested, the final step is **integrating
 > download round-trip byte-identical) + CI green on main AND the
 > v0.59.0 tag first try (runs 37852528185 + 37852531877 — 1709
 > tests, 85-module compile gate, offline golden 30/30).
+
+---
+
+## v0.60.0 — THE CONFIRMATION GATE (Worker 0.30.0 → 0.31.0 — a REAL deploy) — 2026-10-10
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> — **version ID `138c8730-7870-453a-971c-ebeaa8fafa52`**,
+> deployed THIS session with the owner's session-scoped
+> `CLOUDFLARE_API_TOKEN` (`cfut_…`, the token he pasted with the
+> feature ask — the ritual the v0.59.0 record was waiting for).
+>
+> **Verified live (this session):** `/health?cb=…` →
+> `{"status":"ok","service":"github-curator-bot","version":"0.31.0"}`
+> ✓ · root → `200` ✓ · `POST /api/banish/propose` unsigned →
+> `401 {"error":"Missing auth headers"}` ✓ (the HMAC law holds on
+> the new door) · `GET /api/banish/status?id=…` unsigned → `401` ✓.
+> (A pre-deploy cached `404` on the fresh path cleared with the
+> first cache-busted request — edge cache, not code.)
+>
+> **What's new in the Worker (0.31.0):**
+> - `POST /api/banish/propose` (HMAC, desktop) — the Telegram ask:
+>   "🗑️ Deletion review — N notes marked for deletion", the list
+>   (title + URL, ≤20 shown), the contract line, and the two
+>   buttons `🗑️ Delete all N` / `✋ Keep all N`; the ask rests in
+>   the state table (`banish_confirm:<id>`, one live question — a
+>   newer propose supersedes the older pending ask and edits its
+>   message).
+> - `GET /api/banish/status?id=` (HMAC) — the desktop's 3-second
+>   poll (`pending / confirmed / declined / timeout / superseded`).
+> - `POST /api/banish/result` (HMAC) — the close: `deleted` → the
+>   owner's-shape tally line ("🗑️ N websites removed — never to be
+>   fetched again. You confirmed the deletion; …"); `timeout` → the
+>   no-answer story. Every ask and close is activity-logged.
+> - `webhook.js` — the `banish_yes` / `banish_no` callback handlers
+>   (idempotent: a second press answers "Already answered";
+>   editMessage into the confirmed/kept story; answerCallbackQuery
+>   feedback).
+> - No D1 schema change (the ask lives in the existing
+>   `sync_state` table) — `--skip-schema` was used, all
+>   secrets/data persisted.
+>
+> Worker suite: **50 → 59** (`test/banish-gate.test.js` — 9 cases,
+> zero-network, the round-trip + the buttons + the supersede + the
+> HTML-escape law). Desktop release v0.60.0
+> (GitCurator-v0.60.0-windows.zip, 130 files, sha256
+> `52684c6b6682418986702f94755d7a7479b491b82b243070a4b7d4436577368b`,
+> download round-trip byte-identical) + CI green on main AND the
+> v0.60.0 tag first try (runs 37966184109 + 37966183447 — 1721
+> tests, 86-module compile gate, offline golden 30/30).
