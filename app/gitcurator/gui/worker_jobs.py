@@ -573,9 +573,9 @@ def _vault_scan_job(config: dict, log_signal,
                 "info")
         if has_filing:
             for nf in (plan.get('new_folders') or []):
-                log(f"📁 New folder proposed: {nf}", "info")
+                log(f"🌱 New folder proposed: {nf}", "info")
             for m in (plan.get('moves') or []):
-                log(f"📦 Move proposed: {m.get('note')} — "
+                log(f"🚚 Move proposed: {m.get('note')} — "
                     f"{m.get('from')} → {m.get('to')}"
                     f"{(' (' + m['reason'] + ')') if m.get('reason') else ''}",
                     "info")

@@ -47,7 +47,7 @@ import unittest
 from unittest import mock
 
 from gitcurator.gui.scan_plan_dialog import (
-    MAX_SHOWN, VERDICT_CONFIRMED, VERDICT_DECLINED, VERDICT_TIMEOUT,
+    MAX_ROWS, VERDICT_CONFIRMED, VERDICT_DECLINED, VERDICT_TIMEOUT,
     plan_display_model)
 
 _PLAN = {
@@ -91,20 +91,35 @@ class TestTheDisplayModel(unittest.TestCase):
         doors = {d['door'] for d in m['deletions']}
         self.assertEqual(doors, {'trash folder', 'note tag'})
 
-    def test_the_cap_twenty_shown_the_rest_counted(self):
+    def test_the_whole_list_rides_the_scroll(self):
+        # v0.63.0 — the owner's report: "the containers for each must
+        # be scrollable" — the 20-item cap is gone; a 60-row plan
+        # carries all 60 rows to the panel.
         plan = dict(_PLAN)
         plan['deletions'] = [
             {'url': f'https://x.example/{i}', 'title': f'n{i}',
              'marker': '🗑️', 'door': 'note tag'}
-            for i in range(MAX_SHOWN + 7)]
+            for i in range(60)]
         plan['moves'] = [
-            {'note': f'm{i}.md', 'from': '(vault root)', 'to': 'X',
-             'reason': ''} for i in range(MAX_SHOWN + 3)]
+            {'note': f'm{i}.md', 'from': '(vault root)', 'to': 'X/Y',
+             'reason': ''} for i in range(60)]
         m = plan_display_model(plan)
-        self.assertEqual(len(m['deletions']), MAX_SHOWN)
-        self.assertEqual(m['deletions_total'], MAX_SHOWN + 7)
-        self.assertEqual(len(m['moves']), MAX_SHOWN)
-        self.assertEqual(m['moves_total'], MAX_SHOWN + 3)
+        self.assertEqual(len(m['deletions']), 60)
+        self.assertEqual(m['deletions_total'], 60)
+        self.assertEqual(len(m['moves']), 60)
+        self.assertEqual(m['moves_total'], 60)
+
+    def test_the_freeze_guard_counts_beyond_max_rows(self):
+        # a pathological pile past MAX_ROWS is counted, not rendered —
+        # the never-freeze law (the modal can always paint).
+        plan = dict(_PLAN)
+        plan['deletions'] = [
+            {'url': f'https://x.example/{i}', 'title': f'n{i}',
+             'marker': '🗑️', 'door': 'note tag'}
+            for i in range(MAX_ROWS + 7)]
+        m = plan_display_model(plan)
+        self.assertEqual(len(m['deletions']), MAX_ROWS)
+        self.assertEqual(m['deletions_total'], MAX_ROWS + 7)
 
     def test_a_bad_plan_never_crashes(self):
         for bad in (None, {}, {'deletions': 'nope',
@@ -157,6 +172,117 @@ try:
     _HAS_QT = True
 except Exception:  # pragma: no cover — CI installs PyQt6
     _HAS_QT = False
+
+
+@unittest.skipUnless(_HAS_QT, "PyQt6 unavailable")
+class TestTheSectionPanels(unittest.TestCase):
+    """v0.63.0 — THE PLAN AS PANELS: toned cards, big headings, one
+    scroll per list (the owner's four panel wishes)."""
+
+    def setUp(self):
+        self._parents = []
+
+    def _dialog(self, timeout_s=300):
+        parent = QWidget()
+        parent._style_btn = lambda btn, kind: btn
+        self._parents.append(parent)
+        return ScanPlanDialog(parent, plan_display_model(_PLAN),
+                              timeout_s=timeout_s)
+
+    def _cards(self, dlg):
+        from PyQt6.QtWidgets import QWidget
+        return {w.objectName(): w for w in dlg.findChildren(QWidget)
+                if w.objectName().startswith('plan_')}
+
+    def test_each_list_is_a_toned_card(self):
+        cards = self._cards(self._dialog())
+        self.assertIn('plan_delete_card', cards)   # very pale red
+        self.assertIn('plan_create_card', cards)   # very pale green
+        self.assertIn('plan_move_card', cards)     # the neutral sheet
+
+    def test_the_headings_are_big_and_tonal(self):
+        from PyQt6.QtWidgets import QLabel
+        dlg = self._dialog()
+        heads = [l for l in dlg.findChildren(QLabel)
+                 if l.objectName() == 'plan_heading']
+        texts = {l.text(): l for l in heads}
+        self.assertIn('🗑️ Marked for deletion — 2', texts)
+        self.assertIn('🌱 New folders to create — 1', texts)
+        self.assertIn('🚚 Notes to re-file — 1', texts)
+        self.assertTrue(any(t.startswith('🏛️ The library:')
+                            for t in texts))
+        # the tones ride the headings (danger / grow / neutral)
+        tones = {l.property('tone') for l in heads}
+        self.assertEqual(tones, {'danger', 'grow', 'neutral'})
+
+    def test_each_list_rides_its_own_scroll(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QScrollArea
+        scrolls = [s for s in self._dialog().findChildren(QScrollArea)
+                   if s.objectName() == 'plan_list']
+        self.assertEqual(len(scrolls), 3)          # one per panel
+        for s in scrolls:
+            self.assertLessEqual(s.maximumHeight(), 200)
+            self.assertEqual(s.verticalScrollBarPolicy(),
+                             Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.assertEqual(s.horizontalScrollBarPolicy(),
+                             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def test_the_move_rows_wear_the_transportation_glyph(self):
+        dlg = self._dialog()
+        text, _full = dlg._move_line(
+            {'note': 'p.md', 'from': '(vault root)',
+             'to': 'AI-Domain/Agents', 'reason': ''})
+        self.assertTrue(text.startswith('🚚'))
+
+    def test_a_long_pile_scrolls_not_stretches(self):
+        # forty rows in one panel: the scroll caps, the rows all live
+        from PyQt6.QtWidgets import QLabel, QScrollArea
+        plan = dict(_PLAN)
+        plan['moves'] = [
+            {'note': f'm{i}.md', 'from': '(vault root)', 'to': 'X/Y',
+             'reason': ''} for i in range(40)]
+        parent = QWidget()
+        parent._style_btn = lambda btn, kind: btn
+        self._parents.append(parent)
+        dlg = ScanPlanDialog(parent, plan_display_model(plan))
+        scrolls = [s for s in dlg.findChildren(QScrollArea)
+                   if s.objectName() == 'plan_list']
+        move_scroll = scrolls[2]
+        self.assertLessEqual(move_scroll.maximumHeight(), 200)
+        items = [l for l in dlg.findChildren(QLabel)
+                 if l.objectName() == 'cc_item'
+                 and l.text().strip().startswith('🚚')]
+        self.assertEqual(len(items), 40)          # the whole list lives
+
+
+class TestTheThemeKnowsThePanels(unittest.TestCase):
+    """The house source-contract test — the washes and roles live in
+    the ONE theme kit (no per-dialog stylesheet, the de-style law)."""
+
+    def setUp(self):
+        self.root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    def _read(self, *parts):
+        with open(os.path.join(self.root, *parts), 'r',
+                  encoding='utf-8') as f:
+            return f.read()
+
+    def test_the_panel_roles_live_in_the_theme_kit(self):
+        src = self._read('app', 'gitcurator', 'gui', 'theme.py')
+        for role in ('plan_delete_card', 'plan_create_card',
+                     'plan_move_card', 'plan_heading', 'plan_list'):
+            self.assertIn(role, src, f'the theme kit lost {role}')
+        for token in ('plan_del_bg', 'plan_del_border',
+                      'plan_grow_bg', 'plan_grow_border'):
+            self.assertEqual(src.count(token), 3,   # LIGHT + DARK + QSS
+                             f'{token} must live in both palettes + QSS')
+
+    def test_the_dialog_never_grows_a_private_stylesheet(self):
+        src = self._read('app', 'gitcurator', 'gui',
+                         'scan_plan_dialog.py')
+        self.assertNotIn('setStyleSheet', src)     # the de-style law
 
 
 @unittest.skipUnless(_HAS_QT, "PyQt6 unavailable")
@@ -471,8 +597,8 @@ class TestReleaseBookkeeping(unittest.TestCase):
                   encoding='utf-8') as f:
             return f.read()
 
-    def test_version_is_0620(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.62.0')
+    def test_version_is_0630(self):
+        self.assertEqual(self._read('VERSION').strip(), '0.63.0')
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')
@@ -482,10 +608,20 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_changelog_has_the_door(self):
         text = self._read('CHANGELOG.md')
-        self.assertIn('## [0.62.0]', text)
+        self.assertIn('## [0.62.0]', text)      # the history stays
         self.assertIn('ScanPlanDialog', text)
         flat = ' '.join(text.split())    # the prose wraps — flatten it
         self.assertIn('no modal or accept or confirm button', flat)
+
+    def test_changelog_has_the_panels(self):
+        # v0.63.0 — the owner's panel wishes, verbatim, in the record.
+        text = self._read('CHANGELOG.md')
+        self.assertIn('## [0.63.0]', text)
+        flat = ' '.join(text.split())
+        self.assertIn('very pale red background', flat)
+        self.assertIn('very Pale green background', flat)
+        self.assertIn('transporation emoji', flat)
+        self.assertIn('must be scrollable', flat)
 
 
 if __name__ == '__main__':

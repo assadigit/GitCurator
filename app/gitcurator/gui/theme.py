@@ -101,6 +101,15 @@ LIGHT: Dict[str, str] = {
     "log_text":        "#57506B",
     "log_ts":          "#6C6480",
     "banner_warn_bg":  "#FAF3E3",   # the retry banner's amber wash
+    # v0.63.0 — the scan plan's SECTION PANELS (the owner's report:
+    # "very pale red" for the deletions list, "very pale green" for
+    # the creations): near-white tints on the cream library, deep-plum
+    # twins for the night mode. The borders stay one step deeper than
+    # the wash so the panel reads as a card, not a hole.
+    "plan_del_bg":      "#FBEDEF",  # very pale rose — the deletions panel
+    "plan_del_border":  "#F1CFD7",
+    "plan_grow_bg":     "#ECF5EF",  # very pale mint — the creations panel
+    "plan_grow_border": "#CFE7D9",
     "progress_track":  "#E3DACA",
     "progress_chunk":  "#5F54B4",
     "progress_text":   "#514A63",
@@ -175,6 +184,13 @@ DARK: Dict[str, str] = {
     "log_text":        "#C6BFE0",
     "log_ts":          "#8F89A3",
     "banner_warn_bg":  "#322B20",   # the retry banner's amber-on-plum wash
+    # v0.63.0 — the scan plan's section panels, night twins: the same
+    # rose/mint reading at plum-night luminance (the wash stays a WASH —
+    # far from the fill reds/greens the buttons use).
+    "plan_del_bg":      "#3A2731",  # rose-tinted plum — the deletions panel
+    "plan_del_border":  "#54333E",
+    "plan_grow_bg":     "#25352B",  # mint-tinted plum — the creations panel
+    "plan_grow_border": "#33503C",
     "progress_track":  "#17131F",
     "progress_chunk":  "#C4BCF5",
     "progress_text":   "#DDD7EC",
@@ -359,6 +375,28 @@ def _app_rules(t: Dict[str, str]) -> str:
             QScrollBar::add-line:horizontal {{ height: 0; width: 0; }}
             QScrollBar::add-page:horizontal {{ background: transparent; }}
             QWidget#sync_card {{ background-color: {t['sheet']}; border: 1px solid {t['border']}; border-radius: 12px; }}
+            /* v0.63.0 — the scan plan's SECTION PANELS: the deletions
+               wash very pale red, the creations very pale green, the
+               re-file list stays on the neutral sheet (the owner's
+               report: "so it better signal that those are deleted
+               list" / "to signal creation"). The headings grow into
+               the plan_heading role — 15px/800, tonal ink — so the
+               hierarchy reads at a glance (the owner's report:
+               "bigger headings, to better signal hierarchy"). */
+            QWidget#plan_delete_card {{ background-color: {t['plan_del_bg']}; border: 1px solid {t['plan_del_border']}; border-radius: 10px; }}
+            QWidget#plan_create_card {{ background-color: {t['plan_grow_bg']}; border: 1px solid {t['plan_grow_border']}; border-radius: 10px; }}
+            QWidget#plan_move_card {{ background-color: {t['sheet']}; border: 1px solid {t['border']}; border-radius: 10px; }}
+            QLabel#plan_heading {{ font-size: 15px; font-weight: 800; background: transparent; }}
+            QLabel#plan_heading[tone="danger"] {{ color: {t['msg_error']}; }}
+            QLabel#plan_heading[tone="grow"] {{ color: {t['msg_success']}; }}
+            QLabel#plan_heading[tone="neutral"] {{ color: {t['text']}; }}
+            /* each section's list rides its own transparent scroll —
+               the panel's wash shows through and the list scrolls when
+               the pile outgrows the viewport (the owner's report:
+               "the containers for each must be scrollable") */
+            QScrollArea#plan_list {{ border: none; background-color: transparent; }}
+            QScrollArea#plan_list > QWidget {{ border: none; background-color: transparent; }}
+            QScrollArea#plan_list > QWidget > QWidget {{ border: none; background-color: transparent; }}
             /* v0.32 (five-change pass): the retry banner — a flat amber band
             under the status card; the warning word rides the status-role
             QSS (state=warning) for its AA ink. */

@@ -4,13 +4,15 @@ for a VAULT SCAN: reorganize what is badly filed, WITHOUT ever losing or
 rewriting anything.
 
 You are given:
-1. The vault's folder tree, with the note count of every folder. Folders
+1. The vault's folder tree, with the note count of every folder — this tree
+   IS the vault's CURRENT, LATEST state, read fresh moments ago. Folders
    marked [TOO BROAD] hold far more notes than a usable folder should (the
    owner asked for subfolder suggestions exactly for these).
 2. A digest of the MOVE-CANDIDATE notes: notes that are ORPHANED (sitting in
-   the vault root), UNCATEGORIZED (parked in the Uncategorized folder), or
-   filed in a [TOO BROAD] folder. For each: its title, the website's domain,
-   its tags, and the folder it sits in now.
+   the vault root), UNCATEGORIZED (parked in the Uncategorized folder),
+   STRAYS (sitting directly inside a top-level category folder, with no
+   subfolder of their own), or filed in a [TOO BROAD] folder. For each: its
+   title, the website's domain, its tags, and the folder it sits in now.
 
 Your job — propose a filing plan, as JSON:
 
@@ -28,20 +30,37 @@ Hard rules (violations make the whole plan useless):
 1. MOVE only the notes from the given digest — never a note that is not
    listed. Never invent note names.
 2. "note" must be the EXACT file name as listed (including .md).
-3. Every "to" folder is either an EXISTING folder from the tree or one of
-   your "new_folders". Prefer existing folders; create a new folder only
-   when a group of 3+ notes clearly belongs together and no listed folder
-   fits. New folders must sit UNDER an existing parent folder (never at the
-   vault root, never inside _review or _moc or any dot-folder).
-4. Folder names: Title-Case words joined by single hyphens or underscores
+3. CHECK THE TREE FIRST. Before proposing ANY new folder, read the folder
+   tree above and look for an existing folder — at any depth — that already
+   covers the same or a nearly identical category. Compare names ignoring
+   case, spaces, underscores and hyphens: "Color_Tools" and "color tools"
+   are the SAME folder; "Palettes" and "Color_Palettes" under the same
+   parent are near-identical siblings. When a match or near-match exists,
+   file into the EXISTING folder — NEVER create a duplicate or
+   near-duplicate of a category the library already holds.
+4. Every "to" destination is either an EXISTING folder from the tree or one
+   of your "new_folders" — and it is ALWAYS at least two levels deep:
+   <broad category>/<specific subfolder>. Never file a note into the vault
+   root, and never into a bare top-level category folder — every website
+   lives inside a SUBFOLDER of its category (create the subfolder when the
+   category needs one). New folders are subfolders too: they sit UNDER an
+   existing parent folder, never at the vault root, never inside _review
+   or _moc or any dot-folder. Create a new folder only when a group of 3+
+   notes clearly belongs together and no listed folder fits.
+5. Folder names: Title-Case words joined by single hyphens or underscores
    (like the existing folders in the tree). No colons, no slashes inside a
    name, no leading or trailing spaces. Keep them under 40 characters.
-5. NEVER propose deleting a note, and NEVER propose editing a note's
+6. CORE NOTES NEVER MOVE. The library's own catalog notes — above all the
+   Website Directory (the "Website Directory.md" index of every site the
+   library holds) — are the library itself, not filing material. They live
+   at the vault root by design; never propose moving them, even if one
+   appears in the digest.
+7. NEVER propose deleting a note, and NEVER propose editing a note's
    content. Deletions are the owner's own marks — a different, separate
    part of this scan. Your plan is ONLY about folders and moves.
-6. Do not split one website's single note across folders; one note, one
+8. Do not split one website's single note across folders; one note, one
    destination. Do not move a note to the folder it is already in.
-7. If the candidates are already sensibly filed, return empty lists and say
+9. If the candidates are already sensibly filed, return empty lists and say
    so in "summary" — an honest "nothing to move" beats a forced plan.
 
 Aim for the plan a meticulous human librarian would give: small, obvious,
