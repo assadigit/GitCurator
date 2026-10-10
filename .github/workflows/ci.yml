@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 87 audited
-# Python modules and runs the full 1837-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1853-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 78 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -13,7 +13,10 @@
 # mastertable + 43 handdelivery + 27 reviewtable + 83 fifthdoor +
 # 30 masterretry + 44 persistentdoor + 67 realdoor + 44 handharvest +
 # 48 noteredo + 60 banishment + 41 iconcolumn + 8 channelua +
-# 25 vaultscan — v0.61.x: the vault scan and its CTA wiring; +
+# 41 vaultscan — v0.61.x: the vault scan and its CTA wiring; v0.63.0:
+# THE THREE LAWS (fresh eyes — near-duplicate folders absorb into the
+# existing; depth — every website files at least Category/Subfolder
+# deep; core notes — the Website Directory is never re-filed) +
 # 24 trashdoor + 30 scangui — v0.62.0: THE TRASH DOOR (a note the
 # owner moves into the root Trash folder carries the delete verdict:
 # same grammar, same gate, same never-fetch blacklist) + THE GUI

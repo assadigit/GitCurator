@@ -61,15 +61,17 @@ class _FakeLLM:
 
 
 def _note(path, url, managed='gitcurator', tags=None, body='',
-          category='', subcategory=''):
+          category='', subcategory='', kind=''):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tag_line = 'tags: [' + ', '.join(tags or []) + ']'
+    kind_line = f'kind: "{kind}"' if kind else ''
     with open(path, 'w', encoding='utf-8') as f:
         f.write(f"""---
 source: "{url or ''}"
 {tag_line}
 category: "{category}"
 subcategory: "{subcategory}"
+{kind_line}
 fetch_status: "full"
 managed_by: "{managed}"
 ---
@@ -303,12 +305,246 @@ class TestTheLLMPass(_ScanCase):
         self.assertIn('LLM call failed', self.all_logs())
 
     def test_no_candidates_mean_no_llm_call(self):
-        _note(os.path.join(self.vault, 'Design', 'Fine.md'),
-              'https://f.example/ok')
+        # v0.63.0 — the depth law: a note filed at least
+        # Category/Subfolder deep (not a stray at a category root) is
+        # the new "sensibly filed".
+        _note(os.path.join(self.vault, 'Design', 'Assets',
+                           'Fine.md'), 'https://f.example/ok')
         llm = _FakeLLM(plan={'moves': [{'note': 'Fine.md', 'to': 'X'}]})
         plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
         self.assertEqual(llm.calls, [])     # never asked
         self.assertEqual(plan['moves'], [])
+
+
+# ---------------------------------------------------------------------------
+# v0.63.0 — THE THREE LAWS (the owner read the first draft of a real
+# plan and taught the scan its second lesson): fresh eyes (no duplicate
+# categories), depth (every website under a subfolder), core notes
+# (the Website Directory never moves).
+# ---------------------------------------------------------------------------
+
+class TestTheFold(unittest.TestCase):
+    """_fold — the fresh-eyes law's identity function."""
+
+    def test_case_and_separators_fold_away(self):
+        # the same path under different spellings folds the same…
+        self.assertEqual(vs._fold('Design/Color_Tools'),
+                         vs._fold('design/Color Tools'))
+        self.assertEqual(vs._fold('AI-Domain/Agents'),
+                         vs._fold('ai domain/AGENTS'))
+        # …and the folder _NAME fold squashes separators inside a cell
+        self.assertEqual(vs._fold_segment('Color_Tools'), 'colortools')
+        self.assertEqual(vs._fold_segment('color tools'), 'colortools')
+
+    def test_segments_never_collide_across_levels(self):
+        # segment-wise on purpose: 'A/B' is not 'A_B'
+        self.assertNotEqual(vs._fold('A/B'), vs._fold('A_B'))
+
+
+class TestTheThreeLaws(_ScanCase):
+
+    # -- THE CORE-NOTE LAW --------------------------------------------
+
+    def test_the_directory_is_core_and_never_a_candidate(self):
+        _note(os.path.join(self.vault, '000 📚 Website Directory.md'),
+              '', kind='directory')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        self.assertEqual(inv['core_notes'], 1)
+        row = [n for n in inv['notes']
+               if n['file'] == '000 📚 Website Directory.md'][0]
+        self.assertTrue(row['core'])
+        self.assertTrue(row['app_owned'])
+        cands = {n['file'] for n in vs._move_candidates(inv, 40)}
+        self.assertEqual(cands, {'orphan.md'})   # the catalog never rides
+        self.assertIn('never re-filed', self.all_logs())
+
+    def test_a_core_note_by_kind_is_immune_wherever_it_sits(self):
+        _note(os.path.join(self.vault, 'Design', 'catalog.md'),
+              'https://c.example/x', kind='directory')
+        _note(os.path.join(self.vault, 'Design', 'normal.md'),
+              'https://c.example/y')
+        inv = vs.scan_vault_inventory(self.vault)
+        by_file = {n['file']: n for n in inv['notes']}
+        self.assertTrue(by_file['catalog.md']['core'])
+        self.assertFalse(by_file['normal.md']['core'])
+        cands = {n['file'] for n in vs._move_candidates(inv, 40)}
+        self.assertEqual(cands, {'normal.md'})  # the stray, not the catalog
+
+    def test_the_llm_cannot_move_the_directory_even_when_asked(self):
+        # the owner's report (verbatim): "Website directory.md is listed
+        # for refile but actually it's full list of websites and should
+        # not be moved" — the guest proposes exactly that; the law says
+        # no.
+        _note(os.path.join(self.vault, '000 📚 Website Directory.md'),
+              '', kind='directory')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        _note(os.path.join(self.vault, 'Knowledge_Research_Reference',
+                           'ref.md'), 'https://k.example/ref')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Knowledge_Research_Reference/Indexes'],
+            'moves': [
+                {'note': '000 📚 Website Directory.md',
+                 'to': 'Knowledge_Research_Reference/Indexes',
+                 'reason': 'it is an index'},
+                {'note': 'orphan.md',
+                 'to': 'Knowledge_Research_Reference/Indexes',
+                 'reason': 'research'}],
+            'summary': 'file both'})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual([m['note'] for m in plan['moves']], ['orphan.md'])
+
+    # -- THE DEPTH LAW --------------------------------------------------
+
+    def test_strays_at_a_category_root_are_candidates(self):
+        # the owner's report (verbatim): "Each website must be in at
+        # least on sub folder… not stray in the folder root."
+        _note(os.path.join(self.vault, 'Design', 'stray.md'),
+              'https://s.example/1')
+        _note(os.path.join(self.vault, 'Design', 'Color_Tools',
+                           'filed.md'), 'https://s.example/2')
+        inv = vs.scan_vault_inventory(self.vault)
+        cands = {n['file'] for n in vs._move_candidates(inv, 40)}
+        self.assertEqual(cands, {'stray.md'})
+
+    def test_a_bare_category_destination_is_dropped(self):
+        # the owner's real plan filed a root note into a bare top-level
+        # category — the depth law drops it with a reason.
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        _note(os.path.join(self.vault, 'Knowledge_Research_Reference',
+                           'ref.md'), 'https://k.example/ref')
+        llm = _FakeLLM(plan={
+            'new_folders': [],
+            'moves': [{'note': 'orphan.md',
+                       'to': 'Knowledge_Research_Reference',
+                       'reason': 'research'}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['moves'], [])
+        self.assertIn('bare category root', self.all_logs())
+
+    def test_a_lone_new_folder_is_dropped(self):
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Knowledge_Research_Reference'],
+            'moves': [], 'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], [])
+        self.assertIn('bare root cell', self.all_logs())
+
+    # -- THE FRESH-EYES LAW ----------------------------------------------
+
+    def test_near_duplicates_are_absorbed_into_the_existing(self):
+        # the owner's report (verbatim): "LLM must always first check
+        # the latest existing folders, to prevent duplicating folders
+        # for the same or very near and relevant category."
+        _note(os.path.join(self.vault, 'Design', 'ColorTools',
+                           'Coolors.md'), 'https://c.example/1')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Design/Color_Tools'],
+            'moves': [{'note': 'orphan.md', 'to': 'Design/Color_Tools',
+                       'reason': 'color tooling'}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], [])    # nothing duplicate
+        self.assertEqual(plan['moves'][0]['to'], 'Design/ColorTools')
+        self.assertIn('already exists as', self.all_logs())
+
+    def test_a_near_identical_sibling_is_absorbed(self):
+        _note(os.path.join(self.vault, 'Design', 'Color_Palettes',
+                           'Hunt.md'), 'https://p.example/1')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Design/Palettes'],
+            'moves': [{'note': 'orphan.md', 'to': 'Design/Palettes',
+                       'reason': 'palettes'}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], [])
+        self.assertEqual(plan['moves'][0]['to'], 'Design/Color_Palettes')
+
+    def test_an_exact_duplicate_of_an_existing_folder_is_absorbed(self):
+        _note(os.path.join(self.vault, 'Design', 'Color_Tools',
+                           'Hunt.md'), 'https://p.example/1')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Design/Color_Tools'],
+            'moves': [{'note': 'orphan.md', 'to': 'Design/Color_Tools',
+                       'reason': 'color tooling'}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], [])
+        self.assertEqual(plan['moves'][0]['to'], 'Design/Color_Tools')
+        self.assertIn('already exists as', self.all_logs())
+
+    def test_a_plan_may_not_duplicate_itself(self):
+        _note(os.path.join(self.vault, 'Design', 'Somewhere', 'a.md'),
+              'https://d.example/1')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        _note(os.path.join(self.vault, 'second.md'),
+              'https://o.example/2')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Design/Color_Tools', 'Design/color tools'],
+            'moves': [
+                {'note': 'orphan.md', 'to': 'Design/Color_Tools',
+                 'reason': ''},
+                {'note': 'second.md', 'to': 'Design/color tools',
+                 'reason': ''}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], ['Design/Color_Tools'])
+        self.assertEqual(sorted(m['to'] for m in plan['moves']),
+                         ['Design/Color_Tools', 'Design/Color_Tools'])
+        self.assertIn('duplicates', self.all_logs())
+
+    def test_short_leaves_never_false_hit_by_containment(self):
+        # 'Web' (3 folded chars) must not be absorbed by 'Design/Web_Workers'
+        _note(os.path.join(self.vault, 'Design', 'Web_Workers',
+                           'a.md'), 'https://w.example/1')
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={
+            'new_folders': ['Design/Web'],
+            'moves': [{'note': 'orphan.md', 'to': 'Design/Web',
+                       'reason': ''}],
+            'summary': ''})
+        plan = vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        self.assertEqual(plan['new_folders'], ['Design/Web'])  # kept
+
+    # -- the prompt carries the laws ---------------------------------------
+
+    def test_the_prompt_carries_the_three_laws(self):
+        root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        with open(os.path.join(root, 'app', 'prompts',
+                               's01_vaultscan.txt'), 'r',
+                  encoding='utf-8') as f:
+            text = f.read()
+        self.assertIn('CHECK THE TREE FIRST', text)       # fresh eyes
+        self.assertIn('at least two levels deep', text)   # depth
+        self.assertIn('CORE NOTES NEVER MOVE', text)      # core notes
+        self.assertIn('Website Directory', text)
+
+    def test_the_llm_hears_the_laws_at_the_point_of_decision(self):
+        _note(os.path.join(self.vault, 'orphan.md'),
+              'https://o.example/1')
+        llm = _FakeLLM(plan={'new_folders': [], 'moves': [],
+                             'summary': 'nothing'})
+        vs.build_scan_plan(self.vault, llm_call=llm, log=self.log)
+        msgs, _task = llm.calls[0]
+        body = msgs[1]['content']
+        self.assertIn('THE LATEST STATE', body)
+        self.assertIn('Category/Subfolder', body)
+        self.assertIn('Website Directory', body)
 
 
 class TestTheApplyPass(_ScanCase):
@@ -534,7 +770,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_version_is_0611(self):
         # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
-        self.assertEqual(self._read('VERSION').strip(), '0.62.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.63.0')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
@@ -555,6 +791,15 @@ class TestReleaseBookkeeping(unittest.TestCase):
         # the history stays: the 0.61.0 beat is still told.
         self.assertIn('## [0.61.0]', text)
         self.assertIn('vault scan', text.lower())
+
+    def test_changelog_has_the_three_laws(self):
+        # v0.63.0 — the owner's report, verbatim, in the record.
+        text = self._read('CHANGELOG.md')
+        self.assertIn('## [0.63.0]', text)
+        flat = ' '.join(text.split())
+        self.assertIn('latest existing folders', flat)
+        self.assertIn('at least on sub folder', flat)
+        self.assertIn('full list of websites', flat)
 
 
 # ---------------------------------------------------------------------------

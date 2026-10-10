@@ -1,3 +1,77 @@
+## [0.63.0] — The librarian's three laws — 2026-10-11
+
+**The owner's report (session, verbatim):** "In creating new folder,
+LLM must always first check the latest existing folders, to prevent
+duplicating folders for the same or very near and relevant category."
+"Each website must be in at least on sub folder. So Each website, is
+under a broad category, but then it needs to be under another sub
+folder. not stray in the folder root." "Website directory.md is listed
+for refile but actually it's full list of websites and should not be
+moved, system must have an instruction to make exception for this core
+and root notes." The owner read the scan's first real plan and taught
+it its second lesson: three laws, in the prompt AND in the validator.
+
+**THE THREE LAWS (`core/vault_scan.py`)** — taught to the LLM in the
+prompt (rewritten, `prompts/s01_vaultscan.txt`) AND enforced by the
+validator after the guest has spoken (the house way: the guest
+proposes, the vault's laws decide):
+
+1. **THE FRESH-EYES LAW.** The folder tree rides every ask introduced
+   as "THE LATEST STATE, checked fresh this run", and the prompt's
+   first hard rule is CHECK THE TREE FIRST — same or near-identical
+   category (ignoring case, spaces, underscores, hyphens) means file
+   into the EXISTING folder. The validator enforces it mechanically:
+   a proposed folder that folds (case/separator-insensitive,
+   segment-by-segment) to an existing path is ABSORBED — the creation
+   drops, the moves re-route into the folder that is already there,
+   and the log says "♻️ … already exists as … — filing into the
+   existing folder instead, nothing duplicate created". Near-identical
+   SIBLINGS absorb too: same folded parent + leaf names that contain
+   one another (both ≥5 folded chars, so a tiny 'Web' never false-hits
+   'Web_Workers') — 'Design/Palettes' folds into an existing
+   'Design/Color_Palettes'. A plan may not duplicate ITSELF either:
+   two fold-equal proposals become one folder. And a parent that holds
+   no note of its own (only subfolders) is now a real place to hang a
+   subfolder under (the ancestor-roots rule — 'Design' counts as the
+   tree's when 'Design/ColorTools' lives in it).
+
+2. **THE DEPTH LAW.** Every website note files at least
+   `Broad_Category/Subfolder` deep: the prompt forbids the vault root
+   and bare top-level category roots as destinations ("every website
+   lives inside a SUBFOLDER of its category"), and the validator drops
+   any single-segment destination with its own log line ("⚠️ … files a
+   note into a bare category root — every website lives under a
+   subfolder (Category/Subfolder) — dropped") — the exact move the
+   owner's real plan proposed for a root note. New folders are
+   subfolders by the same law (a lone root cell is dropped), and the
+   CANDIDATE side learned the law too: a note straying directly in a
+   top-level category folder (no subfolder of its own) is now a move
+   candidate — the scan proposes the subfolder it deserves.
+
+3. **THE CORE-NOTE LAW.** The Website Directory — "000 📚 Website
+   Directory.md", any spelling of the stem, and every `kind:
+   directory` note — is the library's own catalog, marked `core` in the
+   inventory, counted honestly (`core_notes` rides the plan), named to
+   the LLM as untouchable ("CORE NOTES NEVER MOVE"), and NEVER a move
+   candidate: the exact refile the owner's plan proposed for his
+   directory is now impossible by construction (the guest's proposal
+   for it is dropped — not a listed candidate). The log tells the
+   story: "🏛️ N core catalog note(s) … stay at their post — core notes
+   are never re-filed".
+
+**How the owner sees it:** run Scan → the plan the LLM brings is now
+duplicate-free, subfolder-deep, and leaves the Website Directory at
+its post — the same Apply/Keep gates as always, a better plan under
+them. Suite **1837 → 1853** (16 new cases in
+`tests/test_vaultscan.py`: the fold (two), the three laws — directory
+immunity by name and by kind, the guest's directory move dropped, the
+stray rule, bare-root drops for moves and for lone new folders,
+near-duplicate absorption, sibling containment, exact-duplicate
+absorption, plan self-dedup, the short-leaf guard, the prompt and the
+ask carrying the laws, and the changelog beat). Desktop-only (the
+worker's 0.32.0 stays — the diff under `app/cloudflare-bot/src/` is
+empty, as the record will show).
+
 ## [0.62.0] — The Trash door + the plan on the owner's screen — 2026-10-10
 
 **The owner's report (session, verbatim):** "the problem of not being

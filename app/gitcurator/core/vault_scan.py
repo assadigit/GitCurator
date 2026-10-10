@@ -43,6 +43,29 @@ Four laws, kept:
    sanitized. Anything the validation rejects is dropped with a log
    line, never a crash.
 
+v0.63.0 — THE THREE LAWS (the owner read the first draft of a real
+plan and taught the scan its second lesson):
+
+* **THE FRESH-EYES LAW** — before any new folder is proposed, the
+  LLM is handed the LATEST tree and told to check it; and the
+  validator ENFORCES it: a proposed folder that already exists (same
+  path, or the same path ignoring case/spaces/underscores/hyphens, or
+  a near-identical sibling under the same parent) is ABSORBED into
+  the existing folder — the creation is dropped, the moves re-route
+  into the folder that is already there, and the log says so. A plan
+  may never duplicate (or near-duplicate) a category the library
+  already holds.
+* **THE DEPTH LAW** — every website note files at least
+  ``Broad_Category/Subfolder`` deep: never the vault root, never a
+  bare top-level category folder. Notes found straying at a category
+  root become move candidates; a move whose destination is a single
+  segment is dropped with a warning; a new folder must be a
+  subfolder (two levels or more) by the same law.
+* **THE CORE-NOTE LAW** — the library's own catalog notes — the
+  Website Directory above all — are the library itself, never filing
+  material: they are marked ``core`` in the inventory, excluded from
+  the move candidates, and named to the LLM as untouchable.
+
 Pure stdlib, no Qt, no network (the LLM and the Telegram channel are
 injected callables — the hermetic law). Dry-run aware (``dryrun``).
 """
@@ -54,6 +77,7 @@ from typing import Callable, Dict, List, Optional
 from gitcurator.core import dryrun as _dryrun
 from gitcurator.core import website_pipeline as _wp
 from gitcurator.core.llm_client import extract_json
+from gitcurator.core.website_directory import DIRECTORY_FILENAME
 
 #: v0.61.0 — the scan's own log prefix (the story the log tells).
 SCAN_PREFIX = "🔍 Vault scan:"
@@ -90,12 +114,14 @@ def _read_prompt() -> str:
 
 def _parse_note_frontmatter(path: str) -> Dict:
     """The scan's frontmatter read: ``source``, ``category``,
-    ``subcategory``, ``managed_by``, ``tags`` — the same string-scan
-    style as the banishment's own parser (the house law: core never
-    grows a YAML dependency). Block-style tag lists are read like
-    ``_parse_banish_frontmatter`` reads them."""
+    ``subcategory``, ``managed_by``, ``kind``, ``tags`` — the same
+    string-scan style as the banishment's own parser (the house law:
+    core never grows a YAML dependency). Block-style tag lists are read
+    like ``_parse_banish_frontmatter`` reads them. v0.63.0 — ``kind``
+    joins the read (the core-note law: a ``kind: directory`` note is
+    the machinery's own catalog, never filing material)."""
     out: Dict = {'source': '', 'category': '', 'subcategory': '',
-                 'managed_by': '', 'tags': []}
+                 'managed_by': '', 'kind': '', 'tags': []}
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             lines = f.read(200_000).splitlines()
@@ -125,9 +151,27 @@ def _parse_note_frontmatter(path: str) -> Dict:
                 in_tags = True
             out['tags'] = [t.strip().strip('"').strip("'")
                            for t in inner.split(',') if t.strip()]
-        elif key in ('source', 'category', 'subcategory', 'managed_by'):
+        elif key in ('source', 'category', 'subcategory', 'managed_by',
+                     'kind'):
             out[key] = val
     return out
+
+
+def _is_core_note(name: str, fm: Dict) -> bool:
+    """v0.63.0 — THE CORE-NOTE LAW's predicate: is this note one of the
+    library's own catalog files? The Website Directory (the
+    auto-generated index of every site — any file whose stem ends in
+    "Website Directory", so the owner's spelling survives an emoji or
+    numbering change) and every note the machinery owns outright
+    (``kind: directory``) live where the app put them: at the vault
+    root, by design. They are never move candidates and never
+    re-filed — moving the catalog would scatter the library's own
+    table of contents."""
+    if name == DIRECTORY_FILENAME:
+        return True             # the canonical catalog, by its exact name
+    if (name or '').strip().lower().endswith('website directory.md'):
+        return True            # the same catalog under the owner's spelling
+    return str((fm or {}).get('kind') or '').strip().lower() == 'directory'
 
 
 def scan_vault_inventory(vault_path: str,
@@ -145,14 +189,19 @@ def scan_vault_inventory(vault_path: str,
     says so) but never enter the tree, the notes list, or the totals —
     they are on their way out, not library material, and the LLM is
     never shown them (it must neither rescue nor re-file them).
+    v0.63.0 — the CORE-NOTE LAW: the library's own catalog notes
+    (the Website Directory, any ``kind: directory`` note) are marked
+    ``core`` on their row and counted (``core_notes`` — the log says
+    they stay at their post); they stay in the tree (they ARE the
+    library's front door) but never become move candidates.
     Pure file reads; never raises. Returns
     ``{'folders': [{'rel', 'note_count'}], 'notes': […],
     'root_notes': N, 'uncategorized_notes': N, 'hand_notes': N,
-    'trash_notes': N, 'total_notes': N}``."""
+    'trash_notes': N, 'core_notes': N, 'total_notes': N}``."""
     log = log or (lambda *a, **k: None)
     out: Dict = {'folders': [], 'notes': [], 'root_notes': 0,
                  'uncategorized_notes': 0, 'hand_notes': 0,
-                 'trash_notes': 0, 'total_notes': 0}
+                 'trash_notes': 0, 'core_notes': 0, 'total_notes': 0}
     if not vault_path or not os.path.isdir(vault_path):
         return out
     folder_counts: Dict[str, int] = {}
@@ -178,6 +227,7 @@ def scan_vault_inventory(vault_path: str,
                     domain = ''
             app_owned = (fm.get('managed_by') or '').strip().lower() \
                 == _wp.MANAGED_BY_GITCURATOR
+            core = _is_core_note(name, fm)
             if in_trash:
                 # v0.62.0 — the waiting room: counted (honestly), never
                 # listed, never a candidate, never shown to the LLM.
@@ -198,6 +248,8 @@ def scan_vault_inventory(vault_path: str,
                 out['uncategorized_notes'] += 1
             if not app_owned:
                 out['hand_notes'] += 1
+            if core:
+                out['core_notes'] += 1
             out['total_notes'] += 1
             out['notes'].append({
                 'file': name, 'path': path, 'rel':
@@ -208,7 +260,7 @@ def scan_vault_inventory(vault_path: str,
                 'subcategory': (fm.get('subcategory') or '').strip(),
                 'tags': fm.get('tags') or [],
                 'app_owned': app_owned, 'folder': folder_rel,
-                'in_root': in_root,
+                'in_root': in_root, 'core': core,
                 'protected': folder_rel in _PROTECTED_FOLDERS
                 or folder_rel.startswith(tuple(
                     f + '/' for f in _PROTECTED_FOLDERS))})
@@ -218,18 +270,26 @@ def scan_vault_inventory(vault_path: str,
         log(f"🗑️ {out['trash_notes']} note(s) rest in the Trash folder — "
             f"they await the deletion review (the same gate as your "
             f"auto-delete marks)", "info")
+    if out['core_notes']:
+        log(f"🏛️ {out['core_notes']} core catalog note(s) (the Website "
+            f"Directory and its kin) stay at their post — core notes "
+            f"are never re-filed", "info")
     return out
 
 
 def _move_candidates(inventory: Dict, too_broad: int) -> List[Dict]:
     """Which notes the LLM may propose moving: app-owned, not protected
-    (``_review`` / ``_moc`` are the machinery's), and either orphaned
-    (vault root), uncategorized, or filed in a TOO-BROAD folder."""
+    (``_review`` / ``_moc`` are the machinery's), not core (the Website
+    Directory is the library's own catalog — v0.63.0's core-note law),
+    and either orphaned (vault root), uncategorized, a STRAY (filed
+    directly in a top-level category folder with no subfolder —
+    v0.63.0's depth law: every website lives under a subfolder), or
+    filed in a TOO-BROAD folder."""
     broad = {f['rel'] for f in (inventory.get('folders') or [])
              if f.get('note_count', 0) > too_broad}
     out: List[Dict] = []
     for n in (inventory.get('notes') or []):
-        if not n.get('app_owned') or n.get('protected'):
+        if not n.get('app_owned') or n.get('protected') or n.get('core'):
             continue
         folder = n.get('folder') or ''
         if n.get('in_root') or not folder:
@@ -239,6 +299,9 @@ def _move_candidates(inventory: Dict, too_broad: int) -> List[Dict]:
         if low == 'uncategorized' or low.startswith('uncategorized/'):
             out.append(n)
             continue
+        if '/' not in folder:
+            out.append(n)            # v0.63.0 — a stray at the category
+            continue                 # root (depth law: a subfolder waits)
         if folder in broad or any(folder.startswith(b + '/')
                                   for b in broad):
             out.append(n)
@@ -269,6 +332,22 @@ def _digest_lines(candidates: List[Dict]) -> List[str]:
     return lines
 
 
+def _fold_segment(seg: str) -> str:
+    """One folder cell's case/separator-insensitive identity."""
+    return re.sub(r'[^a-z0-9]+', '', (seg or '').lower())
+
+
+def _fold(rel: str) -> str:
+    """v0.63.0 — THE FRESH-EYES LAW's identity: a folder path folded
+    past case, spaces, underscores and hyphens, segment by segment
+    (``'Design/Color_Tools'`` and ``'design colortools'`` fold the
+    same), so a near-duplicate category can never hide behind its
+    spelling. Segment-wise (not one flat squash) so ``A/B`` never
+    collides with ``A_B``."""
+    parts = [p.strip() for p in (rel or '').replace('\\', '/').split('/')]
+    return '/'.join(_fold_segment(p) for p in parts if p)
+
+
 def _sanitize_folder(rel: str) -> str:
     """One validated relative folder path (forward slashes, no
     traversal, no dot-folders, every cell a safe name). Returns '' when
@@ -297,7 +376,10 @@ def _llm_propose(inventory: Dict, candidates: List[Dict],
     """The LLM pass: folder tree + candidate digests → the filing
     proposal JSON (``new_folders`` / ``moves`` / ``summary``). A broken
     or unparseable answer is an EMPTY proposal with a warning — the
-    scan never crashes on its guest."""
+    scan never crashes on its guest. v0.63.0 — the tree is introduced
+    as THE LATEST STATE and the three laws ride the ask itself (the
+    guest hears the fresh-eyes / depth / core-note rules twice — once
+    in the system prompt, once at the point of decision)."""
     prompt = _read_prompt()
     if not prompt or not candidates:
         return {'new_folders': [], 'moves': [], 'summary':
@@ -310,9 +392,17 @@ def _llm_propose(inventory: Dict, candidates: List[Dict],
                    f"notes (summarized away — plan for the listed ones "
                    f"only)")
     user_msg = (
-        f"Folder tree (relative to the vault root):\n{tree}\n\n"
+        f"Folder tree (relative to the vault root) — THE LATEST STATE, "
+        f"checked fresh this run; read it before proposing any folder:\n"
+        f"{tree}\n\n"
         f"Move-candidate notes ({len(shown)} of {len(candidates)}):\n"
         f"{digest}\n\n"
+        f"The three laws, again, at the point of decision: (1) check "
+        f"the tree above for the same or a near-identical existing "
+        f"folder before proposing ANY new one — reuse it instead; "
+        f"(2) every destination is at least Category/Subfolder deep — "
+        f"never a bare category root, never the vault root; (3) core "
+        f"catalog notes (the Website Directory) are never moved.\n\n"
         f"Return the JSON filing plan now.")
     try:
         raw = llm_call([
@@ -333,32 +423,113 @@ def _llm_propose(inventory: Dict, candidates: List[Dict],
     return data
 
 
+def _absorb_near_duplicate(clean: str,
+                            existing: List[str]) -> Optional[str]:
+    """v0.63.0 — THE FRESH-EYES LAW's lookup: which existing folder (if
+    any) already covers ``clean``? Exact paths folded equal match first;
+    then a near-identical SIBLING — same folded parent, leaf names that
+    contain one another (both at least 5 folded chars, so tiny cells
+    like 'Web' never false-hit 'Web_Workers') — so ``Design/Palettes``
+    is absorbed by an existing ``Design/Color_Palettes``. Returns the
+    existing folder that absorbs the proposal, or ``None`` when the
+    library genuinely lacks the category. Sorted iteration keeps the
+    pick deterministic."""
+    hit = next((ex for ex in sorted(existing)
+                if _fold(ex) == _fold(clean)), None)
+    if hit is not None:
+        return hit
+    parts = clean.split('/')
+    parent_fold = _fold('/'.join(parts[:-1]))
+    leaf_fold = _fold_segment(parts[-1])
+    if len(leaf_fold) < 5:
+        return None            # too short to match by containment
+    for ex in sorted(existing):
+        ex_parts = ex.split('/')
+        if len(ex_parts) < 2 \
+                or _fold('/'.join(ex_parts[:-1])) != parent_fold:
+            continue           # not a sibling under the same parent
+        ex_leaf = _fold_segment(ex_parts[-1])
+        if len(ex_leaf) >= 5 and (leaf_fold in ex_leaf
+                                  or ex_leaf in leaf_fold):
+            return ex
+    return None
+
+
+def _tree_roots(existing: set) -> set:
+    """v0.63.0 — every folder the tree implies, ancestors included: a
+    parent that holds no note of its own (only subfolders) is still a
+    real place to hang a new subfolder under — the LLM's
+    ``Category/Subfolder`` proposals must not be dropped because the
+    category itself has no DIRECT notes."""
+    roots = set(existing)
+    for rel in existing:
+        parts = rel.split('/')
+        for i in range(1, len(parts)):
+            roots.add('/'.join(parts[:i]))
+    return roots
+
+
 def _validate_moves(data: Dict, candidates: List[Dict],
                     inventory: Dict, log: Callable) -> (List[Dict], List[str]):
     """The guest's proposal meets the vault's laws. Only listed
     candidates move; destinations are existing folders or sanitized new
     ones; the same note is never moved twice; a move to the note's own
-    folder is dropped. Returns ``(moves, new_folders)`` — the validated
-    plan (each move carries the note's full path)."""
+    folder is dropped. v0.63.0 — the three laws bite HERE, after the
+    guest has spoken: THE FRESH-EYES LAW (a proposed folder that an
+    existing folder already covers is ABSORBED — the creation drops,
+    the moves re-route into the existing one; a plan may not duplicate
+    itself either), THE DEPTH LAW (every destination is at least
+    ``Category/Subfolder`` deep — a bare category root is not a filing
+    place, and a new folder must be a subfolder, never a lone root
+    cell), and THE CORE-NOTE LAW (a listed core note never rides — the
+    candidates carry no core rows, and an invented one is not a listed
+    candidate to begin with). Returns ``(moves, new_folders)`` — the
+    validated plan (each move carries the note's full path)."""
     existing = {f['rel'] for f in (inventory.get('folders') or [])}
+    roots = _tree_roots(existing)   # ancestors are parents too
     by_name: Dict[str, Dict] = {}
     for n in candidates:
         by_name.setdefault(n['file'], n)
         by_name.setdefault(n['rel'], n)
     raw_new = data.get('new_folders') or []
     new_folders: List[str] = []
+    alias: Dict[str, str] = {}     # proposed path → the folder that covers it
     seen_new = set()
+    seen_fold: Dict[str, str] = {}
     for nf in raw_new if isinstance(raw_new, list) else []:
         clean = _sanitize_folder(str(nf or ''))
         if not clean or clean in seen_new:
             continue
+        if '/' not in clean:
+            log(f"⚠️ Scan plan: new folder “{nf}” is a bare root cell — "
+                f"new folders are SUBFOLDERS under a category (the depth "
+                f"law) — dropped", "warning")
+            continue
         parent = '/'.join(clean.split('/')[:-1])
-        if parent and parent not in existing \
+        if parent and parent not in roots \
                 and parent not in new_folders:
             log(f"⚠️ Scan plan: new folder “{nf}” has no parent in the "
                 f"tree — dropped", "warning")
             continue
+        hit = _absorb_near_duplicate(clean, sorted(existing))
+        if hit is not None:
+            alias[clean] = hit
+            seen_new.add(clean)
+            log(f"♻️ Scan plan: “{clean}” already exists as “{hit}” (the "
+                f"same or a near-identical category) — filing into the "
+                f"existing folder instead, nothing duplicate created",
+                "info")
+            continue
+        plan_hit = seen_fold.get(_fold(clean))
+        if plan_hit is not None and plan_hit != clean:
+            alias[clean] = plan_hit
+            seen_new.add(clean)
+            log(f"♻️ Scan plan: “{clean}” duplicates “{plan_hit}” from the "
+                f"same plan — filing into the one folder instead",
+                "info")
+            continue
         seen_new.add(clean)
+        seen_fold[_fold(clean)] = clean
         new_folders.append(clean)
     legal = existing | set(new_folders)
     moves: List[Dict] = []
@@ -369,12 +540,19 @@ def _validate_moves(data: Dict, candidates: List[Dict],
             continue
         note_ref = str(m.get('note') or m.get('file') or '').strip()
         dest = _sanitize_folder(str(m.get('to') or '').strip())
+        if dest:
+            dest = alias.get(dest, dest)   # the fresh-eyes re-route
         note = by_name.get(note_ref)
         if note is None or note_ref in taken:
             continue        # not a listed candidate — never our call
         if not dest or dest not in legal:
             log(f"⚠️ Scan plan: “{note_ref}” → “{m.get('to')}” is not a "
                 f"legal destination — dropped", "warning")
+            continue
+        if '/' not in dest:
+            log(f"⚠️ Scan plan: “{note_ref}” → “{dest}” files a note "
+                f"into a bare category root — every website lives under "
+                f"a subfolder (Category/Subfolder) — dropped", "warning")
             continue
         if dest == (note.get('folder') or ''):
             continue        # already there
@@ -427,6 +605,7 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
         'uncategorized_notes': inventory.get('uncategorized_notes') or 0,
         'hand_notes': inventory.get('hand_notes') or 0,
         'trash_notes': inventory.get('trash_notes') or 0,
+        'core_notes': inventory.get('core_notes') or 0,
         'folder_count': len(inventory.get('folders') or [])}
     candidates = _move_candidates(inventory, too_broad)
     if not candidates:
