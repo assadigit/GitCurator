@@ -5,6 +5,86 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.63.2 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE SETTLED LEDGER)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.63.2 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim):** "Do not fetch current
+> websites which are sent to bot, because they're already addressed
+> and processed. Fetch only websites, that are added to bot, from
+> now on."
+>
+> **The answer, all on the desktop side — one law under three closed
+> doors.** The app owned THREE automatic doors that kept re-fetching
+> websites the owner had long since addressed: (1) **the caught-up
+> sync's master-retry pass** (v0.51.0) re-fetched the master table's
+> " - " waiting rows on every SYNC — burned-out retry counters REBORN
+> first, so a permanent 403 wall was re-fetched forever; (2)
+> **"Process All"'s full-history payload** fed the bot queue's ENTIRE
+> non-GitHub history into every batch, the in-vault-but-failed
+> exception re-fetching each walled `_review` placeholder it met;
+> (3) **the queue classification's pending lie** counted those same
+> walled placeholders as PENDING forever, so "all caught up" could
+> never be said. **THE SETTLED LEDGER** (`websites_settled`, a new
+> cache.db table) closes all three: ONE time per machine — stamped by
+> the `websites_settled_at` meta key — every website the system
+> already knows (stored, walled, dismissed, hand-added in the master
+> table, lost-state placeholder) is settled: addressed and processed,
+> never machine-fetched again, and the fetch-retry queue gets its
+> settlement date in the same stroke (v0.63.1's law, applied to the
+> last ledger that lacked one). The settlement runs at every
+> production door — the websites phase, the bot-queue check (the very
+> first door after upgrading: the startup auto-check), the caught-up
+> scan — and speaks once ("🤝 THE SETTLEMENT: N website link(s) the
+> bot already delivered are settled — addressed and processed, never
+> fetched again; M queued retry(ies) cleared."). The gates are
+> enforced, not promised: `run()`, `run_due_retries()`,
+> `retry_review_backlog()` and `scan_master_waiting_rows()` all honor
+> the ledger; "Process All" carries ONLY the newly-added website
+> links; the queue report gains the settled bucket; the caught-up
+> sync reports the waiting rows with their doors (✅ / 🪦 / 🖐 / ♻️ /
+> More ▸ 🔁) but never auto-fetches them. The owner's doors through
+> the law: ♻️ revived in the master table UN-SETTLES its link
+> (fetched like new again); the 🖐 hand gesture — or a delivered page
+> waiting in the hand-delivered folder — outranks the settlement and
+> finishes the link by hand.
+>
+> **Proven in a REAL run** (offscreen, the owner's machine distilled —
+> three stored websites, one walled 403 placeholder with its 3 retries
+> burned out and its " - " row waiting, the bot queue's full history
+> re-fed to a batch): the settlement spoke once (4 URLs, 1 retry
+> cleared); the caught-up scan found NO waiting row after it (the
+> v0.51.0 reborn loop starved); the batch fed the FULL history
+> fetched NOTHING (every old link answered with the law's own skip
+> line); a NEWLY-ADDED website was fetched, classified and stored;
+> ♻️ revived un-settled its link and it was fetched like new.
+> Evidence: `/home/z/real-run/settled-ledger-run.py` + `.log`
+> (13/13 PASS).
+>
+> **The suite: 1887 → 1918** (+30 in the new
+> `tests/test_settledledger.py` — the ledger, the split, the door
+> helper, the scan, the run gate with the hand outranking, the retry
+> gates, the ♻️ un-settle door, the source contracts; +1 the owner's
+> upgrade shape in `test_websitesqueuefix`; `test_masterretry`'s and
+> `test_iconcolumn`'s routing classes re-told under the new law; the
+> 21 release pins re-pointed). CI green on main + the tag **first
+> try** (runs 38086222297 / 38086550080, head `d85471c`). The
+> release: `GitCurator-v0.63.2-windows.zip` (135 files, sha256
+> `72f1a2e6b9c976be0673b351049e6aefc4edf91d0ecf737d66f934473b7111b6`,
+> GitHub release 409209829, asset 629007191, download round-trip
+> byte-identical). The owner's home checklist: unzip → 1-INSTALL.bat
+> → GitCurator.bat → launch → the first queue check prints the one
+> 🤝 settlement line (and never again) → the sync ends "caught up"
+> with no re-fetch chatter → send a NEW website to the bot and it is
+> fetched, noted and filed as always. Nothing else changed at the
+> desk.
+
+---
+
 ## 📦 v0.63.1 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE FALSE RETRY CRIES, SILENCED BY THE TRUTH)
 
 > **Live in production** at
