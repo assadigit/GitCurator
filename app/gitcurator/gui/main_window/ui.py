@@ -1393,12 +1393,15 @@ class UiMixin:
         # verbatim: "New CTA row: [Fetch] [Scan] [Test Connection]").
         # The scan reads the whole vault (the folder walk + note
         # contents), finds the owner's auto-delete marks (the v0.60.1
-        # grammar — ONE grammar), asks the LLM for filing proposals
-        # (orphaned / uncategorized / too-broad notes), and takes the
-        # WHOLE plan to Telegram BEFORE anything is deleted or moved
-        # (the banish-gate round-trip template — 300s without an answer
-        # is a safe defer, nothing done). Outline style: it is a
-        # librarian's pass, not the primary action (Hick's Law kept).
+        # grammar — ONE grammar, now three doors: tags, the Trash
+        # folder move, the master table), asks the LLM for filing
+        # proposals (orphaned / uncategorized / too-broad notes), and
+        # takes the WHOLE plan to the owner BEFORE anything is deleted
+        # or moved — the review MODAL at the desk (🗂️ Apply / ✋ Keep,
+        # v0.62.0) or the Telegram round-trip away from it (config
+        # scan_confirm_door; 300s without an answer is a safe defer,
+        # nothing done). Outline style: it is a librarian's pass, not
+        # the primary action (Hick's Law kept).
         self.scan_btn = QPushButton("Scan")
         self.scan_btn.setFixedHeight(56)
         self.scan_btn.setMinimumWidth(120)
@@ -1406,13 +1409,15 @@ class UiMixin:
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.scan_btn.setToolTip(
             "🔍 Vault scan — the librarian's pass over the whole vault:\n"
-            "① your auto-delete marks (🗑️ / delete / auto_delete — the\n"
-            "   same grammar the deletion review uses) are found;\n"
+            "① your delete marks are found — 🗑️ / delete / auto_delete\n"
+            "   tags, the master-table gesture, or a move into the root\n"
+            "   Trash folder (the move IS the verdict);\n"
             "② the LLM proposes folders and moves for the orphaned /\n"
             "   uncategorized / too-broadly-filed notes;\n"
-            "③ the WHOLE plan goes to your Telegram — nothing is\n"
-            "   deleted or moved until you confirm (🗂️ Apply / ✋ Keep);\n"
-            "   no answer in 300s = nothing done.\n"
+            "③ the WHOLE plan opens in the review modal — 🗂️ Apply\n"
+            "   plan / ✋ Keep everything (or Telegram, if configured) —\n"
+            "   nothing is deleted or moved until you answer; no answer\n"
+            "   in 300s = nothing done.\n"
             "Moves never rewrite a note — files only change folders."
         )
         self.scan_btn.setAccessibleName("Scan the vault")

@@ -5,10 +5,23 @@ The owner's ask (session, verbatim): "New CTA row: [Fetch] [Scan]
 Connection; its job runs in a TestWorker thread (the same
 lightweight pattern Test Connection uses — never the GUI thread):
 the vault walk → the plan (the v0.60.1 auto-delete grammar + the
-LLM's filing proposal) → the Telegram ask (the banish-gate round-trip
-template; 300s without an answer = safe defer) → on the owner's ✅:
+LLM's filing proposal) → the confirm door → on the owner's ✅:
 folders + byte-identical moves + the banishment machinery. The log
 tells the whole story; the button re-enables when the story ends.
+
+v0.62.0 — THE GUI CONFIRM DOOR (the owner's report, verbatim: "the
+scan now suggest new folders to be made, but there is no modal or
+accept or confirm button to actually LLM do them"): the desktop's
+own launches inject the worker's ask-gate
+(``request_scan_confirm``) into the job, so the plan opens in
+ScanPlanDialog ON SCREEN — 🗂️ Apply plan / ✋ Keep everything —
+instead of dying in the log (config ``scan_confirm_door`` can pin
+'telegram' to keep the old round-trip). The ask-gate is the
+login-code pattern's twin: the plan rides ``scan_confirm_requested``
+up to the GUI thread, the modal runs a nested event loop, and the
+verdict rides ``provide_scan_verdict`` back down before the worker
+proceeds — never the GUI thread for the scan itself, exactly the
+TestWorker law.
 """
 
 from PyQt6.QtCore import Qt
@@ -43,7 +56,7 @@ class VaultScanUiMixin:
             pass    # widget access must never break the scan
         self.log_message(
             "🔍 Vault scan started — reading the vault, then the plan "
-            "goes to your Telegram for confirmation BEFORE anything is "
+            "appears here for your confirmation BEFORE anything is "
             "deleted or moved (no answer in 300s = nothing done).",
             "info")
         try:
@@ -60,18 +73,55 @@ class VaultScanUiMixin:
         worker = TestWorker(_vault_scan_job, 'vault_scan', snapshot)
 
         def _job(cfg):
-            return _vault_scan_job(cfg, worker.log_message)
+            # v0.62.0 — the GUI confirm door: the worker's own ask-gate
+            # rides in as confirm_gui, so the plan opens in ScanPlanDialog
+            # (the login-code pattern — the worker thread blocks on the
+            # Event while the modal stands open on the GUI thread).
+            return _vault_scan_job(cfg, worker.log_message,
+                                   confirm_gui=worker.request_scan_confirm)
         worker._fn = _job
 
         self._scan_worker = worker
         self._scan_worker.log_message.connect(
             lambda m, l: self.log_message(m, l))
+        # v0.62.0 — the plan's ride up to the GUI thread: the modal opens
+        # here (never in the worker), and the verdict rides back down.
+        self._scan_worker.scan_confirm_requested.connect(
+            lambda plan, w=worker: self._on_scan_confirm_requested(plan, w))
         self._scan_worker.finished_signal.connect(
             self._vault_scan_finished)
         # keep the worker alive until its story ends (the TestWorker
         # contract — _keep_worker's law):
         self._scan_worker_ref = self._scan_worker
         self._scan_worker.start()
+
+    def _on_scan_confirm_requested(self, plan: dict, worker):
+        """v0.62.0 — THE GUI CONFIRM DOOR: the scan's ask reached the
+        owner's screen. Runs on the GUI thread (the signal's own hop);
+        the modal's nested event loop stands open while the worker
+        blocks on its Event — the answer rides provide_scan_verdict
+        back down. The vault is never touched here: the verdict is the
+        job's to enforce, exactly like a Telegram confirm."""
+        try:
+            timeout_s = 300.0
+            try:
+                timeout_s = float(
+                    (self.config or {}).get(
+                        'scan_confirm_timeout_s', 300.0) or 300.0)
+            except (TypeError, ValueError):
+                timeout_s = 300.0
+            from gitcurator.gui.scan_plan_dialog import ask_scan_plan
+            verdict = ask_scan_plan(self, plan, timeout_s=timeout_s)
+        except Exception as e:
+            self.log_message(
+                f"⚠️ The scan plan modal could not open ({e}) — the safe "
+                f"defer applies (nothing moved, nothing deleted)",
+                "warning")
+            verdict = 'declined'
+        try:
+            worker.provide_scan_verdict(verdict)
+        except Exception:
+            pass    # a dead worker never crashes the GUI thread
 
     def _vault_scan_finished(self, name: str, result: dict):
         """The scan's story ended — speak the verdict, re-arm the

@@ -1,9 +1,13 @@
-## [0.62.0] — The Trash door — 2026-10-10
+## [0.62.0] — The Trash door + the plan on the owner's screen — 2026-10-10
 
 **The owner's report (session, verbatim):** "the problem of not being
 able to delete some notes and never-fetch them again exists. What if,
 we create a folder called trash, every note which goes to trash will be
-deleted from vault and never fetch again."
+deleted from vault and never fetch again." — and, in the same breath:
+"the scan now suggest new folders to be made, but there is no modal or
+accept or confirm button to actually LLM do them." Two reports, one
+release: the deletion gesture the hand already knows, and the confirm
+button the desk was missing.
 
 **The answer keeps every law: the move is the verdict, the grammar is
 still ONE.** A root-level `Trash` folder (any spelling — Trash/trash/
@@ -50,7 +54,7 @@ one shape the house will never allow).
 run Scan (or Fetch) → the plan/the gate shows it under the deletions
 with the marker "Trash folder" → confirm → gone and never fetched
 again, ♻️ revivable in the master table like every burial. Suite
-**1783 → 1807** (24 cases in the new pure-stdlib
+**1783 → 1837** (24 cases in the new pure-stdlib
 `tests/test_trashdoor.py`: the predicate, the detection — placement
 fires tagless, tags win the marker, hand-written kept, sourceless
 skipped, deep namesake never the door, the hidden quarantine never
@@ -58,7 +62,50 @@ re-found — the gate's eyes with the dedup, the enforcement — the full
 burial, the never-fetch hold on a fresh arrival, the sacred keep, the
 dry-run rehearsal, the idempotent no-op — and the scan's own laws: the
 counted-but-unlisted waiting room, the never-a-destination rule, the
-dropped sneaky proposal, the plan's trash count).
+dropped sneaky proposal, the plan's trash count; plus 30 cases in the
+new `tests/test_scangui.py` below).
+
+---
+
+**THE GUI CONFIRM DOOR (the second report): the plan on the owner's
+screen.** The scan's filing proposal existed since v0.61.0 — new
+folders, moves, printed into the log — but the only gate that could
+APPLY it was the Telegram round-trip, so at the desk it was a dead
+letter: suggested, never actionable. Now the ask has TWO doors and the
+SAME enforcement behind both: **ScanPlanDialog** (`gui/
+scan_plan_dialog.py`) lays the whole proposal out on screen — the
+deletions with their doors ("via your mark" / "via you moved it to
+Trash"), the new folders, the moves with their reasons, the LLM's own
+summary, the inventory line, and the answering window ticking down —
+with **🗂️ Apply plan** (the primary: the folders are created, the notes
+move byte-identically, the marked deletions run through the same
+banishment machinery a confirmed Telegram ask triggers) and **✋ Keep
+everything** (the safe default: the vault stays byte-for-byte as it
+was). Esc, the ✕, and the window running out are all the safe default
+too — the last one answers 'timeout', exactly the verdict a silent
+Telegram ask gets; nothing is done either way.
+
+**The plumbing is the login-code ask-gate's own twin** (v0.23.0's
+`code_requested` → modal → `provide_code`): TestWorker grows
+`scan_confirm_requested` (the plan rides the signal up to the GUI
+thread), `request_scan_confirm` (the worker thread parks on an Event
+while the owner reads — never the GUI thread for the scan itself), and
+`provide_scan_verdict` (the answer rides back down). The job picks its
+door by the new config `scan_confirm_door`: **'gui' is the default
+whenever a GUI ask-gate is injected** (the desktop's own launches —
+the mixin feeds `worker.request_scan_confirm` in), 'telegram' pins the
+old round-trip (still the away-from-desk door, and the only one a
+headless/CLI launch has); a 'gui' pinned where no GUI lives falls
+back to Telegram with a warning; a broken modal is a decline with a
+warning, never a crash. The two layers stay honest: the display model
+(`plan_display_model`) is PURE (no Qt, no files — the 20-item cap with
+the honest count, the way the Telegram ask caps its lists), and the
+dialog only renders it (the themed QSS roles — sync_card /
+info_header / cc_item / help_box; no per-dialog stylesheet, v0.30.0's
+de-style law). The Scan CTA's tooltip and its opening log line now
+speak the modal's story; the wiring tests grew with them (the
+re-bound fn now feeds the ask-gate in — pinned so the v0.61.1
+crash-fix law can never regress).
 
 ## [0.61.1] — The Scan button works — 2026-10-10
 

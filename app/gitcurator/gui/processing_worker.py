@@ -1816,6 +1816,12 @@ class TestWorker(QThread):
     log_message = pyqtSignal(str, str)        # (msg, level)
     finished_signal = pyqtSignal(str, dict)   # (test_name, result_dict)
     code_requested = pyqtSignal(str)          # "CODE" or "PASSWORD"
+    # v0.62.0 — THE GUI CONFIRM DOOR: the vault scan's ask-gate (the
+    # login-code pattern's own twin — request_code/provide_code). The
+    # plan rides this signal to the GUI thread, which opens ScanPlanDialog;
+    # the worker thread blocks on the Event until provide_scan_verdict
+    # lands (or the answering window runs out — the safe defer).
+    scan_confirm_requested = pyqtSignal(dict)  # the scan plan awaiting the owner
     # v0.23.0 — Test Connection modal progress: which subsystem section is
     # being checked / each result as it lands. (section_index is 1-based,
     # mirroring run_local_checks' on_section.)
@@ -1830,11 +1836,53 @@ class TestWorker(QThread):
         self._kwargs = kwargs
         self._code_event = threading.Event()
         self._code_response = ""
+        self._scan_event = threading.Event()
+        self._scan_verdict = ""
 
     def provide_code(self, code: str):
         """Called from the GUI thread to deliver the login code/password."""
         self._code_response = code
         self._code_event.set()
+
+    def provide_scan_verdict(self, verdict: str):
+        """v0.62.0 — called from the GUI thread to deliver the owner's
+        answer to the scan plan's ask ('confirmed' / 'declined'; the
+        modal's own timeout verdict never passes through here — the
+        worker's own wait reports it)."""
+        self._scan_verdict = str(verdict or '')
+        self._scan_event.set()
+
+    def request_scan_confirm(self, plan: dict,
+                             timeout_s: float = 300.0) -> str:
+        """v0.62.0 — called from the worker thread (the login-code
+        pattern): emit the plan, block until the GUI thread answers via
+        provide_scan_verdict. Returns 'confirmed' / 'declined', or
+        'timeout' when the answering window ran out (the safe defer —
+        nothing was done; the same verdict a silent Telegram ask gets)."""
+        self._scan_event.clear()
+        self._scan_verdict = ""
+        try:
+            self.scan_confirm_requested.emit(dict(plan or {}))
+        except Exception:
+            # a plan that cannot cross the signal line is a defer, never
+            # a crash (the TestWorker contract)
+            return 'timeout'
+        try:
+            wait_s = max(float(timeout_s or 300.0), 1.0)
+        except (TypeError, ValueError):
+            wait_s = 300.0
+        timed_out = not self._scan_event.wait(timeout=wait_s)
+        if timed_out:
+            try:
+                self.log_message.emit(
+                    "⏰ The scan plan's answering window closed — nothing "
+                    "moved, nothing deleted (the safe defer; I'll propose "
+                    "again on the next scan)", "warning")
+            except Exception:
+                pass
+            return 'timeout'
+        v = str(self._scan_verdict or '').strip().lower()
+        return v if v in ('confirmed', 'declined') else 'timeout'
 
     def request_code(self, prompt_type: str = "CODE") -> str:
         """Called from the worker thread. Emits code_requested, then blocks
