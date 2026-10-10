@@ -534,7 +534,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_version_is_0611(self):
         # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
-        self.assertEqual(self._read('VERSION').strip(), '0.61.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.62.0')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
@@ -615,9 +615,12 @@ class TestScanCtaWiring(unittest.TestCase):
         win = self._window()
         seen = {}
 
-        def _fake_job(cfg, log_signal):
+        def _fake_job(cfg, log_signal, confirm_gui=None):
+            # v0.62.0 — the job now takes the GUI ask-gate too (the
+            # wiring feeds worker.request_scan_confirm in)
             seen['cfg'] = cfg
             seen['signal'] = log_signal
+            seen['confirm_gui'] = confirm_gui
             return {'success': True, 'verdict': 'clean'}
 
         with mock.patch.object(_vsui, '_vault_scan_job', _fake_job), \
@@ -632,6 +635,12 @@ class TestScanCtaWiring(unittest.TestCase):
         self.assertEqual(result.get('verdict'), 'clean')
         self.assertEqual(seen['cfg'].get('website_vault_path'),
                          '/tmp/vault')
+        # v0.62.0 — THE GUI CONFIRM DOOR'S wiring law: the ask-gate
+        # rides in (the worker's request_scan_confirm — the login-code
+        # pattern's twin), never None at the desk.
+        self.assertIsNotNone(seen.get('confirm_gui'))
+        self.assertIn('request_scan_confirm',
+                      repr(seen.get('confirm_gui')))
         # PyQt re-binds the signal on every attribute access, so object
         # identity can't be asserted — the LIVE-EMISSION proof below is
         # the real law: the fed signal reaches the window's log.
@@ -645,7 +654,7 @@ class TestScanCtaWiring(unittest.TestCase):
         from gitcurator.gui.main_window import vault_scan_ui as _vsui
         win = self._window()
         with mock.patch.object(_vsui, '_vault_scan_job',
-                               lambda cfg, sig: {
+                               lambda cfg, sig, confirm_gui=None: {
                                    'success': True, 'verdict': 'clean'}), \
                 mock.patch.object(TestWorker, 'start',
                                   lambda self: None):

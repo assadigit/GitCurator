@@ -482,7 +482,8 @@ def _scan_llm_call(config: dict, log) -> Optional[Any]:
         return None
 
 
-def _vault_scan_job(config: dict, log_signal) -> Dict:
+def _vault_scan_job(config: dict, log_signal,
+                   confirm_gui: Optional[Any] = None) -> Dict:
     """v0.61.0 — THE VAULT SCAN (the [Scan] CTA's background job).
 
     The owner's ask (verbatim): "The Scan run: LLM scans the vault
@@ -492,10 +493,25 @@ def _vault_scan_job(config: dict, log_signal) -> Dict:
     / too-broad-category websites, and which notes should move where;
     Confirms with me on Telegram BEFORE deleting or moving anything."
 
+    v0.62.0 — THE GUI CONFIRM DOOR: the owner's report (verbatim):
+    "the scan now suggest new folders to be made, but there is no modal
+    or accept or confirm button to actually LLM do them." The ask now
+    has TWO doors, chosen by config ``scan_confirm_door``: ``'gui'``
+    (the DEFAULT whenever a ``confirm_gui`` ask-gate is injected — the
+    desktop's own launches; the plan opens in ScanPlanDialog and the
+    owner answers on screen) or ``'telegram'`` (the old round-trip —
+    still the away-from-desk door, and the only one a headless/CLI
+    launch has). Both doors answer the same vocabulary
+    ('confirmed'/'declined'/'timeout') and guard the SAME enforcement —
+    nothing moves or deletes until the owner says so, whichever screen
+    he says it on.
+
     The whole story, one thread (never the GUI thread): the inventory
     walk → the plan (deletions = scan_pending_banishments — ONE
-    grammar; filing = the LLM's validated proposal) → the Telegram ask
-    (make_scan_confirm — the banish-gate round-trip template; 300s no
+    grammar; filing = the LLM's validated proposal) → the ask (the
+    GUI door: the plan rides scan_confirm_requested and the worker
+    blocks while the modal stands open; the Telegram door:
+    make_scan_confirm — the banish-gate round-trip template; 300s no
     answer = safe defer) → on CONFIRM: apply_scan_plan (folders +
     byte-identical moves + the banishment machinery) and the closing
     report; on DECLINE/TIMEOUT/DEFER: nothing is touched. Never
@@ -564,12 +580,50 @@ def _vault_scan_job(config: dict, log_signal) -> Dict:
                     f"{(' (' + m['reason'] + ')') if m.get('reason') else ''}",
                     "info")
         # ---- the gate: nothing moves or deletes without the owner ----
-        channel = None
+        # v0.62.0 — the door selection: 'gui' (the modal, the default
+        # whenever the ask-gate is injected — the desktop's launches)
+        # or 'telegram' (the old round-trip). One grammar, two doors.
         try:
-            channel = _scan_confirm.make_scan_confirm(cfg, log=log)
-        except Exception as _e:
-            log(f"⚠️ Scan gate channel unavailable: {_e}", "warning")
+            timeout_s = float(
+                cfg.get('scan_confirm_timeout_s', 300.0) or 300.0)
+        except (TypeError, ValueError):
+            timeout_s = 300.0
+        door = str(cfg.get('scan_confirm_door') or '').strip().lower()
+        use_gui = confirm_gui is not None and door != 'telegram'
+        if door == 'gui' and confirm_gui is None:
+            log(f"⚠️ The scan_confirm_door is set to 'gui' but this launch "
+                f"has no GUI ask-gate — the Telegram door carries the ask "
+                f"instead", "warning")
+        if use_gui:
+            def channel(plan: Dict, ask_log=None) -> Dict:
+                ask_log = ask_log or (lambda *a, **k: None)
+                ask_log(
+                    f"🗂️ Vault scan review — the plan is on your screen "
+                    f"now (Apply / Keep buttons; the vault stays "
+                    f"untouched until you answer; up to "
+                    f"{int(timeout_s)}s)", "info")
+                try:
+                    verdict = confirm_gui(plan, timeout_s=timeout_s)
+                except Exception as e:
+                    log(f"⚠️ The GUI confirm door failed: {e} — the safe "
+                        f"defer applies (nothing moved, nothing deleted)",
+                        "warning")
+                    return {'verdict': 'defer', 'report': None}
+                verdict = str(verdict or 'timeout').strip().lower()
+                if verdict not in ('confirmed', 'declined'):
+                    verdict = 'timeout'
+                return {'verdict': verdict, 'report': None}
+        else:
+            channel = None
+            try:
+                channel = _scan_confirm.make_scan_confirm(cfg, log=log)
+            except Exception as _e:
+                log(f"⚠️ Scan gate channel unavailable: {_e}", "warning")
         if channel is None:
+            # only the Telegram door can land here (the GUI door always
+            # yields a channel — a broken gate answers 'defer' itself):
+            # pinned 'telegram', a headless launch, or the 'gui'-without-
+            # a-gate fallback all tried Telegram and found it unpaired.
             if has_deletions:
                 log(f"⚠️ The Telegram worker is not paired/enabled — "
                     f"NOTHING is deleted or moved (the safe defer: the "
@@ -587,7 +641,7 @@ def _vault_scan_job(config: dict, log_signal) -> Dict:
         if verdict != 'confirmed':
             _why = {'declined': "you said keep everything",
                     'timeout': "no answer in time",
-                    'defer': "the channel could not reach Telegram"
+                    'defer': "the confirm door could not carry the ask"
                              }.get(verdict, verdict)
             log(f"👌 Vault scan: nothing moved, nothing deleted "
                 f"({_why}) — the vault stays exactly as it is", "info")
