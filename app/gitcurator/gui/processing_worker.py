@@ -959,6 +959,13 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                             self.link_tracker.mark_skipped(url, "non-GitHub URL")
                         except Exception:
                             pass
+                    # v0.63.1 — the retry queue's row (if any) is settled:
+                    # this URL is not the GitHub pipeline's business, and
+                    # an unresolved row would cry "repos failed" forever.
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
                     # v26 — Fix 1: emit progress on skip so the bar repaints
                     # (otherwise it appears frozen on the previous URL's status).
                     self.progress_updated.emit(self._current_position, self.total)
@@ -976,6 +983,13 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                             self.link_tracker.mark_skipped(url, "404 quarantine (confirmed dead)")
                         except Exception:
                             pass
+                    # v0.63.1 — the quarantine is the STRONGER verdict; the
+                    # retry queue must not fight it (an unresolved row
+                    # cried "repos failed" at every launch).
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
                     self.progress_updated.emit(self._current_position, self.total)
                     continue
 
@@ -994,6 +1008,12 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                                 url, "dismissed (note deleted)")
                         except Exception:
                             pass
+                    # v0.63.1 — the owner's own verdict settles the queue's
+                    # row too (never a "repos failed" cry again).
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
                     self.progress_updated.emit(self._current_position,
                                                self.total)
                     continue
@@ -1007,6 +1027,11 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                             self.link_tracker.mark_skipped(url, "invalid GitHub URL")
                         except Exception:
                             pass
+                    # v0.63.1 — an unparseable URL is not awaiting anything.
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
                     # v26 — Fix 1: emit progress on skip.
                     self.progress_updated.emit(self._current_position, self.total)
                     continue
@@ -1038,6 +1063,17 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                             self.link_tracker.mark_skipped(url, "already in vault")
                         except Exception:
                             pass
+                    # v0.63.1 — THE VAULT IS THE TRUTH (v0.38.0's own law,
+                    # extended to the retry queue): a URL whose note is in
+                    # the vault is done, whatever old row the queue still
+                    # holds. Without this, a repo that failed once and later
+                    # re-entered through the dedupe path kept its unresolved
+                    # row forever — the startup "repos failed in previous
+                    # runs" cry over a tidy vault (the owner's report).
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
                     # v26 — Fix 1: emit progress on skip so the bar repaints.
                     self.progress_updated.emit(self._current_position, self.total)
                     continue
@@ -1235,6 +1271,12 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                                 self.link_tracker.mark_skipped(url, "already in cache")
                             except Exception:
                                 pass
+                        # v0.63.1 — same law as the vault dedupe above: the
+                        # note exists, the queue's row is settled.
+                        try:
+                            cache.mark_failed_resolved(url)
+                        except Exception:
+                            pass
                         # v26 — Fix 1: emit progress on skip.
                         self.progress_updated.emit(self._current_position, self.total)
                         continue

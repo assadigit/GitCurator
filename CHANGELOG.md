@@ -1,3 +1,108 @@
+## [0.63.1] — The false retry cries, silenced by the truth — 2026-10-12
+
+**The owner's report (session, verbatim):** "A weird message shows on
+the GUI, which ask for retrying repos and websites. for example xxx
+repos need retry — retry now! … find the code responsible for it, and
+find out why it produces this false positive, because as of now, every
+repo and website is processed and tidy, and nothing needs retry. even
+clicking on retry it does nothing, just take sometimes, to show there
+is no update and nothing message (empty and fully processed message)."
+One report, three lying cries, and a single lesson underneath them all:
+every "needs retry" voice in the app was reading a LEDGER nobody ever
+settled — and a ledger with no settlement date lies by default.
+
+**THE THREE CRIES.** The app had three separate voices that could say
+"retry", and all three could say it over a perfectly tidy vault:
+
+1. **The startup line** — "N repos failed in previous runs. Click '🔄
+   Retry Failed'…" (the v22 Feature 4 check, `window.py`): it trusted
+   `CacheDB.failed_repos`'s COUNT alone, and that queue could never
+   empty. Its only resolver was the GitHub pipeline's success path —
+   so a WEBSITE url (enqueued wholesale by Verify Vault's Phase-3
+   fallback, which added every failed manifest row, non-github too),
+   a repo resolved under a drifted URL spelling (the resolve matched
+   exact strings), a repo that later entered through the dedupe path
+   ("already in vault" — a skip, never a resolve), or plain STACKING
+   (a bare INSERT per failure, so one repo counted many times over)
+   each stayed `resolved = 0` forever. Clicking Retry Failed re-served
+   them; the batch skipped every one ("no update"); the queue was
+   unchanged; the cry returned at the next launch — the owner's exact
+   loop.
+
+2. **The retry banner** — "N links from the previous batch need retry"
+   with its Retry button: `get_reconciliation_urls` probed only the
+   GITHUB vault, but a website row's note lives in the WEBSITES vault —
+   so every walled website (its placeholder safely filed in `_review`)
+   and every stored website marked with an empty note path read as
+   "needs retry" FOREVER. Worse, the button's own machinery can't act
+   on them: `_start_worker_with_urls` feeds its URLs to the GitHub
+   loop, which answers "Skipping non-GitHub URL" and skips — the
+   owner's "clicking on retry it does nothing", verbatim.
+
+3. **The mark-read gate** — "Some repos failed — bot messages NOT
+   marked as read": `get_all_clear` ran the same vault-blind probe, so
+   a walled website's `failed` row held the whole bot queue hostage
+   while the Websites pipeline's own retry queue (its ledger, its
+   backoff, its master table — five doors of its own) already owned
+   the link.
+
+**THE TRUTH PASS (`cache_db.py`, pure).** `failed_rows_truth(rows,
+github_has)` re-asks the only question that matters — is the note
+actually missing? GitHub rows whose notes ARE in the vault are STALE
+(old cries, not missing work); absent ones are MISSING (the honest
+cry); non-github urls are NEVER the repos queue's business. The
+startup check (`window.py`) now runs it against the vault's own
+VaultIndex (built once, shared with the reconciliation read — no
+second scan), resolves the stale and website rows out of the queue for
+good (`resolve_failed_urls`, the bulk settle), and announces ONLY the
+genuinely missing, re-worded to say what it means: "N repo(s) failed in
+previous runs and are still missing their notes." Silence is the new
+default on a tidy vault — a cry must be earned. First launch on the
+owner's real machine also heals the historical residue in one pass
+("♻️ N stale retry-queue row(s) resolved — their notes are already in
+the vault").
+
+**THE QUEUE LEARNED THE TRUTH (`cache_db.py`).** `add_failed` never
+stacks (an unresolved row for the URL is updated in place — the fresher
+error wins; resolved history is the record) and keys by the normalized
+URL; `mark_failed_resolved` matches BOTH spellings (the raw legacy
+string and the normalized key), so trailing-slash and case drift
+resolve for real. And the worker settles queue rows at every TERMINAL
+skip — "already in vault" (THE VAULT IS THE TRUTH, v0.38.0's own law,
+extended to the queue), "non-GitHub URL", "404 quarantine", "dismissed
+(note deleted)", "invalid GitHub URL", "already in cache": a URL the
+batch has spoken its last word about is not "awaiting retry" anymore.
+Verify Vault (`dashboard.py`) enqueues GITHUB links only, with one
+honest info line for the websites it used to swallow ("the Websites
+pipeline's own retry queue and master table own them").
+
+**THE BANNER SPEAKS OF WHAT IT CAN ACT ON (`link_tracker.py`).**
+`get_reconciliation_urls` counts GITHUB links only — a website row is
+set aside (still-waiting ones tallied on `set_aside_websites` for the
+honest log line: "N website link(s) … keep waiting in the Websites
+pipeline's own retry queue — never this retry's business"), never
+cried, never fed to a loop that can only skip it. The banner re-worded
+to match ("N repo link(s) from the previous batch need retry" — it
+speaks of repo links because that is ALL it can act on), and its click
+stopped paying the SECOND full vault scan on the empty case (the read
+just proved the count is zero; the banner hides directly). The v0.38.0
+healing law is untouched — pending github rows whose notes are in the
+vault still heal, still persist, still count. And `get_all_clear`
+gates on GITHUB rows only now: the bot-queue mark-read is no longer a
+website wall's hostage; the end-of-batch "not verified" listing counts
+the same population as the verdict (the count can never contradict
+the verdict above it — v0.38.0's law, extended), with the waiting
+websites told in their own quiet line.
+
+**Gate.** 88/88 compiles · 1887/1887 tests (28 modules; +25 in the new
+tests/test_retrycry.py — the pure classifier, the queue's honesty, the
+github-only reconciliation and mark-read gates, the source contracts)
+· offline golden 30/30 · worker 48/48 · the owner's exact scenario
+re-driven before and after (probe_retryfp.py / probe_retryfp2.py —
+before: the queue cried 3 lies and the banner counted 3 false retries;
+after: one honest row, one honest count, both stable across reads).
+Desktop-only release — the worker stays at 0.32.0.
+
 ## [0.63.0] — The librarian's three laws + the plan in panels — 2026-10-11
 
 **The owner's report (session, verbatim):** "In creating new folder,

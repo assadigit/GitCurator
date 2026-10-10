@@ -44,6 +44,59 @@ from gitcurator.gui.dead_links import DEAD_LINK_THRESHOLD
 
 from gitcurator.gui.link_helpers import normalize_url
 
+
+def failed_rows_truth(rows, github_has=None):
+    """v0.63.1 — THE TRUTH PASS over the retry queue's rows (pure, no DB,
+    no files — the caller supplies the probes).
+
+    The owner's report (v0.63.0 session): "a weird message … asks for
+    retrying repos and websites … every repo and website is processed and
+    tidy, and nothing needs retry." The queue's old rows outlived their
+    truth: a WEBSITE url enqueued by Verify Vault's Phase-3 fallback (it
+    added every failed manifest row, non-github too — and the GitHub-only
+    resolver could never clear it), a repo whose retry succeeded under a
+    drifted URL spelling, a repo that later took the dedupe-skip path —
+    all of them stayed ``resolved = 0`` forever, crying at every launch.
+
+    This classifier re-asks the only question that matters — is the
+    note actually missing? ``rows`` are ``(url, error)`` tuples (the
+    shape :meth:`CacheDB.get_failed_urls` returns); ``github_has`` is an
+    optional ``url -> bool`` probe over the GitHub vault's index (the
+    same VaultIndex ground truth reconciliation uses; None = no probe
+    available). Returns ``(stale, missing, websites)``:
+
+      * ``stale`` — github urls whose notes ARE in the vault: old cries,
+        not missing work; the caller resolves them out of the queue.
+      * ``missing`` — github urls whose notes are genuinely absent (or
+        unprovable — a missing probe keeps the old, loud behavior):
+        the honest cry, worth announcing.
+      * ``websites`` — non-github urls: NEVER the repos retry queue's
+        business (the retry batch feeds them to the GitHub loop, which
+        just says "Skipping non-GitHub URL"). The caller resolves them
+        out too; their own doors (the Websites pipeline's retry queue,
+        the master table) tell their story.
+    """
+    stale, missing, websites = [], [], []
+    for row in rows or []:
+        if isinstance(row, dict):
+            url = row.get('url')
+        elif isinstance(row, (tuple, list)) and row:
+            url = row[0]
+        else:
+            url = None            # a None or empty row is nobody's retry
+        url = str(url or '').strip()
+        if not url:
+            continue
+        if _links.extract_github_urls(url):
+            if github_has is not None and github_has(url):
+                stale.append(url)
+            else:
+                missing.append(url)
+        else:
+            websites.append(url)
+    return stale, missing, websites
+
+
 class CacheDB:
     """v30 — Fix (Close CacheDB + busy_timeout + lock, W8):
     - sqlite3 connection now uses timeout=30 AND PRAGMA busy_timeout so a
@@ -262,16 +315,36 @@ class CacheDB:
 
     # ------------------------------------------------------------------
     # v22 Feature 4: Retry Queue Database
+    # (v0.63.1 — the queue learned the truth: rows are keyed by the
+    #  normalized URL, never stack, and resolve under either spelling)
     # ------------------------------------------------------------------
     def add_failed(self, url: str, error: str):
-        """Record a failed repo so it can be retried later via 'Retry Failed'."""
+        """Record a failed repo so it can be retried later via 'Retry Failed'.
+
+        v0.63.1 — THE QUEUE'S TWO OLD LIES fixed here:
+          * STACKING: a plain INSERT meant the same URL re-failed (or
+            re-enqueued by every Verify Vault click) stacked row after
+            row, so the startup cry counted one repo many times over.
+            Now an unresolved row for the URL is UPDATED in place (the
+            fresher error wins); resolved history is never touched.
+          * SPELLING: the row is keyed by ``normalize_url`` (the same
+            grammar every intake uses), so a later resolve under a
+            trailing-slash / case-drifted spelling actually matches.
+        Best-effort — never crashes the batch on a DB error."""
         now = datetime.now().isoformat()
+        norm = normalize_url(url or '')
         try:
             with self._lock:
-                self.cursor.execute(
-                    "INSERT INTO failed_repos (url, error, failed_at, retry_count) VALUES (?, ?, ?, 0)",
-                    (url, error, now)
-                )
+                cur = self.cursor.execute(
+                    "UPDATE failed_repos SET error = ?, failed_at = ? "
+                    "WHERE url = ? AND resolved = 0",
+                    (error, now, norm))
+                if not cur.rowcount:
+                    self.cursor.execute(
+                        "INSERT INTO failed_repos "
+                        "(url, error, failed_at, retry_count) "
+                        "VALUES (?, ?, ?, 0)",
+                        (norm, error, now))
                 self.conn.commit()
         except Exception:
             pass  # best-effort — never crash the batch on a DB error
@@ -288,15 +361,46 @@ class CacheDB:
             return []
 
     def mark_failed_resolved(self, url: str):
-        """Mark a previously-failed URL as resolved (after successful reprocessing)."""
+        """Mark a previously-failed URL as resolved (after successful
+        reprocessing).
+
+        v0.63.1 — the resolve now matches BOTH spellings: the normalized
+        key (what add_failed writes since this version) AND the raw URL
+        (what legacy rows carry), so a repo that failed as
+        ``…/repo`` and came back as ``…/Repo/`` still clears its row —
+        the exact drift that used to leave the queue crying forever."""
         try:
             with self._lock:
                 self.cursor.execute(
-                    "UPDATE failed_repos SET resolved = 1 WHERE url = ?", (url,)
-                )
+                    "UPDATE failed_repos SET resolved = 1 "
+                    "WHERE url = ? OR url = ?",
+                    (url, normalize_url(url or '')))
                 self.conn.commit()
         except Exception:
             pass  # best-effort
+
+    def resolve_failed_urls(self, urls):
+        """v0.63.1 — bulk mark_failed_resolved: the startup truth pass
+        (and any sweep that re-classifies rows against the vaults)
+        clears a whole list in one go, each URL under both spellings.
+        Returns how many rows actually flipped (0 when nothing matched
+        — the caller may stay quiet)."""
+        flipped = 0
+        try:
+            with self._lock:
+                for url in urls or []:
+                    try:
+                        cur = self.cursor.execute(
+                            "UPDATE failed_repos SET resolved = 1 "
+                            "WHERE (url = ? OR url = ?) AND resolved = 0",
+                            (url, normalize_url(url or '')))
+                        flipped += cur.rowcount or 0
+                    except Exception:
+                        pass
+                self.conn.commit()
+        except Exception:
+            pass
+        return flipped
 
     def get_failed_count(self) -> int:
         """Count of unresolved failed URLs."""

@@ -1970,17 +1970,29 @@ class ProcessingControlMixin:
                         # as get_all_clear (vault-present rows are done,
                         # not unfinished), so the count in this log line
                         # can never contradict the verdict above it.
+                        # v0.63.1 — and the SAME population too: get_all_clear
+                        # gates on GITHUB rows only (a website row's
+                        # ledger lives in the Websites pipeline's own
+                        # retry queue — five doors of its own), so the
+                        # listing counts github rows only. The waiting
+                        # websites get their own quiet line instead of a
+                        # false "not verified" cry.
                         try:
                             _has = worker_lt.vault_has
                         except Exception:
                             _has = None
                         pending_links = [
                             l for l in worker_lt.manifest["links"]
-                            if l["status"] in ("failed", "processing", "pending")
+                            if l.get("type") == "github"
+                            and l["status"] in ("failed", "processing", "pending")
                             and not (_has and _has(l["url"]))
                         ]
+                        _ws_waiting = sum(
+                            1 for l in worker_lt.manifest["links"]
+                            if l.get("type") != "github"
+                            and l["status"] in ("failed", "processing", "pending"))
                         self.log_message(
-                            f"⚠️ {len(pending_links)} link(s) not verified — bot messages NOT marked as read",
+                            f"⚠️ {len(pending_links)} repo link(s) not verified — bot messages NOT marked as read",
                             "warning"
                         )
                         for pl in pending_links[:5]:
@@ -1990,6 +2002,13 @@ class ProcessingControlMixin:
                             )
                         if len(pending_links) > 5:
                             self.log_message(f"   ... and {len(pending_links) - 5} more", "info")
+                        if _ws_waiting:
+                            self.log_message(
+                                f"🌐 {_ws_waiting} website link"
+                                f"{'s' if _ws_waiting != 1 else ''} keep "
+                                f"waiting in the Websites pipeline's own "
+                                f"retry queue — accounted for, not a "
+                                f"verification failure.", "info")
                 else:
                     # No link tracker — fall back to the v22 vault-index check
                     all_in_vault = True

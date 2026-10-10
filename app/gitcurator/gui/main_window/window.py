@@ -141,14 +141,53 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
         # v22 Feature 4: On launch, check for repos that failed in a previous
         # run and prompt the user to retry them. Best-effort — if the DB
         # can't be opened, silently skip.
+        # v0.63.1 — THE TRUTH PASS (the owner's report: "a weird message
+        # asks for retrying repos and websites … every repo and website
+        # is processed and tidy, and nothing needs retry"). The old check
+        # trusted the queue's COUNT alone, and the queue lied: website
+        # URLs enqueued by Verify Vault (which the GitHub-only resolver
+        # could never clear), repos resolved under drifted spellings,
+        # repos that later took the dedupe-skip path — all stayed
+        # unresolved forever, crying at every launch while the vault sat
+        # tidy. The count is now re-classified against the GITHUB vault's
+        # own index (the same ground truth reconciliation uses): stale
+        # cries and website rows are resolved out of the queue for good,
+        # and only genuinely-missing repos are announced. Silence is the
+        # new default on a tidy vault — a cry must be earned.
+        _startup_gh_index = None
+        try:
+            _sv = (self.config.get('vault_path') or '').strip()
+            if _sv and os.path.isdir(_sv):
+                from gitcurator.gui.vault_index import VaultIndex as _VI
+                _startup_gh_index = _VI(_sv)
+                _startup_gh_index.rebuild()
+        except Exception:
+            _startup_gh_index = None   # best-effort — the pass degrades to the old count
         try:
             cache = CacheDB()
-            failed_count = cache.get_failed_count()
+            failed_rows = cache.get_failed_urls()
+            missing = []
+            if failed_rows:
+                from gitcurator.gui.cache_db import failed_rows_truth
+                _stale, missing, _websites = failed_rows_truth(
+                    failed_rows,
+                    github_has=_startup_gh_index.has_url
+                    if _startup_gh_index is not None else None)
+                _resolved_now = cache.resolve_failed_urls(_stale + _websites)
+                if _resolved_now:
+                    self.log_message(
+                        f"♻️ {_resolved_now} stale retry-queue row(s) "
+                        f"resolved — their notes are already in the vault "
+                        f"(old cries, not missing work; website rows left "
+                        f"for the Websites pipeline's own doors).",
+                        "success"
+                    )
             cache.close()
-            if failed_count > 0:
+            if missing:
                 self.log_message(
-                    f"⚠️ {failed_count} repos failed in previous runs. "
-                    f"Click '🔄 Retry Failed' in the Bot tab to reprocess them.",
+                    f"⚠️ {len(missing)} repo(s) failed in previous runs and "
+                    f"are still missing their notes — More ▸ '🔄 Retry "
+                    f"Failed' reprocesses them.",
                     "warning"
                 )
         except Exception:
@@ -163,6 +202,11 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
             vault_path = self.config.get('vault_path', '')
             if vault_path and os.path.isdir(vault_path):
                 tracker = LinkTracker(vault_path)
+                # v0.63.1 — share the startup pass's index (no second
+                # vault scan — the same ground truth the truth pass
+                # just used).
+                if _startup_gh_index is not None:
+                    tracker.set_vault_index(_startup_gh_index)
                 failed = tracker.get_reconciliation_urls()
                 # v0.38.0 — reconciliation heals against the vault: rows
                 # left pending/failed by an interrupted batch whose notes
@@ -178,7 +222,7 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
                     )
                 if failed:
                     self.log_message(
-                        f"⚠️ {len(failed)} links from previous batch need retry!",
+                        f"⚠️ {len(failed)} repo link{'s' if len(failed) != 1 else ''} from previous batch need retry!",
                         "warning"
                     )
                     for url in failed[:5]:
@@ -190,6 +234,18 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
                         )
                     self._reconciliation_urls = failed
                 else:
+                    # v0.63.1 — website rows set aside by the read get
+                    # their one honest line (the Websites pipeline's own
+                    # doors own them — the master table is their ledger).
+                    _aside = getattr(tracker, 'set_aside_websites', 0)
+                    if _aside:
+                        self.log_message(
+                            f"ℹ️ {_aside} website link{'s' if _aside != 1 else ''} "
+                            f"from that batch keep waiting in the Websites "
+                            f"pipeline's own retry queue — never this "
+                            f"retry's business.",
+                            "info"
+                        )
                     # Only log "all clear" if a manifest actually exists
                     if tracker.load_previous_manifest():
                         self.log_message(

@@ -1906,7 +1906,14 @@ class UiMixin:
         count is positive; hidden otherwise. Called at startup, after
         every batch (processing_finished) and before/after banner
         retries. Best-effort: an unreadable manifest keeps the banner
-        hidden."""
+        hidden.
+
+        v0.63.1 — the count is GITHUB-ONLY (the reconciliation read's
+        own law now): a website row's note lives in the Websites vault
+        and its retries belong to the Websites pipeline's own doors —
+        counting them here was the false cry the owner reported ("xxx
+        repos need retry … clicking on retry it does nothing"). The
+        banner speaks of repo links because that is ALL it can act on."""
         banner = getattr(self, 'retry_banner', None)
         if banner is None:
             return
@@ -1918,14 +1925,14 @@ class UiMixin:
                 count = len(tracker.get_reconciliation_urls())
             if count > 0:
                 self._retry_banner_text.setText(
-                    f"{count} link{'s' if count != 1 else ''} from the "
+                    f"{count} repo link{'s' if count != 1 else ''} from the "
                     "previous batch need retry")
                 self._set_status(self._retry_banner_text, 'warning', strong=True)
                 # v0.34 (follow-up review, small point): the button carries
                 # the count — "Retry 620" says what it will do.
                 self._retry_banner_btn.setText(f"Retry {count}")
                 self._retry_banner_btn.setToolTip(
-                    f"Reprocess the {count} unfinished link"
+                    f"Reprocess the {count} unfinished repo link"
                     f"{'s' if count != 1 else ''} from the previous batch")
                 banner.setVisible(True)
             else:
