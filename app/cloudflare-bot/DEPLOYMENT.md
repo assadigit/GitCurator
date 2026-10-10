@@ -5,6 +5,83 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.63.1 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE FALSE RETRY CRIES, SILENCED BY THE TRUTH)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.63.1 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim):** "A weird message shows on
+> the GUI, which ask for retrying repos and websites. for example xxx
+> repos need retry — retry now! … find the code responsible for it, and
+> find out why it produces this false positive, because as of now,
+> every repo and website is processed and tidy, and nothing needs
+> retry. even clicking on retry it does nothing, just take sometimes,
+> to show there is no update and nothing message (empty and fully
+> processed message)."
+>
+> **The answer, all on the desktop side — one law under three fixes:**
+> every "needs retry" voice in the app was reading a LEDGER nobody ever
+> settled, and a ledger with no settlement date lies by default.
+> (1) **THE TRUTH PASS** (`cache_db.failed_rows_truth`, pure) — the
+> startup check re-classifies the retry queue's rows against the
+> GitHub vault's own VaultIndex: rows whose notes ARE in the vault are
+> stale (resolved out for good, `resolve_failed_urls`), non-github
+> urls are NEVER the repos queue's business (resolved out too — the
+> Websites pipeline's own doors own them), and only genuinely-missing
+> repos are announced ("N repo(s) failed in previous runs and are
+> still missing their notes"). Silence is the new default on a tidy
+> vault; the first launch heals the historical residue in one pass
+> ("♻️ N stale retry-queue row(s) resolved"). (2) **THE QUEUE LEARNED
+> THE TRUTH** — `add_failed` never stacks (UPDATE-in-place, the
+> fresher error wins) and keys by the normalized URL;
+> `mark_failed_resolved` matches BOTH spellings (raw legacy + normalized
+> — trailing-slash/case drift resolves for real); the worker settles
+> rows at every terminal skip ("already in vault" — v0.38.0's
+> vault-is-the-truth law, extended to the queue — plus non-GitHub /
+> 404-quarantine / dismissed / invalid / already-in-cache); Verify
+> Vault enqueues GITHUB links only. (3) **THE BANNER + THE GATE** —
+> `get_reconciliation_urls` counts GITHUB links only (website rows are
+> set aside with the honest info line, never cried, never fed to the
+> GitHub loop that could only skip them — the owner's exact "clicking
+> on retry it does nothing"); the banner says "repo link(s)" and its
+> click's empty case hides directly (no second full-vault scan — the
+> "takes some time" for nothing); `get_all_clear` gates on github rows
+> only, so a walled website no longer holds the bot-queue mark-read
+> hostage, and the end-of-batch "not verified" listing counts the same
+> population as its verdict.
+>
+> **Proven in a REAL run** (offscreen, the owner's exact state cast
+> both BEFORE and AFTER — a queue holding a website url, a
+> drift-resolved repo, a dedupe-path repo and a stacked row; a
+> manifest of walled/stored/empty-path website rows plus github
+> rows): BEFORE the fix the startup count cried 3 stale rows and the
+> banner counted 3 false retries; AFTER, one honest queue row (the
+> genuinely-missing repo), one honest banner count (the genuinely-moved
+> github note), both stable across reads, the website rows set aside
+> and the mark-read gate clear of them. Evidence:
+> `/home/z/real-run/probe_retryfp.py` + `probe_retryfp2.py` (ALL PASS).
+>
+> **The suite: 1862 → 1887** (+25 in the new `tests/test_retrycry.py`
+> — the pure classifier, the queue's honesty, the github-only
+> reconciliation and mark-read gates, the source contracts; the 18
+> release pins re-pointed + the bothdoors changelog window widened
+> 120000 → 132000, the v0.57.0 precedent). CI green on main + the tag
+> **first try** (runs 38081069279 / 38081261791, head `b8e4699`). The
+> release: `GitCurator-v0.63.1-windows.zip` (135 files, sha256
+> `8a7a30d760d2a10f18638c535497a79707e127caa857e4a36071a13ea6ec850c`,
+> GitHub release 409169527, asset 628853446, download round-trip
+> byte-identical). The owner's home checklist: unzip → 1-INSTALL.bat →
+> GitCurator.bat → launch → the old "N repos failed in previous runs"
+> line either heals itself in one ♻️ line and goes quiet, or names only
+> repos whose notes are genuinely missing → the retry banner (if it
+> shows at all) says "repo link(s)" and its Retry button acts on every
+> link it counts. Nothing else changed at the desk.
+
+---
+
 ## 📦 v0.63.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE LIBRARIAN'S THREE LAWS + THE PLAN IN PANELS)
 
 > **Live in production** at
