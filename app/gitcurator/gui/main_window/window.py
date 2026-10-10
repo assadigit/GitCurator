@@ -163,6 +163,21 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
                 _startup_gh_index.rebuild()
         except Exception:
             _startup_gh_index = None   # best-effort — the pass degrades to the old count
+        # v0.63.3 — has THE SETTLEMENT (repos) run on this machine yet?
+        # Pre-settlement, the retry queue's old rows and the legacy
+        # manifest's failed rows are the PRE-LAW history the owner has
+        # already declared addressed ("since older ones are processed") —
+        # crying them at THIS launch, moments before the first queue
+        # check settles them with one honest 🤝 line, would be the exact
+        # false-positive shape his v0.63.1 report closed. Post-settlement,
+        # every cry is earned (a genuinely-new failure).
+        _repos_settled_yet = False
+        try:
+            _probe = CacheDB()
+            _repos_settled_yet = _probe.repos_ledger_settled()
+            _probe.close()
+        except Exception:
+            _repos_settled_yet = False
         try:
             cache = CacheDB()
             failed_rows = cache.get_failed_urls()
@@ -183,7 +198,17 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
                         "success"
                     )
             cache.close()
-            if missing:
+            if missing and not _repos_settled_yet:
+                # v0.63.3 — the pre-law pile: the first queue check's
+                # settlement clears it with the 🤝 line — not a cry here.
+                self.log_message(
+                    f"ℹ️ {len(missing)} pre-settlement retry row(s) on "
+                    f"record — the repos ledger settles at the first "
+                    f"queue check (older repos are addressed, the owner's "
+                    f"law; only repos added from now on are counted).",
+                    "info"
+                )
+            elif missing:
                 self.log_message(
                     f"⚠️ {len(missing)} repo(s) failed in previous runs and "
                     f"are still missing their notes — More ▸ '🔄 Retry "
@@ -244,6 +269,19 @@ class MainWindow(LifecycleMixin, BackupSealMixin, BotQueueMixin, DashboardMixin,
                             f"from that batch keep waiting in the Websites "
                             f"pipeline's own retry queue — never this "
                             f"retry's business.",
+                            "info"
+                        )
+                    # v0.63.3 — settled repos set aside by the read get
+                    # their one honest line too (legacy-manifest rows the
+                    # settlement addressed — never this retry's
+                    # business; the owner's law).
+                    _aside_settled = getattr(tracker, 'set_aside_settled', 0)
+                    if _aside_settled:
+                        self.log_message(
+                            f"🤝 {_aside_settled} repo link{'s' if _aside_settled != 1 else ''} "
+                            f"from that batch are settled — addressed "
+                            f"(the owner's law), never re-fetched or "
+                            f"counted again.",
                             "info"
                         )
                     # Only log "all clear" if a manifest actually exists

@@ -783,6 +783,22 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         _dead_threshold = dead_link_threshold(self.config)
         dead_urls = cache.get_dead_url_set(_dead_threshold)
         dead_skipped = 0
+        # v0.63.3 — THE SETTLED REPOS LEDGER, the run gate (the repos
+        # twin of the Websites pipeline's settled skip in
+        # WebsitePipeline.run). The owner's report (session, verbatim):
+        # "Do the same for github repos, I want you to only count from
+        # here and now on. since older ones are processed." A settled
+        # repo is skipped BEFORE any GitHub API call — settled links
+        # never cost a rate-limit token, never enter the AI path, and
+        # their (impossible-by-law) failed rows are resolved so no cry
+        # survives them. The batch's own door: whatever list a caller
+        # feeds (bot queue, Process New, retry, import), the law holds.
+        _repos_settled = set()
+        try:
+            _repos_settled = cache.get_settled_repo_set()
+        except Exception:
+            _repos_settled = set()
+        settled_repos_skipped = 0
 
         # Build vault index for URL-based dedup (ground truth)
         vault_path = self.config.get('vault_path', '')
@@ -1018,6 +1034,30 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                                                self.total)
                     continue
                 self._dismissed_skipped = dismissed_skipped
+
+                # v0.63.3 — THE SETTLED REPOS LEDGER's skip: a settled repo
+                # (already sent to the bot and addressed — the owner's law)
+                # is never fetched, never counted as this batch's work.
+                # Checked BEFORE the GitHub API call (the same discipline
+                # as the 404 quarantine and the dismissed gate above); the
+                # skip resolves any queue row so no "repos failed" cry can
+                # survive a settled link. Only the honest aggregate line
+                # below speaks — never a per-URL skip pile.
+                if _repos_settled and normalize_url(url) in _repos_settled:
+                    settled_repos_skipped += 1
+                    if self.link_tracker:
+                        try:
+                            self.link_tracker.mark_skipped(
+                                url, "settled — addressed (the owner's law)")
+                        except Exception:
+                            pass
+                    try:
+                        cache.mark_failed_resolved(url)
+                    except Exception:
+                        pass
+                    self.progress_updated.emit(self._current_position,
+                                               self.total)
+                    continue
 
                 parts = url.replace("https://github.com/", "").split("/")
                 if len(parts) < 2:
@@ -1777,6 +1817,15 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
                 f"🚫 {dead_skipped} dead link(s) skipped — 404 quarantine "
                 f"(confirmed after {DEAD_LINK_THRESHOLD} attempts in earlier runs; "
                 f"More ▸ View 404 Quarantine to manage).", "info")
+        # v0.63.3 — THE SETTLED REPOS LEDGER's one honest line (the repos
+        # twin of the Websites pipeline's "settled — never re-fetched"
+        # line): a batch fed settled history fetches NOTHING for them.
+        if settled_repos_skipped:
+            self.log_message.emit(
+                f"🤝 {settled_repos_skipped} settled repo link(s) skipped — "
+                f"already sent to the bot and addressed (the owner's law: "
+                f"only repos added from now on are fetched; ♻️ Reset 404 "
+                f"Quarantine un-settles any of them).", "info")
         # v0.12.0 — Phase 3: one aggregate line for dismissed URLs (the
         # GitHub notes the owner deleted — never re-added, §4.4).
         if dismissed_skipped:

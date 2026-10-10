@@ -1,3 +1,103 @@
+## [0.63.3] — The settled repos ledger: the owner's law on old repos — 2026-10-12
+
+**The owner's report (session, verbatim):** "Do the same for github
+repos ,  I want you to only count from here and now on. since older
+ones are processed. and not needed you to read from the beginning."
+The websites' settled ledger (v0.63.2) had a twin all along, wearing
+the repos side's own disease: every queue check re-read the FULL bot
+history "from the beginning" and re-classified it, and every repo
+WITHOUT a vault note — a fetch that failed and stayed failed, a note
+the owner deleted, a repo the owner resolved by hand, or plain
+history the system never batched — counted as PENDING work forever.
+"Process All", "Process New", the retry buttons and Verify All's
+missing-list kept feeding that same pile back into batches and
+banners, every single time, over a history the owner had long since
+declared addressed.
+
+**THE SETTLED REPOS LEDGER (`gui/cache_db.py`, new `repos_settled` +
+`cache_meta` tables).** One time per machine — stamped by the
+`repos_settled_at` meta key — every repo the system already knows is
+SETTLED: addressed and processed, never machine-fetched, never
+counted as pending work again. `settle_existing_repos()` seeds the
+ledger from every URL the cache knows (`processed_repos` — stored;
+`failed_repos` — the unresolved pile; `decommissioned_repos` — the
+quarantine, confirmed or not) plus the queue door's extras (the FULL
+bot history at the settlement door: every repo already sent to the
+bot is an "older one", whatever became of it — the owner's own
+words), and gives the repos retry queue its settlement date in the
+same stroke: cleared, so no startup cry ever re-serves an old link
+("every ledger gets a settlement date" — v0.63.1's law, applied to
+the last ledger that lacked one). The settlement runs at the queue's
+own door (the first door the app touches after an upgrade — the
+startup auto-check lands there) and at Verify All's door (it reads
+the same full history), and pays one cheap SELECT once it has spoken
+("🤝 THE SETTLEMENT (repos): N repo link(s) the bot already delivered
+are settled — addressed and processed, never fetched or counted
+again; M queued retry(ies) cleared. Only repos added from now on are
+counted.").
+
+**THE GATES (enforced, not promised).** A settled repo is skipped at
+every machine door, with the law's own words:
+
+1. **The queue classification** (`_bot_queue_job` + the GUI
+   fallback): a settled repo lands in its own honest bucket
+   (`repos_settled_count` — "🤝 Repos settled: N (addressed — never
+   re-fetched)"), never in pending — the badge, the report and the
+   log agree the old pile is not waiting work. The caught-up line
+   says it plainly: "All GitHub repos are addressed — N settled
+   (never re-fetched), the rest in the vault!"
+
+2. **The worker's GitHub loop** (`processing_worker.py`): a settled
+   URL is skipped BEFORE any GitHub API call — the same discipline as
+   the 404 quarantine and the dismissed gate, so settled history
+   never costs a rate-limit token and never enters the AI path. ONE
+   aggregate line speaks ("🤝 N settled repo link(s) skipped —
+   already sent to the bot and addressed") — never a per-URL skip
+   pile — and the skip resolves any queue row so no cry survives it.
+
+3. **The payloads**: "Process All" splits settled repos out of the
+   batch before it starts (the second layer behind the queue's own
+   classification), and "Process New" drops a repo the owner RE-SENDS
+   — a re-send is not a new repo; only repos added from now on are
+   fetched.
+
+4. **The retry doors**: "Retry Failed" and the banner's retry drop
+   settled rows (post-settlement the queue only carries
+   genuinely-new failures — their own honest retries — but the split
+   guards the legacy shapes), and Verify Vault's Phase-3 fallback
+   never enqueues a settled repo into the retry queue.
+
+5. **The reconciliation read** (`link_tracker.py`): a legacy
+   manifest's failed/pending github rows for repos the settlement has
+   since addressed leave the count entirely (`set_aside_settled` —
+   the twin of the v0.63.1 website-rows law) — the banner stops
+   crying history at the next read, and the queue check refreshes the
+   banner after a settlement so it heals immediately.
+
+6. **The startup truth pass** (`window.py`): pre-settlement, the old
+   piles get one quiet info line (the settlement comes at the first
+   queue check), never the "repos failed" cry — the exact
+   false-positive shape the owner's v0.63.1 report closed, kept
+   closed through the upgrade. Post-settlement, every cry is earned.
+
+**THE OWNER'S DOORS (kept, all of them).** ♻️ **Reset 404
+Quarantine** is the way back: `reset_dead_links` now removes BOTH
+marks — the quarantine row AND the settlement — for exactly the URLs
+whose quarantine row is going (every OTHER settled repo keeps its
+settlement), so a reset repo is fetched like new again. The
+manual-resolve verdicts ("Mark as Processed", "Decommission", "Mark
+ALL") settle their URLs as the owner's own word — addressed, never
+re-fetched — with the same ♻️ door back. And a repo that fails AFTER
+the settlement keeps its honest retry lifecycle: the law silences
+history, never new work.
+
+**Gate.** 88/88 compiles · 1953/1953 tests (+35 in the new
+tests/test_reposettled.py: the ledger, the ♻️ un-settle door, the
+reconciliation gate with the healing law untouched, the all-clear
+shape, the source contracts for every production door) · offline
+golden 30/30 · worker 68/68. Desktop-only release — the worker stays
+at 0.32.0.
+
 ## [0.63.2] — The settled ledger: the owner's law on old websites — 2026-10-12
 
 **The owner's report (session, verbatim):** "Do not fetch current

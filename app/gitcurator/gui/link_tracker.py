@@ -602,12 +602,37 @@ class LinkTracker:
         ``self.set_aside_websites`` (the Websites pipeline's own retry
         queue and the master table are their ledger — five doors of
         their own), and the returned list carries only GITHUB links
-        this vault's retry can actually re-process."""
+        this vault's retry can actually re-process.
+
+        v0.63.3 — SETTLED REPOS ARE NEVER A RETRY EITHER (the owner's
+        report, session, verbatim: "Do the same for github repos, I
+        want you to only count from here and now on. since older ones
+        are processed."). A legacy manifest's failed/pending github
+        rows for repos the settlement has since addressed would
+        otherwise cry "repos need retry" forever (the exact shape the
+        owner's v0.63.1 report closed for websites). Settled github
+        rows leave the count entirely — tallied on
+        ``self.set_aside_settled`` for one honest log line; the ♻️
+        doors (Reset 404 Quarantine, the manual-resolve verdicts) are
+        their way back."""
         self.reconciled_vault_hits = 0
         self.set_aside_websites = 0
+        self.set_aside_settled = 0
         prev = self.load_previous_manifest()
         if not prev:
             return []
+        # v0.63.3 — the settled probe: one read, before the loop (the
+        # same once-per-call discipline as the vault index). Guarded —
+        # a broken cache.db never resurrects a settled repo's cry (the
+        # worst case is the old behavior).
+        _settled_repos = set()
+        try:
+            from gitcurator.gui.cache_db import CacheDB as _CacheDB
+            _cache = _CacheDB()
+            _settled_repos = _cache.get_settled_repo_set()
+            _cache.close()
+        except Exception:
+            _settled_repos = set()
         failed = []
         healed = False
         for link in prev.get("links", []):
@@ -639,6 +664,14 @@ class LinkTracker:
                     link["processed_at"] = datetime.now().isoformat()
                     healed = True
                     self.reconciled_vault_hits += 1
+                elif link.get("normalized") in _settled_repos \
+                        or link.get("url") in _settled_repos:
+                    # v0.63.3 — THE SETTLED REPOS LEDGER: this row
+                    # predates the settlement (a legacy manifest), and
+                    # the repo it points at is addressed now — the
+                    # owner's law. Never a retry, never a cry; the
+                    # honest count rides on set_aside_settled.
+                    self.set_aside_settled += 1
                 else:
                     failed.append(link["url"])
             elif link["status"] == "processed":
