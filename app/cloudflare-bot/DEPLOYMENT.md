@@ -5,6 +5,90 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.63.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE LIBRARIAN'S THREE LAWS + THE PLAN IN PANELS)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.63.0 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's seven wishes (session, verbatim):** "In creating new
+> folder, LLM must always first check the latest existing folders, to
+> prevent duplicating folders for the same or very near and relevant
+> category." "Each website must be in at least on sub folder. So Each
+> website, is under a broad category, but then it needs to be under
+> another sub folder. not stray in the folder root." "Website
+> directory.md is listed for refile but actually it's full list of
+> websites and should not be moved, system must have an instruction to
+> make exception for this core and root notes." — and on the modal:
+> "The market for deletation must have a very pale red background, so
+> it better signal that those are deleted list", "creation folders
+> must have a very Pale green background to signal creation", "better
+> emojies must be used for each heading, also bigger headings, to
+> better signal hierarchy. notes to re-file must have a transporation
+> emoji", "the containers for each must be scrollable, just in case
+> the quantity of sites were more than original viewport of the
+> windows."
+>
+> **The answers, both on the desktop side:** (1) THE THREE LAWS
+> (`core/vault_scan.py` + the rewritten `prompts/s01_vaultscan.txt`)
+> — THE FRESH-EYES LAW (the tree rides every ask as "THE LATEST
+> STATE"; a proposed folder that folds — case/spacing/underscores
+> ignored — to an existing one is ABSORBED into it: the creation
+> drops, the moves re-route, the log says ♻️; near-identical siblings
+> absorb too; a plan may not duplicate itself; ancestor folders are
+> real parents), THE DEPTH LAW (every website files at least
+> `Category/Subfolder` deep — bare-root destinations drop with their
+> own warning, lone root-cell new folders drop, strays at a category
+> root become move candidates), and THE CORE-NOTE LAW (the Website
+> Directory, any spelling of the stem, and every `kind: directory`
+> note is marked `core` in the inventory and NEVER a move candidate —
+> the exact refile the owner's plan proposed for his directory is now
+> impossible by construction). (2) THE PLAN AS PANELS
+> (`gui/scan_plan_dialog.py` + the theme kit) — the modal's lists are
+> SECTION CARDS: the deletions on very pale red (`plan_delete_card`),
+> the new folders on very pale green (`plan_create_card`), the
+> re-file list on the neutral sheet (`plan_move_card`) under a 🚚 —
+> the transportation emoji on the heading AND every row; big tonal
+> headings (`plan_heading`, 15px/800 — 🗑️ / 🌱 / 🚚 / 🏛️); every
+> container rides its own scroll (`plan_list`, vertical-only, the
+> WHOLE list — the old 20-item cap retired, MAX_ROWS=500 only the
+> never-freeze guard). All washes and roles live in the ONE theme kit
+> (light + dark); the dialog itself still wears no stylesheet
+> (v0.30.0's de-style law, now test-pinned).
+>
+> **Proven in a REAL run** (offscreen, real `build_scan_plan` with a
+> scripted guest proposing EXACTLY the owner's real plan — refile the
+> Website Directory into a bare category, create `Design/Color_Tools`
+> beside the existing `Design/ColorTools`, file an orphan into the
+> bare root): the directory never moves, the near-duplicate absorbs
+> (moves re-route into the existing folder), the bare-root
+> destinations drop, the legal subfolder proposal survives, Apply
+> lands the six moves byte-identically and buries the marked note —
+> plus the panel screenshots rendered under the REAL theme kit and
+> read back by eye (pale red / pale green / the 🚚 / the big tonal
+> headings / the scrollbar). Evidence:
+> `/home/z/real-run/three-laws-run.log` + `plan-panel-light.png` +
+> `plan-panel-dark.png`.
+>
+> **The suite: 1837 → 1862** (16 new cases in
+> `tests/test_vaultscan.py` + 9 in `tests/test_scangui.py`; the 18
+> release pins re-pointed — the house convention). CI green on main +
+> the tag **first try** (runs 38065702368 / 38065928686, head
+> `fab12a4`). The release: `GitCurator-v0.63.0-windows.zip` (135
+> files, sha256
+> `7bca9849a5316f5c800f2525972e3371ceb78ce6f2b8a74141f0d44b8b6a83d5`,
+> GitHub release 409050259, asset 628374378, download round-trip
+> byte-identical). The owner's home checklist: unzip →
+> 1-INSTALL.bat → GitCurator.bat → Scan → the modal opens with the
+> deletions on pale red, the creations on pale green, the moves under
+> the 🚚 — every list fully readable and scrollable → Apply plan /
+> Keep everything. Nothing else changed at the desk; the Telegram ask
+> still works away from the desk.
+
+---
+
 ## 📦 v0.62.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE TRASH DOOR + THE PLAN ON THE OWNER'S SCREEN)
 
 > **Live in production** at
