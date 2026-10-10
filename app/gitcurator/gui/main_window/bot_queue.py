@@ -249,6 +249,10 @@ class BotQueueMixin:
                     decommissioned_count = result.get('decommissioned_count', 0)
                     blocked_count = result.get('blocked_count', 0)
                     self_count = result.get('self_count', 0)
+                    # v0.63.3 — the settled bucket (the repos twin of
+                    # the websites' settled count, straight from the
+                    # worker's own classification).
+                    repos_settled_count = int(result.get('repos_settled_count', 0) or 0)
                     if result.get('vault_index_count'):
                         self.log_message(
                             f"📚 Vault index: {result['vault_index_count']} notes indexed", "info")
@@ -257,6 +261,7 @@ class BotQueueMixin:
                     decommissioned_count = 0
                     blocked_count = 0
                     self_count = 0
+                    repos_settled_count = 0
                     pending_urls = []
                     # v0.20.0 — the legacy GUI-side filter applies the
                     # same blocked-domain bucket as the worker-side one
@@ -276,9 +281,32 @@ class BotQueueMixin:
                             # Load CONFIRMED-dead URLs (v0.08 quarantine:
                             # fail_count >= threshold; unconfirmed 1-2
                             # attempt entries stay pending for their retries)
+                            _settled_repo_urls = set()
                             try:
                                 cache = CacheDB()
                                 decommissioned_urls = cache.get_dead_url_set()
+                                # v0.63.3 — the GUI fallback of the
+                                # queue door runs the SAME settlement
+                                # (one meta-guarded INSERT batch) and
+                                # the SAME settled bucket as the worker
+                                # path above — only results that arrive
+                                # unfiltered take this branch.
+                                _rep = cache.settle_existing_repos(
+                                    extra_urls=list(all_urls))
+                                if not _rep.get('already'):
+                                    self.log_message(
+                                        f"🤝 THE SETTLEMENT (repos): "
+                                        f"{_rep.get('settled', 0)} repo "
+                                        f"link(s) the bot already "
+                                        f"delivered are settled — "
+                                        f"addressed and processed, never "
+                                        f"fetched or counted again; "
+                                        f"{_rep.get('retries_cleared', 0)} "
+                                        f"queued retry(ies) cleared. Only "
+                                        f"repos added from now on are "
+                                        f"counted (♻️ Reset 404 Quarantine "
+                                        f"un-settles any of them)", "info")
+                                _settled_repo_urls = cache.get_settled_repo_set()
                                 cache.close()
                             except Exception:
                                 decommissioned_urls = set()
@@ -293,6 +321,11 @@ class BotQueueMixin:
                                     in_vault_count += 1
                                 elif norm in decommissioned_urls:
                                     decommissioned_count += 1
+                                elif norm in _settled_repo_urls:
+                                    # v0.63.3 — settled without a vault
+                                    # note: addressed, never pending,
+                                    # never fetched (the owner's law).
+                                    repos_settled_count += 1
                                 else:
                                     pending_urls.append(url)
                         except Exception as vi_err:
@@ -412,6 +445,11 @@ class BotQueueMixin:
                 display += f"Total GitHub URLs in bot:  {len(all_urls)}\n"
                 display += f"✅ Already in vault:        {in_vault_count}\n"
                 display += f"🗑️ Decommissioned (404):    {decommissioned_count}\n"
+                # v0.63.3 — the settled bucket gets its own honest line
+                # (the repos twin of the websites' settled line).
+                if repos_settled_count:
+                    display += (f"🤝 Repos settled:           {repos_settled_count}"
+                                "  (addressed — never re-fetched)\n")
                 if blocked_count:
                     display += f"🚫 Blocked domains:         {blocked_count}\n"
                 if self_count:
@@ -456,7 +494,17 @@ class BotQueueMixin:
                     for i, u in enumerate(pending_urls, 1):
                         display += f"  {i}. {u}\n"
                 else:
-                    display += "🎉 All GitHub repos are already in the vault!\n"
+                    # v0.63.3 — the honest closing line for a settled
+                    # history: "settled" repos are not "in the vault"
+                    # (that bucket is the vault's own truth) — they are
+                    # ADDRESSED, which is the owner's word for done.
+                    if repos_settled_count:
+                        display += ("🎉 All GitHub repos are addressed — "
+                                    f"{repos_settled_count} settled "
+                                    "(never re-fetched), the rest in the "
+                                    "vault!\n")
+                    else:
+                        display += "🎉 All GitHub repos are already in the vault!\n"
                     display += "Click '✅ Verify All Processed' to confirm.\n"
 
                 if _websites_on and _web_vault:
@@ -484,6 +532,15 @@ class BotQueueMixin:
                         "success"
                     )
                 else:
+                    # v0.63.3 — the settled repos get their one honest
+                    # line alongside the caught-up message (the owner's
+                    # law made them addressed, not invisible).
+                    if repos_settled_count:
+                        self.log_message(
+                            f"🤝 {repos_settled_count} repo link(s) are "
+                            f"settled — addressed and processed, never "
+                            f"fetched or counted again (the owner's "
+                            f"law).", "info")
                     self.log_message(
                         f"📬 Queue: all caught up — {len(all_urls)} GitHub repos "
                         f"and {len(non_github)} non-GitHub link(s) are already "
@@ -504,6 +561,17 @@ class BotQueueMixin:
                             "_inbox.", "info")
                     # Hide mark-all-read button until verify passes
                     self.mark_all_read_btn.setVisible(False)
+                # v0.63.3 — the queue check may just have run THE
+                # SETTLEMENT (repos and/or websites): refresh the retry
+                # banner so its count re-reads the healed truth (legacy
+                # manifest rows the settlement addressed stop crying
+                # immediately, not at the next batch's finish).
+                _refresh = getattr(self, '_refresh_retry_banner', None)
+                if callable(_refresh):
+                    try:
+                        _refresh()
+                    except Exception:
+                        pass
             else:
                 self.log_message(f"❌ Bot queue check failed: {result.get('error')}", "error")
                 self.queue_display.setPlainText(f"Error: {result.get('error', 'Unknown')}")
@@ -536,9 +604,40 @@ class BotQueueMixin:
         system addressed — never enters a batch again ("Do not fetch
         current websites which are sent to bot, because they're already
         addressed and processed. Fetch only websites, that are added to
-        bot, from now on.")."""
+        bot, from now on.").
+
+        v0.63.3 — the law's REPOS half, same shape: the batch carries
+        only the pending (newly-added) repos — the settled history
+        never enters ("Do the same for github repos, I want you to only
+        count from here and now on. since older ones are processed.")."""
         urls = getattr(self, '_bot_queue_urls', [])
         websites_pending = getattr(self, '_bot_queue_pending_websites', []) or []
+        # v0.63.3 — THE OWNER'S LAW, repos half ("Do the same for github
+        # repos, I want you to only count from here and now on. since
+        # older ones are processed."): settled repos never enter a
+        # batch. The queue classification already keeps them out of
+        # _bot_queue_urls; this split is the SECOND layer, guarding any
+        # path that writes the list directly (guarded — a broken probe
+        # never hides a repo, the worst case is the old behavior).
+        _settled_kept_out = []
+        try:
+            _cache = CacheDB()
+            _kept = []
+            for _u in (urls or []):
+                if _cache.is_repo_settled(_u):
+                    _settled_kept_out.append(_u)
+                else:
+                    _kept.append(_u)
+            _cache.close()
+            urls = _kept
+        except Exception:
+            pass
+        if _settled_kept_out:
+            self.log_message(
+                f"🤝 {len(_settled_kept_out)} repo link(s) are settled — "
+                f"already sent to the bot and addressed (the owner's "
+                f"law) — excluded from the batch: never fetched again "
+                f"(♻️ Reset 404 Quarantine un-settles any of them)", "info")
         if not urls and not websites_pending:
             self.log_message("No items in queue. Click 'Check Queue' first.", "warning")
             return
@@ -639,6 +738,30 @@ class BotQueueMixin:
                 return
             urls = result.get('urls', [])
             non_github = result.get('non_github_urls', [])
+            # v0.63.3 — THE OWNER'S LAW, repos half: a repo the owner
+            # RE-SENDS to the bot is not a new repo — it is settled
+            # history, and only repos ADDED from now on are fetched.
+            # The split keeps the re-sent link out of the batch with one
+            # honest line (guarded — a broken probe never hides a repo).
+            _settled_resends = []
+            try:
+                _cache = CacheDB()
+                _kept = []
+                for _u in (urls or []):
+                    if _cache.is_repo_settled(_u):
+                        _settled_resends.append(_u)
+                    else:
+                        _kept.append(_u)
+                _cache.close()
+                urls = _kept
+            except Exception:
+                pass
+            if _settled_resends:
+                self.log_message(
+                    f"🤝 {len(_settled_resends)} re-sent repo link(s) are "
+                    f"settled — already addressed (the owner's law) — "
+                    f"excluded from the batch: never fetched again "
+                    f"(♻️ Reset 404 Quarantine un-settles any of them)", "info")
             max_id = result.get('max_message_id', 0)
             dupes = result.get('duplicates_removed', 0)
             raw = result.get('raw_url_count', len(urls) + len(non_github))
@@ -905,6 +1028,7 @@ class BotQueueMixin:
 
                     github_in_vault = 0
                     github_decommissioned = 0
+                    github_settled = 0
                     github_missing = []
 
                     # v0.06 — Perf: ONE CacheDB connection for both the
@@ -923,10 +1047,32 @@ class BotQueueMixin:
                         cache_processed_urls = set()
                         for row in cache.get_all_processed_urls():
                             cache_processed_urls.add(row[0] if isinstance(row, tuple) else row)
+                        # v0.63.3 — THE SETTLED REPOS LEDGER at the verify
+                        # door too (this door reads the FULL bot history —
+                        # the owner's "not needed to read from the
+                        # beginning" law lands here as surely as at the
+                        # queue door): one meta-guarded batch, then the
+                        # settled set for the classification below.
+                        _rep = cache.settle_existing_repos(
+                            extra_urls=list(urls))
+                        if not _rep.get('already'):
+                            self.log_message(
+                                f"🤝 THE SETTLEMENT (repos): "
+                                f"{_rep.get('settled', 0)} repo link(s) the "
+                                f"bot already delivered are settled — "
+                                f"addressed and processed, never fetched "
+                                f"or counted again; "
+                                f"{_rep.get('retries_cleared', 0)} queued "
+                                f"retry(ies) cleared. Only repos added "
+                                f"from now on are counted (♻️ Reset 404 "
+                                f"Quarantine un-settles any of them)",
+                                "info")
+                        settled_repos = cache.get_settled_repo_set()
                         cache.close()
                     except Exception:
                         decommissioned_urls = set()
                         cache_processed_urls = set()
+                        settled_repos = set()
 
                     for url in urls:
                         try:
@@ -947,6 +1093,13 @@ class BotQueueMixin:
                                 if fuzzy_match:
                                     github_in_vault += 1
                                     self.log_message(f"✅ Fuzzy match: {url} → {os.path.basename(fuzzy_match)}", "info")
+                                elif norm in settled_repos:
+                                    # v0.63.3 — THE SETTLED REPOS LEDGER:
+                                    # addressed without a vault note (the
+                                    # owner's law — "older ones are
+                                    # processed") — accounted for, never
+                                    # missing, never re-fetched.
+                                    github_settled += 1
                                 else:
                                     github_missing.append(url)
                         except Exception:
@@ -966,6 +1119,10 @@ class BotQueueMixin:
                     lines.append(f"Total GitHub links in bot:      {len(urls)}")
                     lines.append(f"✅ Found in vault:              {github_in_vault}")
                     lines.append(f"🗑️ Decommissioned (404):        {github_decommissioned}")
+                    # v0.63.3 — the settled bucket (addressed without a
+                    # vault note — the owner's law, accounted for).
+                    if github_settled:
+                        lines.append(f"🤝 Settled (addressed):         {github_settled}  (never re-fetched)")
                     lines.append(f"⏳ Missing from vault:          {len(github_missing)}")
                     lines.append(f"🔗 Non-GitHub links:            {len(non_github)}")
                     lines.append("")
@@ -1037,7 +1194,10 @@ class BotQueueMixin:
                     else:
                         # 0 truly missing — decommissioned doesn't count as missing
                         self.log_message(
-                            f"✅ Verified: {github_in_vault} in vault + {github_decommissioned} decommissioned = {github_in_vault + github_decommissioned}/{len(urls)} accounted for",
+                            f"✅ Verified: {github_in_vault} in vault + "
+                            f"{github_decommissioned} decommissioned + "
+                            f"{github_settled} settled = "
+                            f"{github_in_vault + github_decommissioned + github_settled}/{len(urls)} accounted for",
                             "success"
                         )
                         # Q5/Q13: Show Mark All Read button after verify passes
@@ -1048,6 +1208,7 @@ class BotQueueMixin:
                             f"All GitHub links accounted for! 🎉\n\n"
                             f"  ✅ In vault: {github_in_vault}\n"
                             f"  🗑️ Decommissioned: {github_decommissioned}\n"
+                            f"  🤝 Settled: {github_settled}\n"
                             f"  ❌ Missing: {len(github_missing)}\n\n"
                             f"Would you like to mark all bot messages as read now?\n"
                             f"This will clear the bot queue for future batches."
@@ -1187,6 +1348,10 @@ class BotQueueMixin:
                 owner = m.group(1) if m else ""
                 repo = m.group(2) if m else ""
                 cache.add_processed(0, url, owner, repo, "(manual resolve)", "Manual")
+                # v0.63.3 — the owner's verdict settles the ledger too:
+                # "Mark as Processed" is the owner's own word that this
+                # repo is addressed — never fetched or counted again.
+                cache.settle_repos([url])
                 cache.close()
             except Exception:
                 pass
@@ -1207,6 +1372,10 @@ class BotQueueMixin:
             try:
                 cache = CacheDB()
                 cache.decommission(url, "Manual decommission by user")
+                # v0.63.3 — the owner's verdict settles the ledger too
+                # (addressed — never fetched or counted again; ♻️ Reset
+                # 404 Quarantine is the door back, and it un-settles).
+                cache.settle_repos([url])
                 cache.close()
             except Exception:
                 pass
@@ -1229,6 +1398,9 @@ class BotQueueMixin:
                     owner = m.group(1) if m else ""
                     repo = m.group(2) if m else ""
                     cache.add_processed(0, url, owner, repo, "(manual resolve)", "Manual")
+                # v0.63.3 — the owner's bulk verdict settles the whole
+                # list (same door, same law).
+                cache.settle_repos(missing_urls)
                 cache.close()
             except Exception:
                 pass

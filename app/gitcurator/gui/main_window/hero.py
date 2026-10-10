@@ -425,8 +425,9 @@ class HeroMixin:
                 self._style_btn(self.start_btn, 'hero_primary')
                 self.start_btn.setToolTip(
                     "Stage 1 — fetch every UNDONE item from the Telegram bot\n"
-                    "(repos already in the vault and decommissioned ones are skipped;\n"
-                    "website links already in the Websites vault are skipped too).\n"
+                    "(repos already in the vault, settled (addressed) and\n"
+                    "decommissioned ones are skipped; website links already in\n"
+                    "the Websites vault or settled are skipped too).\n"
                     "The button then becomes PROCESS — click it to start the batch.\n"
                     "While a batch runs this button becomes Stop — click to cancel."
                 )

@@ -44,6 +44,12 @@ from gitcurator.gui.dead_links import DEAD_LINK_THRESHOLD
 
 from gitcurator.gui.link_helpers import normalize_url
 
+# v0.63.3 — THE SETTLED REPOS LEDGER's one-time guard (the twin of the
+# websites' websites_settled_at, v0.63.2): present once settle_existing_repos()
+# has run on this machine. Pre-settlement cries about the old piles stay
+# silent; the first queue check settles them with one honest 🤝 line.
+REPOS_SETTLED_META_KEY = 'repos_settled_at'
+
 
 def failed_rows_truth(rows, github_has=None):
     """v0.63.1 — THE TRUTH PASS over the retry queue's rows (pure, no DB,
@@ -258,6 +264,27 @@ class CacheDB:
                 self.cursor.execute("DROP TABLE notfound_strikes")
         except Exception:
             pass  # best-effort — on error the old table simply stays unused
+        # v0.63.3 — THE SETTLED REPOS LEDGER (the twin of the websites'
+        # websites_settled, v0.63.2): repos already sent to the bot and
+        # addressed are settled — never machine-fetched, never counted
+        # as pending work again. Seeded ONCE by settle_existing_repos()
+        # (the meta key below is the guard); grows only through the
+        # owner's own verdict doors (the manual-resolve dialog); shrinks
+        # through reset_dead_links (the ♻️ door back). cache_meta is the
+        # ledger's own little key-value store (the twin of
+        # website_state_meta).
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS repos_settled (
+                url TEXT PRIMARY KEY,
+                settled_at TIMESTAMP
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cache_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         self.conn.commit()
 
     def is_duplicate(self, repo_id: int) -> bool:
@@ -560,17 +587,42 @@ class CacheDB:
 
         For false positives (a repo that went PRIVATE reads as 404 to an
         unauthorized token; restoring it later should work again).
-        Returns how many entries were removed."""
+        Returns how many entries were removed.
+
+        v0.63.3 — the ♻️ door back through THE SETTLED REPOS LEDGER: the
+        repos twin of the master table's ♻️ revive. A quarantined URL
+        was settled the moment it was addressed (seeded by the one-time
+        settlement, or by the manual-resolve verdict), so removing its
+        quarantine row WITHOUT un-settling it would be a silent no-op
+        under the owner's law ("only repos added from now on are
+        fetched") — the reset now removes BOTH marks (and ONLY for the
+        URLs whose quarantine row is actually going; every OTHER
+        settled repo keeps its settlement), and the repo is fetched
+        like new again."""
         try:
             with self._lock:
                 if url:
+                    norm = normalize_url(url)
                     cur = self.cursor.execute(
                         "DELETE FROM decommissioned_repos WHERE url = ?",
-                        (normalize_url(url),))
+                        (norm,))
+                    _removed = cur.rowcount or 0
+                    if _removed:
+                        self.cursor.execute(
+                            "DELETE FROM repos_settled WHERE url = ?",
+                            (norm,))
                 else:
-                    cur = self.cursor.execute("DELETE FROM decommissioned_repos")
+                    _revived = [r[0] for r in self.cursor.execute(
+                        "SELECT url FROM decommissioned_repos").fetchall()]
+                    cur = self.cursor.execute(
+                        "DELETE FROM decommissioned_repos")
+                    _removed = cur.rowcount or 0
+                    if _revived:
+                        self.cursor.executemany(
+                            "DELETE FROM repos_settled WHERE url = ?",
+                            [(u,) for u in _revived])
                 self.conn.commit()
-                return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                return _removed
         except Exception:
             return 0
 
@@ -602,6 +654,170 @@ class CacheDB:
                 return [row[0] for row in self.cursor.fetchall()]
         except Exception:
             return []
+
+    # -- v0.63.3 THE SETTLED REPOS LEDGER -----------------------------------
+    # (the twin of core/website_state.py's settled ledger, v0.63.2 — the
+    #  owner's report, session, verbatim: "Do the same for github repos,
+    #  I want you to only count from here and now on. since older ones
+    #  are processed. and not needed you to read from the beginning.")
+
+    def get_meta(self, key: str) -> Optional[str]:
+        """v0.63.3 — cache_meta read (the ledger's own little kv store;
+        the twin of WebsiteStateDB.get_meta)."""
+        try:
+            with self._lock:
+                row = self.cursor.execute(
+                    "SELECT value FROM cache_meta WHERE key=?", (key,)).fetchone()
+                return row[0] if row else None
+        except Exception:
+            return None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """v0.63.3 — cache_meta write (INSERT OR REPLACE)."""
+        try:
+            with self._lock:
+                self.cursor.execute(
+                    "INSERT OR REPLACE INTO cache_meta (key, value)"
+                    " VALUES (?,?)", (key, value))
+                self.conn.commit()
+        except Exception:
+            pass  # best-effort — a meta write never breaks a caller
+
+    def is_repo_settled(self, url: str) -> bool:
+        """v0.63.3 — is this repo settled (already sent to the bot and
+        addressed — the owner's law: never machine-fetched, never counted
+        as pending work again)? Normalized through the same link grammar
+        the queue classification and the dead-set use."""
+        try:
+            with self._lock:
+                row = self.cursor.execute(
+                    "SELECT 1 FROM repos_settled WHERE url=?",
+                    (normalize_url(url),)).fetchone()
+                return row is not None
+        except Exception:
+            return False
+
+    def settle_repos(self, urls) -> int:
+        """v0.63.3 — add repos to the settled ledger (idempotent; the
+        owner's verdict doors use this — the manual-resolve dialog's
+        "Mark as Processed" / "Decommission"). Returns how many rows were
+        actually inserted."""
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        added = 0
+        with self._lock:
+            for u in (urls or []):
+                if not u:
+                    continue
+                cur = self.cursor.execute(
+                    "INSERT OR IGNORE INTO repos_settled (url, settled_at)"
+                    " VALUES (?,?)", (normalize_url(u), now_iso))
+                added += cur.rowcount or 0
+            if added:
+                self.conn.commit()
+        return added
+
+    def unsettle_repo(self, url: str) -> bool:
+        """v0.63.3 — the ♻️ door back: remove one repo from the settled
+        ledger so a revived link is fetched like new again (the twin of
+        WebsiteStateDB.unsettle). Returns True when a settled row was
+        actually removed."""
+        try:
+            with self._lock:
+                cur = self.cursor.execute(
+                    "DELETE FROM repos_settled WHERE url=?",
+                    (normalize_url(url),))
+                self.conn.commit()
+                return bool(cur.rowcount)
+        except Exception:
+            return False
+
+    def settled_repos_count(self) -> int:
+        """v0.63.3 — the ledger's size (the honest settlement line)."""
+        try:
+            with self._lock:
+                row = self.cursor.execute(
+                    "SELECT COUNT(*) FROM repos_settled").fetchone()
+                return int(row[0]) if row else 0
+        except Exception:
+            return 0
+
+    def get_settled_repo_set(self) -> set:
+        """v0.63.3 — the settled set, loaded ONCE per queue-check/batch and
+        tested with ``normalize_url(url) in settled`` — no per-URL queries
+        (the same shape as get_dead_url_set)."""
+        try:
+            with self._lock:
+                rows = self.cursor.execute(
+                    "SELECT url FROM repos_settled").fetchall()
+                return {r[0] for r in rows}
+        except Exception:
+            return set()
+
+    def repos_ledger_settled(self) -> bool:
+        """v0.63.3 — has THE SETTLEMENT run on this machine yet? (The
+        ``repos_settled_at`` meta guard — pre-settlement cries about the
+        old piles stay silent: the first queue check settles them.)"""
+        return self.get_meta(REPOS_SETTLED_META_KEY) is not None
+
+    def settle_existing_repos(self, extra_urls=None) -> Dict:
+        """v0.63.3 — THE SETTLEMENT, one time, on the owner's word.
+
+        The owner's report (session, verbatim): "Do the same for github
+        repos, I want you to only count from here and now on. since older
+        ones are processed. and not needed you to read from the
+        beginning." Every repo the system ALREADY knows is settled —
+        addressed and processed, never machine-fetched, never counted as
+        pending work again — and the repos retry queue (whose every row
+        predates the law) gets its settlement date too: cleared, so no
+        startup cry ever re-serves an old link. Only repos added from
+        now on are counted (and their own failures earn their own
+        retries).
+
+        Seeds the ledger from every URL the cache knows —
+        ``processed_repos`` (stored), ``failed_repos`` (the unresolved
+        pile), ``decommissioned_repos`` (the quarantine, confirmed or
+        not) — plus the ``extra_urls`` the queue-door caller adds (the
+        FULL bot history at the settlement door: every repo already sent
+        to the bot is an "older one", whatever became of it). Guarded by
+        the ``repos_settled_at`` meta key: a second call is a no-op
+        (``{'settled': 0, 'retries_cleared': 0, 'already': True}``), so
+        every caller may call it freely. Returns
+        ``{'settled': n, 'retries_cleared': m, 'already': bool}``."""
+        with self._lock:
+            row = self.cursor.execute(
+                "SELECT value FROM cache_meta WHERE key=?",
+                (REPOS_SETTLED_META_KEY,)).fetchone()
+        if row:
+            return {'settled': 0, 'retries_cleared': 0, 'already': True}
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        with self._lock:
+            urls: List[str] = [r[0] for r in self.cursor.execute(
+                "SELECT url FROM processed_repos").fetchall()]
+            urls += [r[0] for r in self.cursor.execute(
+                "SELECT url FROM failed_repos").fetchall()]
+            urls += [r[0] for r in self.cursor.execute(
+                "SELECT url FROM decommissioned_repos").fetchall()]
+            for u in (extra_urls or []):
+                if u:
+                    urls.append(u)
+            seen: set = set()
+            unique = []
+            for u in urls:
+                norm = normalize_url(u) if u else ''
+                if norm and norm not in seen:
+                    seen.add(norm)
+                    unique.append(norm)
+            self.cursor.executemany(
+                "INSERT OR IGNORE INTO repos_settled (url, settled_at)"
+                " VALUES (?,?)", [(u, now_iso) for u in unique])
+            cur = self.cursor.execute("DELETE FROM failed_repos")
+            retries_cleared = cur.rowcount or 0
+            self.cursor.execute(
+                "INSERT OR REPLACE INTO cache_meta (key, value)"
+                " VALUES (?,?)", (REPOS_SETTLED_META_KEY, now_iso))
+            self.conn.commit()
+        return {'settled': len(unique), 'retries_cleared': retries_cleared,
+                'already': False}
 
     def close(self):
         """v30 — idempotent close (safe under races with worker threads)."""

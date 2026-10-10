@@ -649,7 +649,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0520(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.2')
+        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
 
     def test_changelog_mentions_the_law(self):
         text = self._read('CHANGELOG.md')

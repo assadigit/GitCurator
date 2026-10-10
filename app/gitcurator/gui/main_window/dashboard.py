@@ -214,7 +214,8 @@ class DashboardMixin:
             self.log_message(f"⚠️ Could not reset the 404 quarantine: {exc}", "warning")
             return
         self.log_message(
-            f"♻️ 404 quarantine reset — {removed} link(s) will be processed again.",
+            f"♻️ 404 quarantine reset — {removed} link(s) will be processed "
+            f"again (their settlement is gone too — fetched like new).",
             "success")
         self.refresh_quarantine_view()
 
@@ -439,6 +440,29 @@ class DashboardMixin:
                     f"failed their fetches — the Websites pipeline's own "
                     f"retry queue and master table own them (never the "
                     f"repos retry queue).", "info")
+            # v0.63.3 — settled repos never re-enter the retry queue: a
+            # legacy manifest's failed row for a repo the settlement has
+            # since addressed is history, not work (the owner's law —
+            # "older ones are processed"). Guarded — a broken probe
+            # degrades to the old enqueue.
+            _settled_verify_skips = 0
+            try:
+                _vcache = CacheDB()
+                _kept_urls = []
+                for _u in failed_urls:
+                    if _vcache.is_repo_settled(_u):
+                        _settled_verify_skips += 1
+                    else:
+                        _kept_urls.append(_u)
+                _vcache.close()
+                failed_urls = _kept_urls
+            except Exception:
+                pass
+            if _settled_verify_skips:
+                self.log_message(
+                    f"🤝 {_settled_verify_skips} settled repo link(s) "
+                    f"kept out of the retry queue — addressed (the "
+                    f"owner's law), never re-fetched.", "info")
             if failed_urls:
                 self._show_custom_message_box(
                     "Failed Links Found",
@@ -684,7 +708,8 @@ class DashboardMixin:
             self.log_message(f"❌ Failed to reset the 404 quarantine: {e}", "error")
             return
         self.log_message(
-            f"♻️ 404 quarantine reset — {removed} link(s) will be processed again.",
+            f"♻️ 404 quarantine reset — {removed} link(s) will be processed "
+            f"again (their settlement is gone too — fetched like new).",
             "success")
 
     def _retry_reconciliation_links(self):
@@ -766,8 +791,33 @@ class DashboardMixin:
             return
 
         urls = [row[0] for row in failed if row and row[0]]
+        # v0.63.3 — THE SETTLED REPOS LEDGER's door on the retry button:
+        # a settled repo (addressed — the owner's law) is never retried,
+        # whatever stale row sits in the queue. Post-settlement the queue
+        # only carries genuinely-new failures, so this is the second
+        # layer (guarded — a broken probe never hides a real retry).
+        _settled_retry_skips = []
+        try:
+            _cache = CacheDB()
+            _kept = []
+            for _u in urls:
+                if _cache.is_repo_settled(_u):
+                    _settled_retry_skips.append(_u)
+                else:
+                    _kept.append(_u)
+            _cache.close()
+            urls = _kept
+        except Exception:
+            pass
+        if _settled_retry_skips:
+            self.log_message(
+                f"🤝 {len(_settled_retry_skips)} settled repo link(s) left "
+                f"the retry queue — addressed (the owner's law), never "
+                f"re-fetched (♻️ Reset 404 Quarantine un-settles any of "
+                f"them).", "info")
         if not urls:
             self.log_message("✓ No failed repos to retry.", "success")
+            self._show_custom_message_box("Retry Queue Empty", "No failed repos to retry. 🎉", success=True)
             return
 
         # v31.1 safety gate: confirm before large batches (>10 items).

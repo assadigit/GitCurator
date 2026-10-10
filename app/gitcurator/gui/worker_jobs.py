@@ -162,9 +162,37 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             # v0.08 — only CONFIRMED-dead links (fail_count >= threshold)
             # are filtered out; unconfirmed entries (1-2 attempts) stay
             # pending so they receive their remaining attempts.
+            settled_repo_urls = set()
             try:
                 cache = CacheDB()
                 decommissioned_urls = cache.get_dead_url_set()
+                # v0.63.3 — THE SETTLED REPOS LEDGER at the queue's own
+                # door (the repos twin of the websites settlement, and
+                # the FIRST door the app touches after an upgrade — the
+                # startup auto-check lands HERE). The owner's report
+                # (session, verbatim): "Do the same for github repos, I
+                # want you to only count from here and now on. since
+                # older ones are processed. and not needed you to read
+                # from the beginning." One time per machine: every repo
+                # the system already knows — stored, failed,
+                # quarantined, or simply present in the bot's history
+                # at this door — is settled, and the repos retry queue
+                # gets its settlement date (cleared). Only repos added
+                # from now on count as pending work.
+                _repo_settlement = cache.settle_existing_repos(
+                    extra_urls=list(result.get('urls') or []))
+                if not _repo_settlement.get('already'):
+                    log_signal.emit(
+                        f"🤝 THE SETTLEMENT (repos): {_repo_settlement.get('settled', 0)} "
+                        f"repo link(s) the bot already delivered are "
+                        f"settled — addressed and processed, never "
+                        f"fetched or counted again; "
+                        f"{_repo_settlement.get('retries_cleared', 0)} "
+                        f"queued retry(ies) cleared. Only repos added "
+                        f"from now on are counted (♻️ Reset 404 "
+                        f"Quarantine un-settles any of them)",
+                        "info")
+                settled_repo_urls = cache.get_settled_repo_set()
                 cache.close()
             except Exception:
                 decommissioned_urls = set()
@@ -172,7 +200,7 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             # (links.platform_domains_from_config): a github.com repo
             # link must NEVER be blanket-banned here, whatever the law
             # says about the Websites vault.
-            pending, in_vault, decomm, blocked, selfc = [], 0, 0, 0, 0
+            pending, in_vault, decomm, blocked, selfc, settledc = [], 0, 0, 0, 0, 0
             for url in result.get('urls', []):
                 norm = normalize_url(url)
                 if blocked_domains and _links.domain_is_blocked(
@@ -185,6 +213,12 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                     in_vault += 1
                 elif norm in decommissioned_urls:
                     decomm += 1
+                elif norm in settled_repo_urls:
+                    # v0.63.3 — THE SETTLED REPOS LEDGER: addressed
+                    # without a vault note (a walled failure, an owner
+                    # verdict, a repo the settlement's history pass
+                    # covered) — settled, never pending, never fetched.
+                    settledc += 1
                 else:
                     pending.append(url)
             result['pending_urls'] = pending
@@ -192,6 +226,9 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
             result['decommissioned_count'] = decomm
             result['blocked_count'] = blocked
             result['self_count'] = selfc
+            # v0.63.3 — the settled bucket (the repos twin of the
+            # websites' websites_settled_count).
+            result['repos_settled_count'] = settledc
         except Exception as vi_err:
             log_signal.emit(f"⚠️ Vault filter failed in worker ({vi_err}); showing all URLs.", "warning")
             result['pending_urls'] = list(result.get('urls', []))
