@@ -5,6 +5,106 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.63.3 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE SETTLED REPOS LEDGER)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.63.3 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim):** "Do the same for github
+> repos ,  I want you to only count from here and now on. since older
+> ones are processed. and not needed you to read from the
+> beginning."
+>
+> **The answer, all on the desktop side — the websites' settled
+> ledger (v0.63.2), given its repos twin.** The repos side owned the
+> same disease from its own angle: every queue check re-read the FULL
+> bot history "from the beginning" and re-classified it, and every
+> repo WITHOUT a vault note — a fetch that failed and stayed failed,
+> a note the owner deleted, a repo the owner resolved by hand, or
+> plain history the system never batched — counted as PENDING work
+> forever; "Process All", "Process New", the retry buttons and Verify
+> All's missing-list kept feeding that same pile back into batches
+> and banners over a history the owner had long since declared
+> addressed. **THE SETTLED REPOS LEDGER** (`repos_settled` + its
+> `cache_meta` store, new cache.db tables — the twin of the websites'
+> `websites_settled`) closes it: ONE time per machine — stamped by
+> the `repos_settled_at` meta key — every repo the system already
+> knows (`processed_repos`, `failed_repos`, `decommissioned_repos`,
+> plus the FULL bot history at the settlement door: every repo
+> already sent to the bot is an "older one", whatever became of it)
+> is settled: addressed and processed, never machine-fetched, never
+> counted as pending work again; the repos retry queue gets its
+> settlement date in the same stroke (cleared). The settlement runs
+> at the queue's own door (the very first door after upgrading: the
+> startup auto-check) and at Verify All's door, and speaks once
+> ("🤝 THE SETTLEMENT (repos): N repo link(s) the bot already
+> delivered are settled — addressed and processed, never fetched or
+> counted again; M queued retry(ies) cleared. Only repos added from
+> now on are counted."). **The gates are enforced, not promised:**
+> the queue classification's settled bucket (never pending — the
+> badge, the report and the log agree); the worker's GitHub loop
+> skips settled URLs BEFORE any API call (settled history never costs
+> a rate-limit token, never enters the AI path; one aggregate line,
+> never a per-URL pile); "Process All" and "Process New" split
+> settled repos out of their payloads (a re-send is not a new repo);
+> the retry buttons and Verify Vault's enqueue drop settled rows; the
+> reconciliation read sets settled manifest rows aside
+> (`set_aside_settled` — the twin of the v0.63.1 website-rows law)
+> and the banner refreshes after a queue check; the startup truth
+> pass stays quiet pre-settlement (the exact false-positive shape the
+> owner's v0.63.1 report closed, kept closed through the upgrade).
+> **The owner's doors through the law:** ♻️ **Reset 404 Quarantine**
+> removes BOTH marks (the quarantine row AND the settlement) for
+> exactly the quarantined URLs — every other settled repo keeps its
+> settlement — so a reset repo is fetched like new again; the
+> manual-resolve verdicts ("Mark as Processed" / "Decommission" /
+> "Mark ALL") settle on the owner's word; and a repo that fails
+> AFTER the settlement keeps its honest retry lifecycle — the law
+> silences history, never new work.
+>
+> **Proven in a REAL run** (offscreen, the owner's machine distilled —
+> two stored notes, one failed fetch with its unresolved retry row,
+> one quarantined 404, one repo the system never batched, the bot
+> queue's full history re-fed through every production door): the
+> settlement spoke once (5 repos, 1 retry cleared); a second door
+> paid one SELECT and said nothing; the full history classified to 2
+> in vault + 1 decommissioned + 2 settled + **0 pending**; the
+> "Process All" payload carried none of it; the worker's pre-API gate
+> skipped every old URL; a NEWLY-ADDED repo counted as pending,
+> entered the payload and passed the gate (it is fetched); a re-sent
+> old repo was dropped; the reconciliation dropped the settled
+> legacy rows and kept the new failure crying; the retry split
+> dropped the settled row; ♻️ un-settled exactly the quarantined URL
+> (pending again, fetched like new) while every other settled repo
+> kept its settlement; the owner's "Mark as Processed" verdict
+> settled. Evidence: `/home/z/real-run/repos-settled-run.py` + `.log`
+> (18/18 PASS).
+>
+> **The suite: 1918 → 1953** (+35 in the new
+> `tests/test_reposettled.py` — the ledger, the ♻️ un-settle door,
+> the reconciliation gate with the v0.38.0 healing law untouched, the
+> all-clear shape, the source contracts for every production door;
+> the bothdoors changelog window widened 132000 → 140000 — the
+> v0.63.1 precedent, the new entry pushed [0.43.0] out; the 26
+> release pins re-pointed + UA `GitCurator/0.63.3`). CI green on
+> main + the tag **first try** (runs 38092924760 / 38093251473, head
+> `bfdb312`). The release: `GitCurator-v0.63.3-windows.zip` (135
+> files, sha256
+> `ac939eed349af63163cabf63381c6685a9149bdf25fe36ee1c04446fd0695c59`,
+> GitHub release 409256653, asset 629202012, download round-trip
+> byte-identical). The owner's home checklist: unzip → 1-INSTALL.bat
+> → GitCurator.bat → launch → the first queue check prints the one
+> 🤝 settlement line (and never again) → the sync ends "caught up"
+> with the settled bucket counted honestly → the startup shows no
+> pre-law retry cry → send a NEW repo to the bot and it is fetched,
+> noted and filed as always; re-send an OLD one and it stays settled.
+> Nothing else changed at the desk.
+
+---
+
 ## 📦 v0.63.2 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE SETTLED LEDGER)
 
 > **Live in production** at
