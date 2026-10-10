@@ -220,26 +220,32 @@ class HeroMixin:
             # owner's law ("before declaring everything is uptodate it
             # must check 'decomissioned' note and find those that should
             # be retried") — a " - " row with no verdict emoji is a valid
-            # link whose fetch failed, so it is fetched AGAIN instead of
-            # the empty-state claim. Only a table with no waiting fetch
-            # row may say "everything is up to date". (Guarded: the bare
-            # hero-flow stubs carry no processing-control collaborator.)
+            # link whose fetch failed. v0.63.2 — THE OWNER'S NEW LAW
+            # superseded the FETCH half: "Do not fetch current websites
+            # which are sent to bot, because they're already addressed
+            # and processed. Fetch only websites, that are added to bot,
+            # from now on." The CHECK half survives (the table is read,
+            # the waiting rows reported with their doors); the AUTO
+            # fetch pass — with its reborn counters re-fetching the
+            # same walled links on every single sync — is retired. (The
+            # settlement at the scan's own door settles the whole
+            # historical pile, so a settled vault reports nothing.)
+            # (Guarded: the bare hero-flow stubs carry no
+            # processing-control collaborator.)
             _scan_master = getattr(self, '_scan_master_waiting', None)
             _waiting = _scan_master() if callable(_scan_master) else []
             _work_started = False
             if _waiting:
                 _eyes = getattr(self, '_master_waiting_eyes', 0)
                 self.log_message(
-                    f"📋 Bot queue caught up, but {len(_waiting)} ' - ' "
-                    f"row(s) in the master table "
-                    f"(_review/DECOMMISSIONED.md) are still waiting — "
-                    f"valid links whose fetches failed. Fetching them "
-                    f"again now"
-                    + (f" ({_eyes} row(s) wait for your eyes: set ✅ or "
-                       f"🪦 in the table)" if _eyes else "")
+                    f"📋 Bot queue caught up; the master table records "
+                    f"{len(_waiting)} ' - ' row(s) whose fetches failed — "
+                    f"NOT re-fetched on my own (only newly-added websites "
+                    f"are fetched). Your doors: set ✅ or 🪦 in the table, "
+                    f"queue 🖐, ♻️ revive, or More ▸ 🔁 Retry the table's "
+                    f"' - ' rows to fetch them now"
+                    + (f" ({_eyes} row(s) wait for your eyes)" if _eyes else "")
                     + ".", "info")
-                self._start_master_retry()
-                _work_started = True
             # v0.52.0 — the 🖐 hand rows get their scrape before the
             # claim too (the owner's report: "I set hand emoji, but
             # those links didn't refetched using scrapping manually on
@@ -301,7 +307,18 @@ class HeroMixin:
                 return
             self._set_hero_state('sync')
             self.progress_bar.setFormat("Ready")
-            self.log_message("✅ All caught up — nothing undone in the bot queue.", "success")
+            # v0.63.2 — the honest closing line: with waiting rows
+            # reported above, the machine's work is still DONE (new
+            # links fetched, failures walled and recorded — the owner's
+            # law makes the rest his doors), so "caught up" is said
+            # with the table's rows named, not denied.
+            if _waiting:
+                self.log_message(
+                    "✅ Bot queue caught up — no new websites to fetch; "
+                    "the waiting row(s) above are yours (the owner's "
+                    "doors), not the machine's.", "success")
+            else:
+                self.log_message("✅ All caught up — nothing undone in the bot queue.", "success")
             # v0.31.0 (balance pass): a sync that finds nothing new ends
             # with a clean, meaningful log card — the fetch chatter is
             # cleared and the EMPTY STATE carries the summary ("Everything

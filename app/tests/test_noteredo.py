@@ -989,7 +989,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             os.path.dirname(os.path.abspath(__file__))))
 
     def test_version_pin(self):
-        self.assertIn('0.63.1', self._read('VERSION'))
+        self.assertIn('0.63.2', self._read('VERSION'))
 
     def test_changelog_beat(self):
         text = self._read('CHANGELOG.md')

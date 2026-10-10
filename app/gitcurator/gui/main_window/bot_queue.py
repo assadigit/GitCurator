@@ -320,6 +320,9 @@ class BotQueueMixin:
                     _websites_dismissed = int(result.get('websites_dismissed_count', 0) or 0)
                     _websites_blocked = int(result.get('websites_blocked_count', 0) or 0)
                     _websites_self = int(result.get('websites_self_count', 0) or 0)
+                    # v0.63.2 — the settled bucket (the owner's law:
+                    # already sent to the bot and addressed)
+                    _websites_settled = int(result.get('websites_settled_count', 0) or 0)
                     if result.get('websites_vault_index_count'):
                         self.log_message(
                             f"📚 Websites vault index: {result['websites_vault_index_count']} notes indexed", "info")
@@ -327,6 +330,7 @@ class BotQueueMixin:
                     pending_websites = []
                     _websites_in_vault = _websites_processed = 0
                     _websites_dismissed = _websites_blocked = _websites_self = 0
+                    _websites_settled = 0
                     if _websites_on and _web_vault and non_github:
                         try:
                             _wvi = VaultIndex(_web_vault, normalizer=_links.normalize_website_url)
@@ -359,11 +363,21 @@ class BotQueueMixin:
                                         except Exception:
                                             _prior = None
                                     if _prior and _prior.get('fetch_status') == 'failed':
-                                        pending_websites.append(_u)
+                                        # v0.63.2 — the settled ledger: a
+                                        # walled failed placeholder is
+                                        # "addressed" when settled — never
+                                        # re-fetched (the owner's law).
+                                        if _wstate is not None and _wstate.is_settled(_canon):
+                                            _websites_settled += 1
+                                        else:
+                                            pending_websites.append(_u)
                                     else:
                                         _websites_in_vault += 1
                                 elif _wstate is not None and _wstate.is_processed(_canon):
                                     _websites_processed += 1
+                                elif _wstate is not None and _wstate.is_settled(_canon):
+                                    # v0.63.2 — settled without a vault note
+                                    _websites_settled += 1
                                 else:
                                     pending_websites.append(_u)
                             if _wstate is not None:
@@ -411,6 +425,9 @@ class BotQueueMixin:
                         display += f"📚 Websites vault notes:    {result.get('websites_vault_index_count', 0)}\n"
                     display += f"✅ Websites in vault:       {_websites_in_vault}\n"
                     display += f"✔️ Websites processed:      {_websites_processed}\n"
+                    if _websites_settled:
+                        display += (f"🤝 Websites settled:        {_websites_settled}"
+                                    "  (addressed — never re-fetched)\n")
                     if _websites_dismissed:
                         display += f"🗑️ Websites dismissed:      {_websites_dismissed}\n"
                     if _websites_blocked:
@@ -511,7 +528,15 @@ class BotQueueMixin:
         NEVER reached the Websites pipeline (the worker has supported
         websites-only batches since v0.11.0 — see _run_impl's
         "not urls and not (_websites_pipeline_on and _website_links)" —
-        but no caller ever started one from the queue flow)."""
+        but no caller ever started one from the queue flow).
+
+        v0.63.2 — THE OWNER'S LAW settles the payload: the batch carries
+        ONLY the pending (newly-added) website links. The settled
+        history — every link the owner already sent to the bot and the
+        system addressed — never enters a batch again ("Do not fetch
+        current websites which are sent to bot, because they're already
+        addressed and processed. Fetch only websites, that are added to
+        bot, from now on.")."""
         urls = getattr(self, '_bot_queue_urls', [])
         websites_pending = getattr(self, '_bot_queue_pending_websites', []) or []
         if not urls and not websites_pending:
@@ -540,10 +565,17 @@ class BotQueueMixin:
         # v0.24.1: the full non-GitHub list is passed (the Websites
         # pipeline's own dedupe skips the already-done links) — exactly the
         # payload a GitHub+websites batch has always carried.
+        # v0.63.2 — THE OWNER'S LAW: "Fetch only websites, that are added
+        # to bot, from now on." The batch carries ONLY the pending (new)
+        # website links — the settled/in-vault/dismissed history never
+        # enters a batch again (its _inbox rows were already written by
+        # the queue check; the settled ledger guards the pipeline's own
+        # doors as the second layer).
         self._start_worker_with_urls(
             urls,
             bot_source=True,
-            non_github_urls=getattr(self, '_bot_queue_non_github', []),
+            non_github_urls=(getattr(self, '_bot_queue_pending_websites', [])
+                             or []),
             intake_duplicates=getattr(self, '_bot_queue_duplicates', 0),
             raw_url_count=getattr(self, '_bot_queue_raw_count', 0),
         )

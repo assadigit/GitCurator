@@ -56,7 +56,7 @@ from pathlib import Path
 # API, health — as the app it is; the honest identity passes the edge,
 # the banned one never did. Keep this in sync with VERSION at release
 # time (the string only needs to not be a banned signature).
-HTTP_USER_AGENT = "GitCurator/0.63.1 (+https://github.com/assadigit/GitCurator)"
+HTTP_USER_AGENT = "GitCurator/0.63.2 (+https://github.com/assadigit/GitCurator)"
 
 
 # ========================================

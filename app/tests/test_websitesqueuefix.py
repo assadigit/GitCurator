@@ -237,7 +237,11 @@ class TestQueueWebsiteClassification(QueueFixBase):
 
     def test_failed_review_placeholder_is_pending(self):
         """A fetch-failed _review placeholder (retries left) stays PENDING
-        — the pipeline's upgrade path re-processes it."""
+        — the pipeline's upgrade path re-processes it. v0.63.2 — for a
+        POST-SETTLEMENT machine: the settlement ran when the owner's law
+        arrived, and this walled link failed AFTER it (a newly-added
+        website), so the settled ledger must not own it — its own 3
+        retries do."""
         # _review notes ARE indexed (VaultIndex only skips _moc/_inbox/
         # attachments/.obsidian). State rows always store the CANONICAL url
         # (the pipeline records normalize_website_url(url) — a bare domain
@@ -248,6 +252,9 @@ class TestQueueWebsiteClassification(QueueFixBase):
             fh.write(_note("https://flaky.org/"))
         _orig = wp.WebsiteStateDB
         state = _orig(db_path=self.cache_db)
+        # v0.63.2 — the machine settled BEFORE this link arrived (the
+        # one-time migration; the queue door runs it on every check).
+        state.settle_existing()
         state.mark_processed("https://flaky.org/",
                              os.path.join(rev, "flaky.md"), "", "", "failed")
         state.close()
@@ -262,6 +269,37 @@ class TestQueueWebsiteClassification(QueueFixBase):
         res = self._run_job(["https://flaky.org/"])
         self.assertEqual(res.get("pending_website_urls"), ["https://flaky.org/"])
         self.assertEqual(res.get("websites_in_vault_count"), 0)
+        # the settled bucket stays quiet for a post-settlement failure
+        self.assertEqual(res.get("websites_settled_count"), 0)
+
+    def test_pre_settlement_placeholder_lands_in_the_settled_bucket(self):
+        """v0.63.2 — THE OWNER'S UPGRADE SHAPE (the report, verbatim:
+        "Do not fetch current websites which are sent to bot, because
+        they're already addressed and processed"): a walled failed
+        placeholder that PREDATES the settlement is settled at the
+        queue's own door — never pending, never re-fetched."""
+        rev = os.path.join(self.web_vault, "_review")
+        os.makedirs(rev)
+        with open(os.path.join(rev, "walled.md"), "w", encoding="utf-8") as fh:
+            fh.write(_note("https://walled.org/"))
+        _orig = wp.WebsiteStateDB
+        state = _orig(db_path=self.cache_db)
+        state.mark_processed("https://walled.org/",
+                             os.path.join(rev, "walled.md"), "", "", "failed")
+        state.close()
+
+        def _factory(db_path="cache.db"):
+            return _orig(db_path=self.cache_db)
+
+        patcher = mock.patch.object(wp, "WebsiteStateDB", _factory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        res = self._run_job(["https://walled.org/"])
+        self.assertEqual(res.get("pending_website_urls"), [])
+        self.assertEqual(res.get("websites_settled_count"), 1)
+        # the settlement line spoke at the queue's door
+        self.assertTrue(any("THE SETTLEMENT" in m for _, m in self.log.lines))
 
     def test_dismissed_outranks_the_vault_index(self):
         """v0.60.1 — a dismissed link whose note STILL sits in the vault

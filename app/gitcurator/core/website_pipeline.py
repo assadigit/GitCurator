@@ -60,7 +60,7 @@ from gitcurator.core.taxonomy import Taxonomy, load_taxonomy_from_config
 # v0.25.0 — the state ledger moved to core/website_state.py
 # (re-exported here so import paths and test patch targets are unchanged).
 from gitcurator.core.website_state import (  # noqa: F401
-    MAX_FETCH_RETRIES, RETRY_BACKOFF_DAYS, WebsiteStateDB,
+    MAX_FETCH_RETRIES, RETRY_BACKOFF_DAYS, SETTLED_META_KEY, WebsiteStateDB,
 )
 
 # Bump when the website prompt set changes shape (SPEC Appendix A).
@@ -840,7 +840,10 @@ def scan_master_waiting_rows(vault_path: str,
         the human-eye classes of v0.49.0).
       * dropped — retired (dead / reviewed / revived / dismissed /
         auto-verdict) or already stored (a real note in a category
-        folder: the refresh stamps those rows '📁 stored').
+        folder: the refresh stamps those rows '📁 stored'), or
+        SETTLED (v0.63.2 — the owner's law: already sent to the bot
+        and addressed; never machine-fetched again; ♻️ is the door
+        back).
 
     ``state`` is OPTIONAL (the hermetic law): without it the scan is a
     pure file read and the queue/stored probes are skipped (a
@@ -880,6 +883,14 @@ def scan_master_waiting_rows(vault_path: str,
             try:
                 if state.is_dismissed(canonical):
                     continue            # retired — ♻️ is its door back
+                # v0.63.2 — THE SETTLED LEDGER: a link the owner already
+                # sent to the bot and addressed is not "waiting" for the
+                # machine — the owner's law (verbatim): "Do not fetch
+                # current websites which are sent to bot, because
+                # they're already addressed and processed." ♻️ revived
+                # is the door back (consume pass 2 un-settles).
+                if state.is_settled(canonical):
+                    continue            # settled — addressed, never re-fetched
                 prior = state.processed_row(canonical)
                 if prior is not None \
                         and prior.get('fetch_status') != 'failed' \
@@ -1867,6 +1878,105 @@ def split_dismissed_links(state, urls: List[str],
     return kept, dropped
 
 
+def split_settled_links(state, urls: List[str],
+                        log: Optional[Callable] = None
+                        ) -> (List[str], List[str]):
+    """v0.63.2 — THE SETTLED LEDGER's own honesty (the twin of
+    :func:`split_dismissed_links`).
+
+    The owner's report (session, verbatim): "Do not fetch current
+    websites which are sent to bot, because they're already addressed
+    and processed. Fetch only websites, that are added to bot, from
+    now on." Links already in the settled ledger leave the batch's
+    count BEFORE processing starts, with one honest line instead of a
+    per-link skip pile. Returns ``(kept, settled)``; the state probe
+    is guarded (a broken DB never hides a link — the worst case is
+    the old behavior, the per-link gates); never raises.
+
+    NB: the 🖐 hand gesture outranks the settlement exactly as it
+    outranks the burned-out retry counter (v0.56.0) — but THAT
+    exemption needs the pipeline's own probes (the master-table row,
+    the delivered folder), so it lives in :meth:`WebsitePipeline.run`
+    and the backlog driver, not in this pure state-level split."""
+    log = log or (lambda *a, **k: None)
+    kept: List[str] = []
+    settled: List[str] = []
+    for u in (urls or []):
+        try:
+            c = normalize_website_url(u)
+            if c and state is not None and state.is_settled(c):
+                settled.append(u)
+                continue
+        except Exception:
+            pass        # a broken probe never hides a link
+        kept.append(u)
+    if settled:
+        log(
+            f"🤝 {len(settled)} link(s) are settled — already sent to "
+            f"the bot and addressed (the owner's law) — excluded from "
+            f"the run's count before processing: never fetched again "
+            f"(♻️ revived in the master table un-settles any of them)",
+            "info")
+    return kept, settled
+
+
+def settle_the_ledger(state, vault_path: str,
+                      log: Optional[Callable] = None) -> Dict:
+    """v0.63.2 — THE SETTLEMENT, run at every production door (the
+    websites phase, the bot-queue classification, the caught-up scan).
+
+    The owner's report (session, verbatim): "Do not fetch current
+    websites which are sent to bot, because they're already addressed
+    and processed. Fetch only websites, that are added to bot, from
+    now on." ONE time per machine — guarded by the
+    ``websites_settled_at`` meta key — every website the system
+    already knows is settled (never machine-fetched again): the state
+    ledger's own URLs (stored, walled, dismissed) plus the vault's
+    truth (every data-row URL of the master table, every ``_review``
+    note URL — hand-added rows and lost-state placeholders included),
+    and the fetch-retry queue gets its settlement date (cleared — no
+    backoff timer re-serves an old link). Later calls are one cheap
+    SELECT (the meta guard runs BEFORE the file scans — the v0.06
+    anti-freeze rule). Returns
+    ``{'settled': n, 'retries_cleared': m, 'already': bool}``; never
+    raises on the caller's head (a broken settlement logs and defers
+    to :meth:`WebsiteStateDB.settle_existing`'s own guard)."""
+    log = log or (lambda *a, **k: None)
+    try:
+        if state.get_meta(SETTLED_META_KEY):
+            return {'settled': 0, 'retries_cleared': 0, 'already': True}
+    except Exception:
+        pass    # fall through — settle_existing guards again
+    extra: List[str] = []
+    if vault_path and os.path.isdir(vault_path):
+        try:
+            extra += [r.get('url') or '' for r in _parse_decommission_rows(
+                decommission_table_path(vault_path))]
+        except Exception:
+            pass    # a hand-edited table never blocks the settlement
+        try:
+            extra += [it.get('url') or '' for it in
+                      scan_review_notes(vault_path)]
+        except Exception:
+            pass    # an unreadable _review never blocks the settlement
+    extra = [normalize_website_url(u) for u in extra if u]
+    try:
+        rep = state.settle_existing(extra_urls=extra) or {}
+    except Exception as e:
+        log(f"⚠️ Settlement skipped: {e}", "warning")
+        return {'settled': 0, 'retries_cleared': 0, 'already': True}
+    if not rep.get('already'):
+        log(
+            f"🤝 THE SETTLEMENT: {rep.get('settled', 0)} website link(s) "
+            f"the bot already delivered are settled — addressed and "
+            f"processed, never fetched again; "
+            f"{rep.get('retries_cleared', 0)} queued retry(ies) "
+            f"cleared. Only websites added from now on are fetched "
+            f"(♻️ revived in the master table un-settles any of them)",
+            "info")
+    return rep
+
+
 def scan_pending_banishments(vault_path: str,
                              log: Optional[Callable] = None) -> Dict:
     """v0.60.0 — THE GATE'S EYES: what WOULD be banished this run.
@@ -2539,9 +2649,19 @@ def consume_decommission_table(state, vault_path: str,
             continue
         report['revived'] += 1
         try:
+            _revive_parts = []
             if state.undismiss(canonical):
-                log(f"♻️ {row['url']}: revived — the dismissal is gone, "
-                    f"it will be fetched like new", "info")
+                _revive_parts.append("the dismissal is gone")
+            # v0.63.2 — the settled ledger honors the ♻️ the same way:
+            # a revived link is fetched like new again — the owner's
+            # own door through THE SETTLEMENT (the twin of the
+            # graveyard's undismiss, and the ONLY machine-opened one).
+            if state.unsettle(canonical):
+                _revive_parts.append("the settlement is gone")
+            if _revive_parts:
+                log(f"♻️ {row['url']}: revived — "
+                    f"{' and '.join(_revive_parts)}, it will be fetched "
+                    f"like new", "info")
         except Exception as e:
             log(f"⚠️ Graveyard revival skipped for {row['url']}: {e}",
                 "warning")
@@ -4286,9 +4406,60 @@ class WebsitePipeline:
                     'fetch_status': '', 'error': 'duplicate within batch'})
                 continue
             seen.add(canonical)
+            # v0.63.2 — THE SETTLED LEDGER's gate: a link the owner
+            # already sent to the bot and addressed is never fetched
+            # again — whatever path delivered it here (the bot queue's
+            # full history, a re-send in a new message, an import).
+            # The owner's 🖐 hand outranks the settlement exactly as it
+            # outranks the burned-out retry counter (v0.56.0): a
+            # gesture row or a delivered page waiting in the folder
+            # says "finish this one" and passes.
+            try:
+                if canonical and self.state.is_settled(canonical) \
+                        and not self._hand_outranks_settlement(canonical):
+                    result = {
+                        'url': url, 'canonical': canonical,
+                        'outcome': 'skipped', 'note_path': '',
+                        'category': '', 'subcategory': '',
+                        'fetch_status': '',
+                        'error': ('settled — already sent to the bot and '
+                                  'addressed (the owner\'s law); never '
+                                  're-fetched')}
+                    results.append(result)
+                    self.last_results.append(result)
+                    self.counters['skipped'] += 1
+                    self.log(
+                        f"🤝 {url}: settled — already addressed and "
+                        f"processed; never fetched again (the owner's "
+                        f"law; ♻️ revived in the master table "
+                        f"un-settles it)", "info")
+                    continue
+            except Exception:
+                pass  # a broken probe never hides a link
             results.append(self.process_link(url))
         self._refresh_master_table()
         return results
+
+    def _hand_outranks_settlement(self, canonical: str) -> bool:
+        """v0.63.2 — does the owner's 🖐 hand outrank the settlement for
+        this link? The gesture on the master-table row, or a delivered
+        page already waiting in the hand-delivered folder — the same
+        probes the burned-out counter reborn uses (v0.56.0). Never
+        raises; False on any doubt (the settlement holds)."""
+        try:
+            if self._row_reads_hand(canonical):
+                return True
+        except Exception:
+            pass
+        if self.hand_delivery and self.vault_path:
+            try:
+                return any(
+                    _same_source(d.get('url') or '', canonical)
+                    for d in _hand_delivery.collect_delivered(
+                        self.vault_path))
+            except Exception:
+                return False
+        return False
 
     def run_due_retries(self, should_continue=None, on_progress=None) -> List[Dict]:
         """Retry fetch-failed links whose backoff elapsed (SPEC §4.3:
@@ -4300,7 +4471,12 @@ class WebsitePipeline:
         already written (dismissed — the same gate process_link
         enforces) leaves the count BEFORE the pass, with the one
         honest line (:func:`split_dismissed_links`) instead of a
-        skip pile inside it."""
+        skip pile inside it.
+
+        v0.63.2 — THE SETTLED LEDGER: settled links never re-fetch
+        (belt & braces — the settlement cleared the queue, so a
+        settled URL here means one that re-entered against the law;
+        :func:`split_settled_links` drops it with the honest line)."""
         due = self.state.due_retries()
         if not due:
             return []
@@ -4308,6 +4484,10 @@ class WebsitePipeline:
             self.state, due, log=self.log)
         if _due_dropped:
             due = _due_kept
+        _due_kept2, _due_settled = split_settled_links(
+            self.state, due, log=self.log)
+        if _due_settled:
+            due = _due_kept2
         if not due:
             return []
         self.log(f"🔁 Retrying {len(due)} fetch-failed website link(s) "
@@ -4381,6 +4561,27 @@ class WebsitePipeline:
             by_url.setdefault(it.get('url') or '', []).append(
                 it.get('path') or '')
         by_url.pop('', None)
+        # v0.63.2 — THE SETTLED LEDGER: settled placeholders never
+        # re-fetch (the owner's law — already sent to the bot and
+        # addressed); the 🖐 gesture outranks the settlement (v0.56.0's
+        # law, the same exemption run() gives).
+        try:
+            _settled_keys = [
+                u for u in by_url
+                if (normalize_website_url(u) or '')
+                and self.state.is_settled(normalize_website_url(u))
+                and not self._hand_outranks_settlement(
+                    normalize_website_url(u))]
+        except Exception:
+            _settled_keys = []
+        if _settled_keys:
+            for u in _settled_keys:
+                by_url.pop(u, None)
+            self.log(
+                f"🤝 {len(_settled_keys)} settled link(s) left the "
+                f"_review backlog retry — already sent to the bot and "
+                f"addressed; never fetched again (♻️ revived in the "
+                f"master table un-settles any of them)", "info")
         self.counters['retried'] = self.counters.get('retried', 0) \
             + len(by_url)
         for url, paths in by_url.items():
