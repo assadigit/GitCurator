@@ -576,11 +576,20 @@ class TestHeroHandRouting(unittest.TestCase):
                              for _, m in hero.logs))
 
     def test_waiting_and_hand_rows_both_fire(self):
+        # v0.63.2 — the owner's new law: the waiting " - " rows are
+        # REPORTED but never auto-fetched (the v0.51.0 reborn loop is
+        # retired); the 🖐 hand rows keep their Chrome delivery (the
+        # owner's explicit gesture, not a machine fetch).
         hero = self._hero(waiting=[{'url': _URL2, 'kind': 'fetch'}],
                           hand=[{'url': _URL, 'wall': _ERR}])
         hero._after_sync_fetch("bot_check", {"success": True})
-        self.assertEqual(hero._master_starts, [1])
+        self.assertEqual(hero._master_starts, [])
+        self.assertTrue(any("NOT re-fetched on my own" in m
+                            for _, m in hero.logs))
         self.assertEqual(len(hero._chrome_starts), 1)
+        self.assertEqual(hero._chrome_starts[0][0]['url'], _URL)
+        # the machine work is done — the honest closing line names the
+        # waiting rows instead of the plain "All caught up" claim
         self.assertFalse(any("All caught up" in m for _, m in hero.logs))
 
     def test_no_hand_rows_keeps_the_old_law(self):
@@ -640,7 +649,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0520(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.63.2')
 
     def test_changelog_mentions_the_law(self):
         text = self._read('CHANGELOG.md')

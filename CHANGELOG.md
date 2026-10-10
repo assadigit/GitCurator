@@ -1,3 +1,94 @@
+## [0.63.2] — The settled ledger: the owner's law on old websites — 2026-10-12
+
+**The owner's report (session, verbatim):** "Do not fetch current
+websites which are sent to bot, because they're already addressed and
+processed. Fetch only websites, that are added to bot, from now on."
+Two sentences, one law, and underneath it the disease v0.63.1's truth
+pass had just uncovered from the other side: the app owned THREE
+automatic doors that kept re-fetching websites the owner had long
+since addressed, and each of them could hold a perfectly tidy vault
+hostage to work nobody wanted.
+
+**THE THREE RE-FETCH DOORS.** Where an already-addressed website could
+be fetched again, against the owner's word:
+
+1. **The caught-up sync's master-retry pass** (v0.51.0, `hero.py` +
+   `retry_master_waiting`): on every SYNC that found nothing new, the
+   master table's " - " rows — valid links whose fetches failed — were
+   re-fetched, and their burned-out retry counters REBORN first. A
+   permanent wall (403 bot defense) was therefore re-fetched on every
+   sync, forever: the exact "it does nothing, just take some time"
+   loop, wearing the honest clothes of the v0.51.0 law it superseded.
+
+2. **"Process All"'s full-history payload** (`process_bot_queue`): the
+   bot queue's ENTIRE non-GitHub history — every website ever sent —
+   rode into every batch, and the pipeline's in-vault-but-failed
+   exception re-fetched each walled `_review` placeholder it met (the
+   "upgrade path"), skipping only the rest slowly.
+
+3. **The queue classification's pending lie**
+   (`_bot_queue_job`): a walled failed placeholder counted as PENDING
+   forever — the app kept saying work was waiting, the badge kept
+   counting it, and the honest "all caught up" could never be said
+   while the wall pile stared back.
+
+**THE SETTLED LEDGER (`core/website_state.py`, new
+`websites_settled` table).** One time per machine — stamped by the
+`websites_settled_at` meta key — every website the system already
+knows is SETTLED: addressed and processed, never machine-fetched
+again. `settle_existing()` seeds the ledger from every URL the state
+knows (stored, walled, dismissed) plus the vault's own truth (every
+data-row URL of the master table, every `_review` note URL —
+hand-added rows and lost-state placeholders included), and gives the
+fetch-retry queue its settlement date in the same stroke: cleared,
+so no backoff timer ever re-serves an old link ("every ledger gets a
+settlement date" — v0.63.1's law, applied to the last ledger that
+lacked one). The settlement runs at every production door — the
+websites phase, the bot-queue check, the caught-up scan — and pays
+one cheap SELECT once it has spoken ("🤝 THE SETTLEMENT: N website
+link(s) the bot already delivered are settled — addressed and
+processed, never fetched again; M queued retry(ies) cleared.").
+
+**THE GATES (enforced, not promised).** A settled URL is skipped at
+every machine door with the law's own words ("settled — already sent
+to the bot and addressed; never re-fetched"): `WebsitePipeline.run`
+(whatever path delivered the link — the queue's full history, a
+re-send in a new message, an import), `run_due_retries` (belt and
+braces — the queue was cleared, but a settled URL that re-entered
+against the law is dropped), `retry_review_backlog` (settled
+placeholders leave the backlog retry with one honest line), and
+`scan_master_waiting_rows` (a settled row never counts as waiting —
+which retires the caught-up re-fetch pass by starving it). The 🖐 hand
+outranks the settlement exactly as it outranks the burned-out counter
+(v0.56.0's precedent): a gesture row or a delivered page waiting in
+the folder says "finish this one" and passes. And ♻️ revived in the
+master table UN-SETTLES its link (`unsettle` — the twin of the
+graveyard's `undismiss`): the owner keeps his door through the law,
+fetched like new again.
+
+**THE QUEUE LEARNED THE LAW.** The classification's pending set now
+excludes settled links into their own honest bucket
+(`websites_settled_count` — "🤝 Websites settled: N (addressed —
+never re-fetched)"), so the badge, the report and the log agree that
+an addressed wall pile is not waiting work. "Process All" carries
+ONLY the pending (newly-added) website links — the settled history
+never enters a batch again; its `_inbox` rows were already written by
+the queue check, and the pipeline's own gates stand behind the
+payload as the second layer. The caught-up sync still CHECKS the
+table (v0.51.0's honest half) and reports the waiting rows with their
+doors — "NOT re-fetched on my own … Your doors: set ✅ or 🪦 in the
+table, queue 🖐, ♻️ revive, or More ▸ 🔁 Retry the table's ' - ' rows
+to fetch them now" — but the fetch is the owner's explicit ask; the
+auto trigger is retired.
+
+**Gate.** 88/88 compiles · 1918/1918 tests (+31 — 30 in the new
+tests/test_settledledger.py: the ledger, the split, the door helper,
+the scan, the run gate with the hand outranking, the retry gates, the
+♻️ un-settle door, the source contracts; +1 in test_websitesqueuefix
+for the owner's upgrade shape; test_masterretry's routing class
+re-told under the new law) · offline golden 30/30 · worker 48/48.
+Desktop-only release — the worker stays at 0.32.0.
+
 ## [0.63.1] — The false retry cries, silenced by the truth — 2026-10-12
 
 **The owner's report (session, verbatim):** "A weird message shows on

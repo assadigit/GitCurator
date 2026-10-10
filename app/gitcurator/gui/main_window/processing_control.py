@@ -364,6 +364,18 @@ class ProcessingControlMixin:
                 else:
                     state = _website_pipeline.WebsiteStateDB()
                 try:
+                    # v0.63.2 — THE SETTLEMENT at the caught-up door:
+                    # every website the system already knows is settled
+                    # (the owner's law — "already addressed and
+                    # processed"), so the walled " - " pile stops
+                    # reading as waiting work the machine must re-fetch.
+                    # One time per machine; the meta guard runs before
+                    # the file scans (the v0.06 rule).
+                    try:
+                        _website_pipeline.settle_the_ledger(
+                            state, vault, log=self.log_message.emit)
+                    except Exception:
+                        pass
                     scanned = _website_pipeline.scan_master_waiting_rows(
                         vault, state=state)
                 finally:

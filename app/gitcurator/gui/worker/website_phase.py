@@ -181,6 +181,21 @@ class WorkerWebsitePhaseMixin:
             else:
                 state = _website_pipeline.WebsiteStateDB()
 
+            # v0.63.2 — THE SETTLEMENT at the batch's own door: every
+            # website the system already knows is settled — addressed
+            # and processed, never machine-fetched again (the owner's
+            # law, verbatim: "Do not fetch current websites which are
+            # sent to bot … Fetch only websites, that are added to bot,
+            # from now on"). One time per machine; later batches pay
+            # one cheap SELECT. Runs BEFORE the pipeline exists so the
+            # batch's links meet the settled ledger at the run() gate.
+            try:
+                _website_pipeline.settle_the_ledger(
+                    state, website_vault, log=self.log_message.emit)
+            except Exception as _settle_err:
+                self.log_message.emit(
+                    f"⚠️ Settlement pass skipped: {_settle_err}", "warning")
+
             # The websites vault gets its OWN VaultIndex keyed with the
             # website normalizer (query params are part of the identity).
             index = VaultIndex(

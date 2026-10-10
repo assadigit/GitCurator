@@ -485,10 +485,17 @@ except BaseException:  # noqa: BLE001 — PyQt6 stack unavailable
 
 @unittest.skipUnless(_QT_OK, "PyQt6 stack unavailable (runs in CI)")
 class TestHeroCaughtUpRouting(unittest.TestCase):
-    """The owner's exact complaint surface: the SYNC that finds nothing
-    new must NOT say "All caught up" while " - " rows wait — it starts
-    the master-retry batch instead. Bare-mixin stubs, the queue-fix
-    suite's _hero pattern."""
+    """The owner's exact complaint surface — twice told, two laws:
+
+    v0.51.0: the SYNC that finds nothing new must CHECK the table and
+    never silently claim "All caught up" while " - " rows wait.
+    v0.63.2: the SYNC must not FETCH those rows on its own either —
+    the owner's new law (verbatim): "Do not fetch current websites
+    which are sent to bot, because they're already addressed and
+    processed. Fetch only websites, that are added to bot, from now
+    on." The waiting rows are REPORTED with their doors (✅ / 🪦 / 🖐 /
+    ♻️ / the explicit More ▸ pass); the auto master-retry trigger is
+    retired. Bare-mixin stubs, the queue-fix suite's _hero pattern."""
 
     class _Txt:
         def __init__(self, s=""):
@@ -519,18 +526,30 @@ class TestHeroCaughtUpRouting(unittest.TestCase):
             ("info", "CAUGHT_UP_STATE"))
         return hero
 
-    def test_waiting_rows_start_the_pass_not_the_claim(self):
+    def test_waiting_rows_reported_never_auto_fetched(self):
+        # v0.63.2 — the owner's new law: the rows are reported with
+        # their doors, the machine fetches NOTHING on its own, and the
+        # sync settles into the caught-up state (the honest variant of
+        # the closing line names the rows instead of denying them).
         hero = self._hero(waiting=[{'url': _URL, 'kind': 'fetch'}],
                           eyes=2)
         hero._after_sync_fetch("bot_check", {"success": True})
-        self.assertEqual(hero._master_starts, [1])
+        self.assertEqual(hero._master_starts, [])
         self.assertTrue(any("' - ' row(s)" in m for _, m in hero.logs))
+        self.assertTrue(any("NOT re-fetched on my own" in m
+                            for _, m in hero.logs))
         self.assertTrue(any("wait for your eyes" in m
                             for _, m in hero.logs))
-        # the empty-state claim is NEVER made while rows wait
+        # the auto pass's own door is named for the owner
+        self.assertTrue(any("Retry the table's" in m for _, m in hero.logs))
+        # the sync settles (no work started, the honest closing line)
+        self.assertEqual(hero.states, ["sync"])
+        self.assertTrue(any("no new websites to fetch" in m
+                            for _, m in hero.logs))
+        self.assertTrue(any(m == "CAUGHT_UP_STATE"
+                            for _, m in hero.logs))
+        # the plain "All caught up" claim stays out while rows wait
         self.assertFalse(any("All caught up" in m for _, m in hero.logs))
-        self.assertFalse(any(m == "CAUGHT_UP_STATE"
-                             for _, m in hero.logs))
 
     def test_no_waiting_rows_keeps_the_old_law(self):
         hero = self._hero(waiting=[])
@@ -579,7 +598,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0510(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.63.2')
 
     def test_changelog_mentions_the_pass(self):
         text = self._read('CHANGELOG.md')

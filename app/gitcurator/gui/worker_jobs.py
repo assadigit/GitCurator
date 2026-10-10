@@ -255,8 +255,22 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                     log_signal.emit(
                         f"⚠️ Websites state DB unavailable ({state_err}) — "
                         "classifying by vault index only.", "warning")
+                # v0.63.2 — THE SETTLEMENT at the queue's own door (the
+                # first door the app touches after an upgrade — the
+                # startup auto-check lands HERE): every website the
+                # system already knows is settled, so the walled
+                # " - " pile and every stored link stop counting as
+                # pending work. One time per machine; the meta guard
+                # runs before the file scans (the v0.06 rule).
+                if state is not None:
+                    try:
+                        _website_pipeline.settle_the_ledger(
+                            state, website_vault_path,
+                            log=log_signal.emit)
+                    except Exception:
+                        pass
                 pending_web, web_in_vault, web_done, web_dismissed = [], 0, 0, 0
-                web_blocked, web_self = 0, 0
+                web_blocked, web_self, web_settled = 0, 0, 0
                 for url in non_github:
                     canonical = _links.normalize_website_url(url)
                     if web_block and _links.domain_is_blocked(
@@ -285,11 +299,24 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                                 prior = None
                         if (prior and prior.get('fetch_status') == 'failed'
                                 and state is not None):
-                            pending_web.append(url)
+                            # v0.63.2 — THE SETTLED LEDGER: the old rules
+                            # counted a walled failed placeholder as
+                            # pending FOREVER (the upgrade path re-fetch);
+                            # settled, it is "addressed and processed" —
+                            # the owner's law — and never re-fetched.
+                            if state.is_settled(canonical):
+                                web_settled += 1
+                            else:
+                                pending_web.append(url)
                         else:
                             web_in_vault += 1
                     elif state is not None and state.is_processed(canonical):
                         web_done += 1
+                    elif state is not None and state.is_settled(canonical):
+                        # v0.63.2 — settled without a vault note (a
+                        # master-table row, a lost-state placeholder) —
+                        # addressed, never fetched by the machine.
+                        web_settled += 1
                     else:
                         pending_web.append(url)
                 if state is not None:
@@ -303,6 +330,7 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 result['websites_dismissed_count'] = web_dismissed
                 result['websites_blocked_count'] = web_blocked
                 result['websites_self_count'] = web_self
+                result['websites_settled_count'] = web_settled
             except Exception as web_err:
                 log_signal.emit(
                     f"⚠️ Websites vault filter failed in worker ({web_err}) — "

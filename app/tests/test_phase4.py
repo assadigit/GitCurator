@@ -558,6 +558,15 @@ class TestWorkerRouters(unittest.TestCase):
         self._orig_cloud = gui_app.ProcessingWorker._call_cloud_llm
         self._orig_app_dir = _wp.APP_DIR
         _wp.APP_DIR = self.tmp  # WebsiteStateDB() defaults land in tmp
+        # v0.63.2 — WebsiteStateDB reads ITS OWN module's APP_DIR
+        # (gitcurator.core.website_state), so patch that too — without
+        # it the phase's state landed in the real app dir, where the
+        # one-time SETTLEMENT (v0.63.2, run at the phase's door) then
+        # settled whatever earlier test runs had leaked there and the
+        # batch skipped its own links ("processed 0 != 2").
+        import gitcurator.core.website_state as _ws
+        self._orig_ws_app_dir = _ws.APP_DIR
+        _ws.APP_DIR = self.tmp
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -569,6 +578,8 @@ class TestWorkerRouters(unittest.TestCase):
         gui_app.ProcessingWorker._call_cloud_llm = staticmethod(
             self._orig_cloud)
         _wp.APP_DIR = self._orig_app_dir
+        import gitcurator.core.website_state as _ws
+        _ws.APP_DIR = self._orig_ws_app_dir
 
     def _worker(self, config):
         w = gui_app.ProcessingWorker.__new__(gui_app.ProcessingWorker)

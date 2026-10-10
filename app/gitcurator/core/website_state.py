@@ -15,12 +15,17 @@ import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from gitcurator.constants import APP_DIR
 
 MAX_FETCH_RETRIES = 3            # SPEC: retried automatically up to 3 times
 RETRY_BACKOFF_DAYS = 2           # "over several days"
+
+#: v0.63.2 — the meta key that stamps THE SETTLEMENT (one-time): every
+#: website the system already knew when the owner's law arrived is
+#: "addressed and processed" — never machine-fetched again.
+SETTLED_META_KEY = 'websites_settled_at'
 
 
 class WebsiteStateDB:
@@ -32,6 +37,10 @@ class WebsiteStateDB:
       website_retry_queue — fetch failures awaiting automatic retry
       dismissed_urls — URLs whose note the owner deleted (never re-add;
         populated by Phase 3's delete detection, read here from day one)
+      websites_settled — v0.63.2 THE SETTLED LEDGER: URLs the owner has
+        already sent to the bot and considers addressed — the machine
+        never fetches them again (only ♻️ revived in the master table
+        un-settles one, or 🖐 hand-delivery finishes it by hand)
     """
 
     def __init__(self, db_path: str = "cache.db"):
@@ -73,6 +82,12 @@ class WebsiteStateDB:
                 CREATE TABLE IF NOT EXISTS website_state_meta (
                     key TEXT PRIMARY KEY,
                     value TEXT
+                )
+            """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS websites_settled (
+                    url TEXT PRIMARY KEY,
+                    settled_at TEXT
                 )
             """)
             self.conn.commit()
@@ -186,6 +201,112 @@ class WebsiteStateDB:
                 "DELETE FROM websites_processed WHERE url=?", (url,))
             self.conn.commit()
             return bool(cur.rowcount)
+
+    # -- v0.63.2 THE SETTLED LEDGER ----------------------------------------
+
+    def is_settled(self, url: str) -> bool:
+        """v0.63.2 — is this URL settled (already sent to the bot and
+        addressed — the owner's law: never machine-fetched again)?"""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM websites_settled WHERE url=?", (url,)).fetchone()
+        return row is not None
+
+    def settle_urls(self, urls: Iterable[str]) -> int:
+        """v0.63.2 — add URLs to the settled ledger (idempotent). Returns
+        how many rows were actually inserted."""
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        added = 0
+        with self._lock:
+            for u in (urls or []):
+                if not u:
+                    continue
+                cur = self.conn.execute(
+                    "INSERT OR IGNORE INTO websites_settled (url, settled_at)"
+                    " VALUES (?,?)", (u, now_iso))
+                added += cur.rowcount or 0
+            if added:
+                self.conn.commit()
+        return added
+
+    def unsettle(self, url: str) -> bool:
+        """v0.63.2 — the ♻️ door back: remove one URL from the settled
+        ledger so a revived link is fetched like new again (the table's
+        revive marker is the owner's hand; this is the enforcement —
+        the twin of :meth:`undismiss`). Returns True when a settled row
+        was actually removed."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM websites_settled WHERE url=?", (url,))
+            self.conn.commit()
+            return bool(cur.rowcount)
+
+    def settled_count(self) -> int:
+        """v0.63.2 — the ledger's size (the honest settlement line)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM websites_settled").fetchone()
+        return int(row[0]) if row else 0
+
+    def settle_existing(self, extra_urls: Optional[Iterable[str]] = None
+                        ) -> Dict:
+        """v0.63.2 — THE SETTLEMENT, one time, on the owner's word.
+
+        The owner's report (session, verbatim): "Do not fetch current
+        websites which are sent to bot, because they're already
+        addressed and processed. Fetch only websites, that are added to
+        bot, from now on." Every website the system ALREADY knows is
+        settled — addressed and processed, never machine-fetched again
+        — and the fetch-retry queue (whose every row predates the law)
+        gets its settlement date too: cleared, so no backoff timer ever
+        re-serves an old link. Only websites added from now on are
+        fetched (and their own failures earn their own 3 retries).
+
+        Seeds the settled ledger from every URL the state knows —
+        ``websites_processed`` (stored or walled), ``website_retry_queue``
+        (the wall pile), ``dismissed_urls`` (the graveyard) — plus the
+        ``extra_urls`` the vault-level caller adds (the master table's
+        data rows and the ``_review`` note URLs — hand-added rows and
+        lost-state placeholders included). Guarded by the
+        ``websites_settled_at`` meta key: a second call is a no-op
+        (``{'settled': 0, 'retries_cleared': 0, 'already': True}``), so
+        every caller may call it freely. Returns
+        ``{'settled': n, 'retries_cleared': m, 'already': bool}``."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM website_state_meta WHERE key=?",
+                (SETTLED_META_KEY,)).fetchone()
+        if row:
+            return {'settled': 0, 'retries_cleared': 0, 'already': True}
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        with self._lock:
+            urls: List[str] = [r[0] for r in self.conn.execute(
+                "SELECT url FROM websites_processed").fetchall()]
+            urls += [r[0] for r in self.conn.execute(
+                "SELECT url FROM website_retry_queue").fetchall()]
+            urls += [r[0] for r in self.conn.execute(
+                "SELECT url FROM dismissed_urls").fetchall()]
+            for u in (extra_urls or []):
+                if u:
+                    urls.append(u)
+            seen: set = set()
+            unique = []
+            for u in urls:
+                if u and u not in seen:
+                    seen.add(u)
+                    unique.append(u)
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO websites_settled (url, settled_at)"
+                " VALUES (?,?)", [(u, now_iso) for u in unique])
+            retries_cleared = 0
+            cur = self.conn.execute("DELETE FROM website_retry_queue")
+            retries_cleared = cur.rowcount or 0
+            self.conn.execute(
+                "INSERT OR REPLACE INTO website_state_meta (key, value)"
+                " VALUES (?,?)", (SETTLED_META_KEY, now_iso))
+            self.conn.commit()
+        return {'settled': len(unique), 'retries_cleared': retries_cleared,
+                'already': False}
 
     # -- v0.19.0 proxy-epoch meta + retry re-arm --------------------------
 
