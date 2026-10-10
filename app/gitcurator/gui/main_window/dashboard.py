@@ -420,11 +420,29 @@ class DashboardMixin:
             # happened. The retry queue is the canonical source of "links to
             # reprocess" so this is safe even if the user clicks the Verify
             # Vault button many times.
-            failed_urls = [fl.get('url') for fl in report['failed_links'] if fl.get('url')]
+            # v0.63.1 — GITHUB LINKS ONLY (the owner's report: "a weird
+            # message … asks for retrying repos and websites … nothing
+            # needs retry"). Verify Vault used to enqueue EVERY failed
+            # row — non-github too — into failed_repos, a queue whose only
+            # resolver is the GitHub pipeline's success path. Website rows
+            # sat unresolved forever, crying "repos failed in previous
+            # runs" at every launch while the Websites pipeline had its
+            # own retry queue and master table for them. They are no longer
+            # this queue's business — one honest info line instead.
+            failed_urls = [fl.get('url') for fl in report['failed_links']
+                           if fl.get('url') and fl.get('type') == 'github']
+            _ws_failed = [fl for fl in report['failed_links']
+                          if fl.get('type') != 'github']
+            if _ws_failed:
+                self.log_message(
+                    f"ℹ️ {len(_ws_failed)} website link{'s' if len(_ws_failed) != 1 else ''} "
+                    f"failed their fetches — the Websites pipeline's own "
+                    f"retry queue and master table own them (never the "
+                    f"repos retry queue).", "info")
             if failed_urls:
                 self._show_custom_message_box(
                     "Failed Links Found",
-                    f"{len(failed_urls)} link(s) failed verification.\n\n"
+                    f"{len(failed_urls)} repo link(s) failed verification.\n\n"
                     "They have been added to the retry queue.\n"
                     "Click '🔄 Retry Failed' in the Bot tab to reprocess them.",
                     success=False
@@ -676,7 +694,15 @@ class DashboardMixin:
         shape as retry_failed_repos: the >10-item confirm gate, the
         bot-queue lists cleared so the auto-mark-read flow never fires on
         a retry batch. The banner hides for the run; processing_finished
-        re-reads the manifest and refreshes it with the truth."""
+        re-reads the manifest and refreshes it with the truth.
+
+        v0.63.1 — the read (and the banner behind it) counts only GITHUB
+        links now: a website row was never this queue's retry (its note
+        lives in the Websites vault; the GitHub loop can only answer
+        "Skipping non-GitHub URL" — the owner's "clicking retry does
+        nothing" report, exactly). The empty case also stops paying the
+        SECOND full vault scan: the read just proved the count is zero,
+        so the banner hides directly."""
         vault = self.vault_combo.currentText()
         if not vault or not os.path.isdir(vault):
             self._show_custom_message_box("Error", "Please select a valid Obsidian vault path.", success=False)
@@ -688,9 +714,19 @@ class DashboardMixin:
             self.log_message(f"❌ Failed to read the previous batch: {e}", "error")
             return
         if not urls:
-            # The manifest changed under us — re-read the banner's truth.
-            if hasattr(self, '_refresh_retry_banner'):
-                self._refresh_retry_banner()
+            # v0.63.1 — the read just proved the count is zero — hide the
+            # banner directly (the old path re-scanned the whole vault a
+            # second time through _refresh_retry_banner; "takes some
+            # time" for nothing).
+            if getattr(self, 'retry_banner', None) is not None:
+                self.retry_banner.setVisible(False)
+            _aside = getattr(tracker, 'set_aside_websites', 0)
+            if _aside:
+                self.log_message(
+                    f"ℹ️ {_aside} website link{'s' if _aside != 1 else ''} "
+                    f"from that batch keep waiting in the Websites "
+                    f"pipeline's own retry queue — never this retry's "
+                    f"business.", "info")
             self.log_message("✓ Nothing to retry — the previous batch is fully processed.", "success")
             return
         # v31.1 safety gate: confirm before large batches (>10 items).

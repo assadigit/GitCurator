@@ -68,6 +68,12 @@ class LinkTracker:
         # against the vault (read by the startup logger to explain the
         # banner's truth to the owner).
         self.reconciled_vault_hits = 0
+        # v0.63.1 — how many WEBSITE rows the same pass set aside (their
+        # notes live in the Websites vault, their retries belong to the
+        # Websites pipeline's own doors — never the repos-vault banner's
+        # count). Read by the startup logger / the retry click for the
+        # honest "not this queue's business" line.
+        self.set_aside_websites = 0
 
     def set_vault_index(self, index):
         """v0.38.0 — share an ALREADY-BUILT VaultIndex (the worker builds
@@ -487,8 +493,20 @@ class LinkTracker:
         unfinished work: an interrupted batch left the row pending and a
         later batch (or the owner) stored the note anyway. The vault is
         the ground truth — such a link no longer blocks the bot-queue
-        mark-read with a false 'not verified' verdict."""
+        mark-read with a false 'not verified' verdict.
+        v0.63.1 — WEBSITE ROWS NEVER BLOCK. The probe below can only see
+        the GITHUB vault, so a website row's 'failed'/'processing' status
+        used to hold the whole bot queue hostage with a false "not
+        verified" — while the Websites pipeline's own retry queue (its
+        ledger, its backoff, its master table) already owned that link.
+        Non-github rows are the websites doors' business; only GITHUB
+        rows gate the mark-read here."""
         for link in self.manifest["links"]:
+            if link.get("type") != "github":
+                # v0.63.1 — the Websites pipeline's own doors own these
+                # (the old v29.4 rule for 'pending', extended to every
+                # non-github status: accounted for is accounted for).
+                continue
             if link["status"] == "failed":
                 # v0.38.0 — even a FAILED row is done if the note is in the
                 # vault (the failure predates a successful later attempt).
@@ -499,10 +517,9 @@ class LinkTracker:
                     return False
             # GitHub "pending" = real failure (should have been processed
             # or skipped) — unless the vault already holds the note.
-            if link["status"] == "pending" and link.get("type") == "github":
+            if link["status"] == "pending":
                 if not self._vault_has(link["url"]):
                     return False
-            # Non-GitHub "pending" = duplicate, already recorded elsewhere — OK
         return True
 
     def _save(self):
@@ -573,14 +590,44 @@ class LinkTracker:
             the vault are returned for retry.
         ``self.reconciled_vault_hits`` carries the healed count for the
         startup log line. A vault that cannot be scanned degrades to
-        the old manifest-only behavior."""
+        the old manifest-only behavior.
+
+        v0.63.1 — WEBSITE ROWS ARE NEVER THIS QUEUE'S RETRY. The
+        tracker indexes the GITHUB vault, but a website row's note
+        lives in the WEBSITES vault — the old read counted every
+        walled/stored website as "needing retry" forever (the banner
+        cried, the click fed them to the GitHub loop, which can only
+        answer "Skipping non-GitHub URL"). Non-github rows now leave
+        the count entirely: rows still waiting are tallied on
+        ``self.set_aside_websites`` (the Websites pipeline's own retry
+        queue and the master table are their ledger — five doors of
+        their own), and the returned list carries only GITHUB links
+        this vault's retry can actually re-process."""
         self.reconciled_vault_hits = 0
+        self.set_aside_websites = 0
         prev = self.load_previous_manifest()
         if not prev:
             return []
         failed = []
         healed = False
         for link in prev.get("links", []):
+            if link.get("type") != "github":
+                # v0.63.1 — a WEBSITE row: its note lives in the Websites
+                # vault (invisible to this tracker's ground truth), and
+                # its retries belong to the Websites pipeline's own
+                # doors. Count the still-waiting ones for the honest
+                # log line; never cry them here.
+                _st = link.get("status")
+                if _st in ("failed", "processing", "pending"):
+                    self.set_aside_websites += 1
+                elif _st == "processed":
+                    _np = link.get("note_path")
+                    if not _np or not os.path.isfile(_np):
+                        # stored under an empty/stale path (the phase's
+                        # ``or ''`` marking) — its own machinery re-marks
+                        # it; the repos-vault banner stays quiet.
+                        self.set_aside_websites += 1
+                continue
             if link["status"] in ("failed", "processing", "pending"):
                 if self._vault_has(link["url"]):
                     # Stored — the ledger just never got its terminal

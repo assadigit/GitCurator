@@ -770,7 +770,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_version_is_0611(self):
         # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
-        self.assertEqual(self._read('VERSION').strip(), '0.63.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.63.1')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
