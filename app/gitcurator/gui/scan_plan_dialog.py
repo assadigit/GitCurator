@@ -35,13 +35,23 @@ round-trip; also the only door a headless/CLI launch has).
 Two layers, the house law:
 
 * ``plan_display_model(plan)`` is PURE (no Qt, no files — dict in,
-  display rows out; the cap law: 20 items shown per list, the rest
-  counted, exactly the way the Telegram ask caps its lists);
+  display rows out; the freeze-guard law: the WHOLE list rides the
+  model now — the owner's v0.63.0 report: "the containers for each
+  must be scrollable, just in case the quantity of sites were more
+  than original viewport of the windows" — and only a list beyond
+  :data:`MAX_ROWS` (far past any real plan) is counted instead of
+  rendered, so a pathological plan can never freeze the modal);
 * ``ScanPlanDialog`` only RENDERS that model (QDialog + the themed QSS
   roles — sync_card / info_header / cc_row_name / cc_item / help_box;
-  no per-dialog stylesheet, v0.30.0's de-style law). The dialog never
-  touches the vault; the apply pass lives in the job's thread, exactly
-  where it always lived.
+  no per-dialog stylesheet, v0.30.0's de-style law). v0.63.0 — THE
+  PLAN AS PANELS: each list becomes a SECTION CARD with its own wash
+  and its own scroll — the deletions on very pale red
+  (``plan_delete_card``), the new folders on very pale green
+  (``plan_create_card``), the re-file list on the neutral sheet
+  (``plan_move_card``) under a 🚚 — and the headings grow into the
+  ``plan_heading`` role (15px/800, tonal ink) so the hierarchy reads
+  at a glance. The dialog never touches the vault; the apply pass
+  lives in the job's thread, exactly where it always lived.
 """
 
 from typing import Dict, List, Optional
@@ -55,9 +65,19 @@ try:                                        # pragma: no cover — env
 except Exception:                           # PyQt6 absent: inert base
     _QT_DIALOG_BASE = object
 
-#: How many items each list shows before "… +N more" (the Telegram
-#: ask's own cap — the modal keeps the same honesty).
-MAX_SHOWN = 20
+#: v0.63.0 — the freeze guard: the WHOLE list rides its scrollable
+#: panel now (the owner's report: "the containers for each must be
+#: scrollable, just in case the quantity of sites were more than
+#: original viewport of the windows"), so the old 20-item cap is gone;
+#: only a list past this size is counted instead of rendered — a
+#: never-freeze law, far beyond any real plan (the LLM sees at most
+#: ``scan_max_notes`` candidates; the deletions are the owner's own
+#: marks, never a machine-generated pile).
+MAX_ROWS = 500
+
+#: Each section's list panel caps at this height (about ten rows) and
+#: scrolls beyond — the modal keeps its shape whatever the pile.
+_LIST_MAX_PX = 200
 
 #: The verdict strings the door may answer (the Telegram channel's own
 #: vocabulary — one grammar, two doors).
@@ -85,9 +105,11 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
     The plan is :func:`gitcurator.core.vault_scan.build_scan_plan`'s own
     shape (``deletions`` / ``moves`` / ``new_folders`` / ``summary`` /
     ``inventory`` / ``kept_handwritten``); the model is what the dialog
-    renders — every list capped at :data:`MAX_SHOWN` items with the
-    honest ``+N more`` count, every field a plain str (a bad plan can
-    never crash the modal). Pure: no Qt, no file reads, never raises."""
+    renders — the WHOLE list (v0.63.0's scrollable-panel law: the
+    owner reads every row, the panel scrolls when the pile outgrows
+    the viewport), counted-not-rendered only past :data:`MAX_ROWS` (the
+    freeze guard), every field a plain str (a bad plan can never crash
+    the modal). Pure: no Qt, no file reads, never raises."""
     plan = plan or {}
     inv = plan.get('inventory')
     if not isinstance(inv, dict):
@@ -100,7 +122,7 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
                 items.append(shaper(it if isinstance(it, dict) else {}))
             except Exception:
                 continue
-        shown = items[:MAX_SHOWN]
+        shown = items[:MAX_ROWS]
         return shown, len(items)
 
     def _deletion(d: Dict) -> Dict:
@@ -119,7 +141,7 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
     deletions, deletions_total = _rows(plan.get('deletions'), _deletion)
     moves, moves_total = _rows(plan.get('moves'), _move)
     folders = [str(f) for f in (plan.get('new_folders') or [])
-               if isinstance(f, (str,))][:MAX_SHOWN]
+               if isinstance(f, (str,))][:MAX_ROWS]
     folders_total = len(plan.get('new_folders') or []) \
         if isinstance(plan.get('new_folders'), list) else 0
     return {
@@ -150,17 +172,24 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
 class ScanPlanDialog(_QT_DIALOG_BASE):
     """The scan plan on the owner's screen — Apply / Keep, nothing else.
 
-    One section per list (🗑️ deletions with their doors, 📁 new folders,
-    📦 moves), the LLM's summary in the help box, the inventory line,
-    and the answering window ticking down (at zero: the safe defer —
-    the same 'timeout' verdict a silent Telegram ask gets; nothing is
-    done). Apply is the ONLY path that leads to 'confirmed'. Esc and
-    the ✕ are declines — the vault stays byte-for-byte as it was."""
+    v0.63.0 — THE PLAN AS PANELS: one SECTION CARD per list, each with
+    its own wash and its own scroll — 🗑️ the deletions on very pale
+    red, 🌱 the new folders on very pale green, 🚚 the re-file list on
+    the neutral sheet — and big tonal headings (``plan_heading``,
+    15px/800) over each so the hierarchy reads at a glance. Each list
+    panel caps at ~ten rows and SCROLLS beyond (the whole list, never
+    a counted-away tail). The LLM's summary rides the help box, the
+    inventory line opens the story, and the answering window ticks
+    down (at zero: the safe defer — the same 'timeout' verdict a
+    silent Telegram ask gets; nothing is done). Apply is the ONLY
+    path that leads to 'confirmed'. Esc and the ✕ are declines — the
+    vault stays byte-for-byte as it was."""
 
-    #: the item column's pixel width (600 dialog - 2*20 root margins -
-    #: 2*12 card margins - 18 item indent — the ConnectionTestDialog's
-    #: own arithmetic, kept so no line can ever clip).
-    _ITEM_COL_PX = 600 - 2 * 20 - 2 * 12 - 18
+    #: the item column's pixel width (640 dialog - 2*20 root margins -
+    #: 2*12 sync_card margins - 2*10 section-card margins - 12 scrollbar
+    #: allowance - 9 item indent — the same never-clip arithmetic the
+    #: ConnectionTestDialog taught, re-counted for the nested panels).
+    _ITEM_COL_PX = 640 - 2 * 20 - 2 * 12 - 2 * 10 - 12 - 9
 
     def __init__(self, main_window, model: Dict,
                  timeout_s: float = 300.0):
@@ -171,7 +200,7 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
         self.setObjectName("scan_plan_dialog")
         self.setWindowTitle("Vault scan review")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        self.setMinimumWidth(640)
         self._verdict = VERDICT_DECLINED
         self._remaining = max(int(timeout_s or 300), 1)
 
@@ -193,11 +222,12 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
         card_lay.setSpacing(4)
 
         inv = (model or {}).get('inventory') or {}
-        self._line(card_lay, f"📚 The library: {inv.get('total_notes', 0)} "
-                             f"note(s) in {inv.get('folder_count', 0)} "
-                             f"folder(s) — {inv.get('root_notes', 0)} "
-                             f"orphaned, {inv.get('uncategorized_notes', 0)}"
-                             f" uncategorized", bold=True)
+        self._heading(card_lay,
+                      f"🏛️ The library: {inv.get('total_notes', 0)} "
+                      f"note(s) in {inv.get('folder_count', 0)} "
+                      f"folder(s) — {inv.get('root_notes', 0)} "
+                      f"orphaned, {inv.get('uncategorized_notes', 0)}"
+                      f" uncategorized")
         if inv.get('trash_notes'):
             self._line(card_lay,
                        f"🗑️ {inv.get('trash_notes')} note(s) rest in the "
@@ -210,15 +240,18 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
                        f"kept (yours; the app never deletes what it did "
                        f"not write)", bold=True)
 
-        self._section(card_lay, "🗑️ Marked for deletion",
+        self._section(card_lay, "plan_delete_card", "danger",
+                      "🗑️ Marked for deletion",
                       (model or {}).get('deletions') or [],
                       int((model or {}).get('deletions_total') or 0),
                       self._deletion_line)
-        self._section(card_lay, "📁 New folders to create",
+        self._section(card_lay, "plan_create_card", "grow",
+                      "🌱 New folders to create",
                       (model or {}).get('new_folders') or [],
                       int((model or {}).get('new_folders_total') or 0),
                       self._folder_line)
-        self._section(card_lay, "📦 Notes to re-file",
+        self._section(card_lay, "plan_move_card", "neutral",
+                      "🚚 Notes to re-file",
                       (model or {}).get('moves') or [],
                       int((model or {}).get('moves_total') or 0),
                       self._move_line)
@@ -272,33 +305,81 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
         label.setWordWrap(not bold)
         lay.addWidget(label)
 
-    def _section(self, lay, title: str, rows: List[Dict], total: int,
-                 shaper):
-        """One list: the bold heading with its count, the capped item
-        lines, and the honest '+N more' when the cap bit."""
+    def _heading(self, lay, text: str):
+        """v0.63.0 — the big neutral section voice (``plan_heading``):
+        the library line opens the story at the same size the sections
+        speak, so the panel reads as one headed hierarchy."""
         from PyQt6.QtWidgets import QLabel
+        label = QLabel(str(text or ''))
+        label.setObjectName("plan_heading")
+        label.setProperty("tone", "neutral")
+        label.setWordWrap(True)
+        lay.addWidget(label)
+
+    def _section(self, lay, card_name: str, tone: str, title: str,
+                 rows: List[Dict], total: int, shaper):
+        """v0.63.0 — one SECTION PANEL: the big tonal heading, the list
+        riding its OWN transparent scroll (the whole list, capped only
+        by the model's freeze guard), and the honest '+N more' when
+        even that guard bites. The card name picks the wash — very pale
+        red for the deletions, very pale green for the creations, the
+        neutral sheet for the re-file list — all from the theme kit's
+        own roles (no per-dialog stylesheet, the de-style law)."""
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import (QAbstractScrollArea, QFrame, QLabel,
+                                     QScrollArea, QVBoxLayout, QWidget)
         if total <= 0:
             return
-        self._line(lay, f"{title} — {total}", bold=True)
-        for row in rows:
-            text, full = shaper(row)
-            item = QLabel()
-            item.setObjectName("cc_item")
-            item.setWordWrap(False)      # ONE line, always
-            try:
-                from PyQt6.QtCore import Qt
-                item.ensurePolished()    # the QSS 11px font applies
-                shown = item.fontMetrics().elidedText(
-                    text, Qt.TextElideMode.ElideMiddle, self._ITEM_COL_PX)
+        card = QWidget()
+        card.setObjectName(card_name)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(10, 8, 10, 8)
+        cl.setSpacing(4)
+        head = QLabel(f"{title} — {total}")
+        head.setObjectName("plan_heading")
+        head.setProperty("tone", tone)
+        cl.addWidget(head)
+        if rows:
+            listw = QWidget()
+            lw = QVBoxLayout(listw)
+            lw.setContentsMargins(2, 0, 2, 0)
+            lw.setSpacing(2)
+            for row in rows:
+                text, full = shaper(row)
+                item = QLabel()
+                item.setObjectName("cc_item")
+                item.setWordWrap(False)      # ONE line, always
+                try:
+                    item.ensurePolished()    # the QSS 11px font applies
+                    shown = item.fontMetrics().elidedText(
+                        text, Qt.TextElideMode.ElideMiddle,
+                        self._ITEM_COL_PX)
+                except Exception:
+                    shown = text
+                item.setText(f"   {shown}")
+                if full and full != text:
+                    item.setToolTip(full)
+                lw.addWidget(item)
+            scroll = QScrollArea()
+            scroll.setObjectName("plan_list")
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            try:      # shrink-to-fit short lists, cap tall ones
+                scroll.setSizeAdjustPolicy(
+                    QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
             except Exception:
-                shown = text
-            item.setText(f"   {shown}")
-            if full and full != text:
-                item.setToolTip(full)
-            lay.addWidget(item)
+                pass
+            scroll.setMaximumHeight(_LIST_MAX_PX)
+            scroll.setWidget(listw)
+            cl.addWidget(scroll)
         more = total - len(rows)
         if more > 0:
-            self._line(lay, f"   … +{more} more (counted, not listed)")
+            self._line(cl, f"   … +{more} more (counted, not listed)")
+        lay.addWidget(card)
 
     def _deletion_line(self, d: Dict):
         door = str(d.get('door') or 'note tag')
@@ -313,7 +394,9 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
         return f"📁 {f}", f"New folder: {f}"
 
     def _move_line(self, m: Dict):
-        text = f"📦 {m.get('note', '')}: {m.get('from', '')} → " \
+        # v0.63.0 — the transportation glyph the owner asked for: notes
+        # to re-file ride the 🚚 (the heading and the rows agree).
+        text = f"🚚 {m.get('note', '')}: {m.get('from', '')} → " \
                f"{m.get('to', '')}"
         full = text + (f"\nwhy: {m.get('reason')}" if m.get('reason')
                        else '')

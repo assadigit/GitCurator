@@ -1,4 +1,4 @@
-## [0.63.0] — The librarian's three laws — 2026-10-11
+## [0.63.0] — The librarian's three laws + the plan in panels — 2026-10-11
 
 **The owner's report (session, verbatim):** "In creating new folder,
 LLM must always first check the latest existing folders, to prevent
@@ -8,8 +8,15 @@ under a broad category, but then it needs to be under another sub
 folder. not stray in the folder root." "Website directory.md is listed
 for refile but actually it's full list of websites and should not be
 moved, system must have an instruction to make exception for this core
-and root notes." The owner read the scan's first real plan and taught
-it its second lesson: three laws, in the prompt AND in the validator.
+and root notes." — and on the modal itself: "The market for deletation
+must have a very pale red background, so it better signal that those
+are deleted list", "creation folders must have a very Pale green
+background to signal creation", "better emojies must be used for each
+heading, also bigger headings, to better signal hierarchy. notes to
+re-file must have a transporation emoji", "the containers for each must
+be scrollable, just in case the quantity of sites were more than
+original viewport of the windows." Seven wishes, one lesson: the owner
+read the scan's first real plan and taught it its second one.
 
 **THE THREE LAWS (`core/vault_scan.py`)** — taught to the LLM in the
 prompt (rewritten, `prompts/s01_vaultscan.txt`) AND enforced by the
@@ -59,18 +66,46 @@ proposes, the vault's laws decide):
    story: "🏛️ N core catalog note(s) … stay at their post — core notes
    are never re-filed".
 
-**How the owner sees it:** run Scan → the plan the LLM brings is now
+**THE PLAN IN PANELS (`gui/scan_plan_dialog.py` + the theme kit)** —
+the modal's lists become SECTION CARDS, each with its own wash, its own
+big heading, and its own scroll: the deletions on a very pale red
+panel (`plan_delete_card`) so the list reads as what it is — the
+deleted list; the new folders on a very pale green panel
+(`plan_create_card`) so creation announces itself; the re-file list on
+the neutral sheet under a 🚚 — the transportation emoji the owner asked
+for, on the heading AND on every row. The headings grew: the new
+`plan_heading` role (15px/800, tonal ink — deep rose for deletions,
+deep mint for creations) carries "🗑️ Marked for deletion — N", "🌱 New
+folders to create — N", "🚚 Notes to re-file — N" and the opening
+"🏛️ The library: …" line, so the hierarchy reads at a glance. And
+every container is SCROLLABLE: each list rides its own transparent
+`plan_list` scroll (vertical-only, capped at ~ten rows, shrink-to-fit
+for short lists) — the whole list, never a counted-away tail (the old
+20-item cap is retired; only a pathological 500+-row pile is counted,
+the never-freeze guard). All the washes and roles live in the ONE
+theme kit (`gui/theme.py` — light: near-white rose/mint tints on the
+cream library; dark: rose/mint-tinted plums for the night mode) — the
+dialog itself still wears no stylesheet of its own (v0.30.0's
+de-style law, now test-pinned). The job's log lines agree with the
+panels: "🌱 New folder proposed" and "🚚 Move proposed".
+
+**How the owner sees it:** run Scan → the modal opens with the
+deletions on pale red, the creations on pale green, the moves under
+the 🚚 — every list fully readable and scrollable → Apply plan / Keep
+everything, exactly as before, but the plan the LLM brings is now
 duplicate-free, subfolder-deep, and leaves the Website Directory at
-its post — the same Apply/Keep gates as always, a better plan under
-them. Suite **1837 → 1853** (16 new cases in
-`tests/test_vaultscan.py`: the fold (two), the three laws — directory
-immunity by name and by kind, the guest's directory move dropped, the
-stray rule, bare-root drops for moves and for lone new folders,
-near-duplicate absorption, sibling containment, exact-duplicate
-absorption, plan self-dedup, the short-leaf guard, the prompt and the
-ask carrying the laws, and the changelog beat). Desktop-only (the
-worker's 0.32.0 stays — the diff under `app/cloudflare-bot/src/` is
-empty, as the record will show).
+its post. Suite **1837 → 1862** (16 new cases in
+`tests/test_vaultscan.py`: the fold, the three laws — directory
+immunity by name and by kind, the stray rule, bare-root drops, near-
+duplicate absorption, sibling containment, plan self-dedup, the
+short-leaf guard, the prompt and the ask carrying the laws, and the
+changelog beat; 9 new in
+`tests/test_scangui.py`: the whole-list law, the freeze guard, the
+toned cards, the big tonal headings, one scroll per panel, the
+transportation glyph, the long-pile scroll, the theme-kit source
+contract, and the changelog beat). Desktop-only (the worker's 0.32.0
+stays — the diff under `app/cloudflare-bot/src/` is empty, as the
+record will show).
 
 ## [0.62.0] — The Trash door + the plan on the owner's screen — 2026-10-10
 

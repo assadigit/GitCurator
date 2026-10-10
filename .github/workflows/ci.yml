@@ -1,7 +1,7 @@
 # GitCurator CI — the same gate the dashboard runs via POST /api/verify.
 #
 # Every push to main, every tag, and every PR compiles the 87 audited
-# Python modules and runs the full 1853-case suite (34 core + 11 e2e +
+# Python modules and runs the full 1862-case suite (34 core + 11 e2e +
 # 28 goodrepos + 19 reliability + 14 quarantine + 24 phase0 + 38 phase1 +
 # 78 phase2 + 36 phase3 + 45 phase4 + 47 phase5 + 13 packaging + 79
 # llamacpp + 45 phase6 + 68 connection + 47 detectset + 48 webproxy +
@@ -17,11 +17,14 @@
 # THE THREE LAWS (fresh eyes — near-duplicate folders absorb into the
 # existing; depth — every website files at least Category/Subfolder
 # deep; core notes — the Website Directory is never re-filed) +
-# 24 trashdoor + 30 scangui — v0.62.0: THE TRASH DOOR (a note the
+# 24 trashdoor + 39 scangui — v0.62.0: THE TRASH DOOR (a note the
 # owner moves into the root Trash folder carries the delete verdict:
 # same grammar, same gate, same never-fetch blacklist) + THE GUI
 # CONFIRM DOOR (ScanPlanDialog — the scan plan on the owner's screen,
-# Apply/Keep; the login-code ask-gate's twin in TestWorker).
+# Apply/Keep; the login-code ask-gate's twin in TestWorker); v0.63.0:
+# THE PLAN AS PANELS (deletions on very pale red, creations on very
+# pale green, re-file under the 🚚; big tonal headings; every list
+# rides its own scroll).
 # v0.57.0 — THE NOTE IS THE SUCCESS: the owner's report — "I've
 # noticed that chrome still fetches a new session, moreover it
 # correctly loads the websites, and websites gets loaded on those
