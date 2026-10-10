@@ -5,6 +5,71 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.62.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE TRASH DOOR + THE PLAN ON THE OWNER'S SCREEN)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.62.0 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's two reports (session, verbatim):** (1) "the problem of
+> not being able to delete some notes and never-fetch them again
+> exists. What if, we create a folder called trash, every note which
+> goes to trash will be deleted from vault and never fetch again."
+> (2) "the scan now suggest new folders to be made, but there is no
+> modal or accept or confirm button to actually LLM do them."
+>
+> **The answers, both on the desktop side:** (1) THE TRASH DOOR — a
+> root-level `Trash` folder (any spelling, its subfolders) is the
+> THIRD door of the ONE deletion grammar: a note the owner MOVES into
+> it carries the delete verdict by placement alone (the drag-and-drop
+> IS the gesture); same gate, same enforcement — the URL is
+> blacklisted (never fetched again), the note leaves the visible
+> `Trash/` waiting room for `.trash/banished`, the master table holds
+> the ♻️-revivable record row whose Source column reads "Trash
+> folder"; hand-written notes in Trash are KEPT with a warning (the
+> sacred law); the scan's inventory counts the waiting room but never
+> shows it to the LLM, and `_sanitize_folder` rejects Trash as a
+> destination cell (no back-door deletions past the gate). (2) THE GUI
+> CONFIRM DOOR — **ScanPlanDialog** (`gui/scan_plan_dialog.py`) puts
+> the whole plan on the owner's screen — the deletions with their
+> doors, the new folders, the moves with their reasons, the LLM's own
+> summary, the inventory line, the answering window ticking down —
+> with 🗂️ Apply plan / ✋ Keep everything; the plumbing is the
+> login-code ask-gate's twin in TestWorker
+> (`scan_confirm_requested` / `request_scan_confirm` /
+> `provide_scan_verdict`), and the job picks its door by the new
+> config `scan_confirm_door` ('gui' the default whenever a GUI
+> ask-gate is injected; 'telegram' pins the old round-trip — still
+> the away-from-desk door and the only one a headless launch has).
+> Esc, the ✕, and the window running out are all the safe default
+> too ('timeout' — the same verdict a silent Telegram ask gets).
+>
+> **Proven in a REAL run** (offscreen, real TestWorker thread, real
+> job, real ScanPlanDialog, real banishment machinery): a vault
+> holding one tagged note + one note moved into `Trash/` → the modal
+> opens → **Apply** buries BOTH notes through their own doors
+> (`.trash/banished` + never-fetch blacklist + the master-table
+> record rows) → **Keep** leaves the vault byte-for-byte. Evidence:
+> `/home/z/real-run/gui-door-run.log`.
+>
+> **The suite: 1783 → 1837** (24 cases in the new pure-stdlib
+> `tests/test_trashdoor.py` + 30 in the new `tests/test_scangui.py`,
+> both added to ci.yml + AGENTS.md; the 17 release pins re-pointed —
+> the house convention). CI green on main + the tag **first try**
+> (runs 38060130507 / 38060432922, head `6e4308b`). The release:
+> `GitCurator-v0.62.0-windows.zip` (135 files, sha256
+> `dba147868c14336eebdc031292916816bc476f8ea2f72e04fc434f84d57ec783`,
+> GitHub release 409006285, download round-trip byte-identical). The
+> owner's home checklist: unzip → 1-INSTALL.bat → drag a note into
+> `Trash/` (or leave your 🗑️ marks as before) → Scan → the modal
+> shows the whole plan → Apply / Keep. The Telegram ask still works
+> away from the desk (`scan_confirm_door: telegram` pins it); the
+> one-time `/pair` reminder from the v0.60.2 record still applies.
+
+---
+
 ## 📦 v0.61.1 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only hotfix · THE SCAN BUTTON)
 
 > **Live in production** at
