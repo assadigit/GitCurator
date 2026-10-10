@@ -37,7 +37,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
   tests.test_fifthdoor tests.test_masterretry tests.test_iconcolumn \
   tests.test_persistentdoor tests.test_realdoor tests.test_handharvest \
   tests.test_noteredo tests.test_banishment tests.test_channelua \
-  tests.test_vaultscan
+  tests.test_vaultscan tests.test_trashdoor
 ```
 
 That exact module list lives in `.github/workflows/ci.yml` (also: the

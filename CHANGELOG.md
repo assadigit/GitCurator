@@ -1,3 +1,65 @@
+## [0.62.0] — The Trash door — 2026-10-10
+
+**The owner's report (session, verbatim):** "the problem of not being
+able to delete some notes and never-fetch them again exists. What if,
+we create a folder called trash, every note which goes to trash will be
+deleted from vault and never fetch again."
+
+**The answer keeps every law: the move is the verdict, the grammar is
+still ONE.** A root-level `Trash` folder (any spelling — Trash/trash/
+TRASH, and its subfolders) is now the THIRD door of the same deletion
+grammar that v0.58–v0.60.1 built (the note's own frontmatter tags, the
+note body's inline tags, the master-table gesture): a note the owner
+MOVES into it carries the delete verdict by placement alone — no tag
+needed, the drag-and-drop IS the gesture ("the user's moves are
+corrections", the oldest law). It rides the SAME confirmation gate
+(`scan_pending_banishments` — nothing leaves before the owner says so),
+the SAME enforcement (`banish_marked_notes` → `_banish_url`: the URL is
+dismissed with the banished reason so it is NEVER fetched again — not
+on a re-paste, not on a re-arm, not on a fresh batch months later; the
+note file leaves the visible `Trash/` waiting room for the hidden
+`.trash/banished` quarantine, out of the library and every index, one
+hand-move from undone; the ledger row is forgotten; the master table
+gains the ♻️-revivable record row whose **Source column reads "Trash
+folder"** and whose Notes cell says "you moved it to the Trash
+folder"). The dismissal reason names the door: *"banished by owner —
+🗑️ Trash folder move (Trash folder)"*. A hand-written note resting in
+Trash is KEPT with a warning (the sacred law — the app never deletes
+what it did not write); a note already resting in `.trash/banished` is
+never re-found (the dot-folder walk); a deep `SomeDir/Trash` that
+merely shares the name is never the door (the convention is ONE
+waiting room at the root, exactly where Obsidian keeps its own). When
+the owner both tags AND moves, the tag's marker wins the log line (the
+tag doors were read first) — one burial either way, deduped by
+canonical URL.
+
+**The scan's side of the contract** (`core/vault_scan.py`): the
+waiting room is counted honestly (`trash_notes` rides the inventory
+and the plan — the log line "N note(s) rest in the Trash folder — they
+await the deletion review") but it is NOT library material: its notes
+never enter the tree, the notes list, the totals, or the LLM's eyes
+(it must neither rescue nor re-file what the owner has thrown away),
+and **no plan may ever file INTO the trash** — `_sanitize_folder`
+rejects `Trash` (any spelling, any depth) as a destination cell, so a
+guest proposal that tries is dropped with the same "not a legal
+destination" line as every other illegal filing (a filing move into
+Trash would be a deletion through the back door, past the gate — the
+one shape the house will never allow).
+
+**How the owner uses it:** drag the note into `Trash/` in Obsidian →
+run Scan (or Fetch) → the plan/the gate shows it under the deletions
+with the marker "Trash folder" → confirm → gone and never fetched
+again, ♻️ revivable in the master table like every burial. Suite
+**1783 → 1807** (24 cases in the new pure-stdlib
+`tests/test_trashdoor.py`: the predicate, the detection — placement
+fires tagless, tags win the marker, hand-written kept, sourceless
+skipped, deep namesake never the door, the hidden quarantine never
+re-found — the gate's eyes with the dedup, the enforcement — the full
+burial, the never-fetch hold on a fresh arrival, the sacred keep, the
+dry-run rehearsal, the idempotent no-op — and the scan's own laws: the
+counted-but-unlisted waiting room, the never-a-destination rule, the
+dropped sneaky proposal, the plan's trash count).
+
 ## [0.61.1] — The Scan button works — 2026-10-10
 
 **The bug the owner found at home (the first real v0.61.0 run on his

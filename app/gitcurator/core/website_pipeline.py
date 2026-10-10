@@ -521,6 +521,25 @@ BANISH_TALLY_PREFIX = "🗑️ Run tally:"
 #: VaultIndex/mirror/directory/the Website Directory, recoverable by
 #: hand; ♻️ revived + a hand move brings a mistaken burial back).
 BANISH_QUARANTINE_RELPATH = os.path.join(".trash", "banished")
+#: v0.62.0 — THE TRASH DOOR: the owner's most natural deletion gesture
+#: is a MOVE, not a tag (session, verbatim: "What if, we create a folder
+#: called trash, every note which goes to trash will be deleted from
+#: vault and never fetch again"). A note the owner moves into a
+#: root-level ``Trash`` folder (any spelling — Trash/trash/TRASH, its
+#: subfolders too) reads as carrying the delete verdict: the SAME
+#: grammar, the SAME confirmation gate, the SAME enforcement as the
+#: tag doors (the URL is blacklisted — never fetched again — the note
+#: leaves the library for ``.trash/banished``, the master table holds
+#: the ♻️-revivable record row). Hand-written notes in Trash are KEPT
+#: with a warning (the sacred law — the app never deletes what it did
+#: not write; the owner deletes his own notes by hand in Obsidian).
+#: The folder name never becomes a destination: nothing ever proposes
+#: moving a note INTO the trash, and the vault scan's inventory walks
+#: past it (it is the waiting room, not the library).
+TRASH_FOLDER_NAMES = ("trash",)
+#: The log/record label the trash door's items carry.
+TRASH_MARKER = "Trash folder"
+TRASH_GESTURE = "Trash folder move"
 #: The dismissal reason prefix the skip gate reads (process_link names
 #: the door so the log tells a banishment from a graveyard burial).
 BANISH_REASON_PREFIX = "banished by owner"
@@ -1661,6 +1680,22 @@ def _note_reads_banished(fm: Optional[Dict]) -> (bool, str):
 _BODY_TAG_STOPS = " \t\r\n,.;:!?)]}'\"»«…—>"
 
 
+def _is_trash_folder(rel: str) -> bool:
+    """v0.62.0 — is this vault-relative folder path the owner's Trash?
+
+    Root-level only (``Trash``, ``trash`` — case-insensitive, the
+    spelling is the owner's choice) and its subfolders
+    (``Trash/whatever``). A ``SomeDir/Trash`` deep inside the tree is a
+    category folder that happens to share the name — never the door
+    (the convention is ONE visible waiting room at the top, the same
+    way Obsidian's own trash is a root folder). Pure predicate."""
+    rel = (rel or '').strip().replace('\\', '/').strip('/').lower()
+    if not rel or rel == '.':
+        return False
+    first = rel.split('/', 1)[0]
+    return first in TRASH_FOLDER_NAMES
+
+
 def _note_body_banish_tag(path: str) -> str:
     """v0.60.1 — the note BODY's own inline tags.
 
@@ -1734,11 +1769,16 @@ def scan_banished_notes(vault_path: str,
     ``_missing``, ``_moc`` — the note can be marked wherever it lives;
     ``_inbox`` record tables and dot-folders are skipped, so a note
     already resting in ``.trash/banished`` is never re-found). Returns
-    ``[{'url', 'path', 'marker', 'app_owned'}, ...]`` sorted by the
-    walk's deterministic order — hand-written marked notes ride the
+    ``[{'url', 'path', 'marker', 'door', 'app_owned'}, ...]`` sorted by
+    the walk's deterministic order — hand-written marked notes ride the
     list with ``app_owned: False`` so the burial can keep + warn (the
-    sacred law) instead of silently ignoring them. Pure file reads; no
-    state DB, no network; never raises."""
+    sacred law) instead of silently ignoring them. v0.62.0 — THE TRASH
+    DOOR joins the grammar as the third read: a note the owner MOVED
+    into the root ``Trash`` folder (any spelling, its subfolders too)
+    carries the verdict by placement alone (``door: 'trash folder'``)
+    — the tag doors stay first (a tag's marker wins when the owner
+    both marked and moved). Pure file reads; no state DB, no network;
+    never raises."""
     log = log or (lambda *a, **k: None)
     out: List[Dict] = []
     if not vault_path or not os.path.isdir(vault_path):
@@ -1746,6 +1786,8 @@ def scan_banished_notes(vault_path: str,
     for root, dirs, files in os.walk(vault_path):
         dirs[:] = sorted(d for d in dirs
                          if d != '_inbox' and not d.startswith('.'))
+        rel_root = os.path.relpath(root, vault_path).replace(os.sep, '/')
+        in_trash = _is_trash_folder(rel_root)
         for name in sorted(files):
             if not name.lower().endswith('.md'):
                 continue
@@ -1756,6 +1798,7 @@ def scan_banished_notes(vault_path: str,
             if not fm:
                 continue            # not a frontmattered note — a human's
             marked, marker = _note_reads_banished(fm)
+            door = 'note tag'
             if not marked:
                 # v0.60.1 — the BODY's own inline tags: the owner's
                 # natural "tag the note" is typing #auto-delete in the
@@ -1765,12 +1808,23 @@ def scan_banished_notes(vault_path: str,
                 # when both are present); the body is the second read.
                 marker = _note_body_banish_tag(path)
                 marked = bool(marker)
+            if not marked and in_trash:
+                # v0.62.0 — THE TRASH DOOR, the third read: the move
+                # itself is the verdict (the owner's ask, verbatim:
+                # "every note which goes to trash will be deleted from
+                # vault and never fetch again"). Placement needs no
+                # tag at all; the tags above simply win the marker
+                # when the owner marked AND moved.
+                marker = TRASH_MARKER
+                marked = True
+                door = 'trash folder'
             if not marked:
                 continue
             url = (fm.get('source') or '').strip()
             if not url.lower().startswith(('http://', 'https://')):
                 continue            # the directory note / tagless files
             out.append({'url': url, 'path': path, 'marker': marker,
+                        'door': door,
                         'app_owned': fm.get('managed_by', '').lower()
                         == MANAGED_BY_GITCURATOR})
     return out
@@ -1827,7 +1881,10 @@ def scan_pending_banishments(vault_path: str,
     hand, counted separately) and the master-table door
     (:func:`scan_decommission_table` — 🗑-marked rows that are not yet
     confirmed-stamped; a ``🗑️ banished — confirmed <date>`` row is
-    history, not a pending ask). Pure file reads; no state DB, no
+    history, not a pending ask). v0.62.0 — the note-tag door now
+    carries the TRASH DOOR too (a note the owner moved into the root
+    ``Trash`` folder rides the list with ``door: 'trash folder'`` —
+    the move is the verdict). Pure file reads; no state DB, no
     network; never raises. Returns ``{'items': [{'url', 'canonical',
     'title', 'marker', 'door', 'path'}], 'kept_handwritten': int}``."""
     log = log or (lambda *a, **k: None)
@@ -1848,7 +1905,8 @@ def scan_pending_banishments(vault_path: str,
             'title': os.path.splitext(os.path.basename(
                 it.get('path') or ''))[0] or canonical,
             'marker': it.get('marker') or 'delete mark',
-            'door': 'note tag', 'path': it.get('path') or ''})
+            'door': it.get('door') or 'note tag',
+            'path': it.get('path') or ''})
     try:
         table = scan_decommission_table(vault_path)
     except Exception as e:
@@ -2028,16 +2086,18 @@ def banish_marked_notes(state, vault_path: str,
     Every APP-OWNED note in the library whose tags carry 🗑️ (or
     ``delete`` / ``banish`` / ``blacklist`` / ``purge``), or whose
     frontmatter carries a true ``decommission:`` / ``banish:`` /
-    ``blacklist:`` key, leaves the vault for ``.trash/banished`` and
-    its URL is blacklisted — dismissed with the banished reason, so the
-    never-fetch gate holds for every future arrival (a re-paste, a
-    re-arm, a fresh batch months later: skipped, 🗑️ in the log). The
-    master table gains the record row
-    (``🗑️ banished — confirmed <date>``, ♻️ revivable like any burial).
-    A hand-written note carrying the mark is KEPT with a warning (the
-    sacred law — the app never deletes what it did not write; the
-    owner deletes his own notes by hand in Obsidian, the natural
-    gesture).
+    ``blacklist:`` key, or which the owner MOVED into the root ``Trash``
+    folder (v0.62.0 — the trash door: the move is the verdict), leaves
+    the vault for ``.trash/banished`` and its URL is blacklisted —
+    dismissed with the banished reason, so the never-fetch gate holds
+    for every future arrival (a re-paste, a re-arm, a fresh batch
+    months later: skipped, 🗑️ in the log). The master table gains the
+    record row (``🗑️ banished — confirmed <date>``, ♻️ revivable like
+    any burial — the Source column names the door that fired).
+    A hand-written note carrying the mark — or resting in the Trash
+    folder — is KEPT with a warning (the sacred law — the app never
+    deletes what it did not write; the owner deletes his own notes by
+    hand in Obsidian, the natural gesture).
 
     Idempotent: a banished note rests in ``.trash`` (the scan never
     enters dot-folders) and the table row is never duplicated (the
@@ -2059,34 +2119,59 @@ def banish_marked_notes(state, vault_path: str,
     seen: set = set()
     record_urls: List[str] = []
     record_notes: Dict[str, str] = {}
+    record_rows_tag: List[str] = []          # v0.62.0 — per-door rows
+    record_notes_tag: Dict[str, str] = {}
+    record_rows_trash: List[str] = []
+    record_notes_trash: Dict[str, str] = {}
     for it in items:
         report['marked'] += 1
+        via_trash = (it.get('door') == 'trash folder')
         if not it.get('app_owned'):
             report['kept_handwritten'] += 1
-            log(f"✍️ kept {os.path.basename(it['path'])} — it carries the "
-                f"🗑️ mark but is hand-written (yours); delete it by hand "
-                f"in Obsidian if you want it gone", "warning")
+            if via_trash:
+                log(f"✍️ kept {os.path.basename(it['path'])} — it rests in "
+                    f"the Trash folder but is hand-written (yours); the "
+                    f"app never deletes what it did not write — delete it "
+                    f"by hand in Obsidian if you want it gone", "warning")
+            else:
+                log(f"✍️ kept {os.path.basename(it['path'])} — it carries "
+                    f"the 🗑️ mark but is hand-written (yours); delete it "
+                    f"by hand in Obsidian if you want it gone", "warning")
             continue
         canonical = normalize_website_url(it.get('url') or '')
         if not canonical or canonical in seen:
             continue            # two marked notes, one link — one burial
         seen.add(canonical)
+        gesture = TRASH_GESTURE if via_trash else 'note tag'
         b = _banish_url(state, vault_path, canonical, it.get('path'),
-                        it.get('marker') or '', 'note tag', log=log)
+                        it.get('marker') or '', gesture, log=log)
         report['review_swept'] += b['review_swept']
         if not b['dismissed']:
             continue            # the DB refused — the verdict is not law
         report['banished'] += 1
         record_urls.append(canonical)
-        record_notes[canonical] = f"🗑️ marked on the note: " \
-                                  f"{it.get('marker') or 'delete'}"
+        if via_trash:
+            record_rows_trash.append(canonical)
+            record_notes_trash[canonical] = \
+                "🗑️ you moved it to the Trash folder"
+        else:
+            record_rows_tag.append(canonical)
+            record_notes_tag[canonical] = f"🗑️ marked on the note: " \
+                                          f"{it.get('marker') or 'delete'}"
         if b['moved']:
             report['notes_moved'] += 1
-            log(f"🗑️ {canonical}: banished — the note carried the delete "
-                f"mark; it left the library for "
-                f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')} and "
-                f"the URL is blacklisted (never fetched again; ♻️ "
-                f"revived in the master table undoes it)", "info")
+            if via_trash:
+                log(f"🗑️ {canonical}: banished — you moved it to the "
+                    f"Trash folder; it left the library for "
+                    f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')} "
+                    f"and the URL is blacklisted (never fetched again; "
+                    f"♻️ revived in the master table undoes it)", "info")
+            else:
+                log(f"🗑️ {canonical}: banished — the note carried the "
+                    f"delete mark; it left the library for "
+                    f"{BANISH_QUARANTINE_RELPATH.replace(os.sep, '/')} "
+                    f"and the URL is blacklisted (never fetched again; ♻️ "
+                    f"revived in the master table undoes it)", "info")
         elif _dryrun.is_enabled():
             log(f"🗑️ {canonical}: banishment REHEARSED (dry-run) — the "
                 f"URL is blacklisted in the shadow cache and the note's "
@@ -2100,10 +2185,18 @@ def banish_marked_notes(state, vault_path: str,
                 f"next run retries the move)", "warning")
     if record_urls:
         try:
-            report['rows_written'] = write_decommission_candidates(
-                vault_path, record_urls, source='note tag',
-                notes=record_notes,
-                status=f"🗑️ banished — confirmed {date_str}", log=log)
+            written = 0
+            if record_rows_tag:
+                written += write_decommission_candidates(
+                    vault_path, record_rows_tag, source='note tag',
+                    notes=record_notes_tag,
+                    status=f"🗑️ banished — confirmed {date_str}", log=log)
+            if record_rows_trash:
+                written += write_decommission_candidates(
+                    vault_path, record_rows_trash, source='Trash folder',
+                    notes=record_notes_trash,
+                    status=f"🗑️ banished — confirmed {date_str}", log=log)
+            report['rows_written'] = written
         except Exception as e:
             log(f"⚠️ Banishment record rows skipped: {e}", "warning")
         log(f"🗑️ Banishment: {report['banished']} note(s) removed from "

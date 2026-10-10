@@ -139,14 +139,20 @@ def scan_vault_inventory(vault_path: str,
     become move candidates — the review machinery owns them). Every
     note carries its title (the file name), source URL, domain,
     category/subcategory frontmatter, ownership, and the folder it
-    lives in. Pure file reads; never raises. Returns
+    lives in. v0.62.0 — the TRASH DOOR's waiting room: notes resting
+    in the root ``Trash`` folder (any spelling, its subfolders) are
+    COUNTED (``trash_notes`` — they await the deletion gate, the log
+    says so) but never enter the tree, the notes list, or the totals —
+    they are on their way out, not library material, and the LLM is
+    never shown them (it must neither rescue nor re-file them).
+    Pure file reads; never raises. Returns
     ``{'folders': [{'rel', 'note_count'}], 'notes': […],
     'root_notes': N, 'uncategorized_notes': N, 'hand_notes': N,
-    'total_notes': N}``."""
+    'trash_notes': N, 'total_notes': N}``."""
     log = log or (lambda *a, **k: None)
     out: Dict = {'folders': [], 'notes': [], 'root_notes': 0,
                  'uncategorized_notes': 0, 'hand_notes': 0,
-                 'total_notes': 0}
+                 'trash_notes': 0, 'total_notes': 0}
     if not vault_path or not os.path.isdir(vault_path):
         return out
     folder_counts: Dict[str, int] = {}
@@ -154,6 +160,7 @@ def scan_vault_inventory(vault_path: str,
         dirs[:] = sorted(d for d in dirs
                          if d != '_inbox' and not d.startswith('.'))
         rel_root = os.path.relpath(root, vault_path).replace(os.sep, '/')
+        in_trash = _wp._is_trash_folder(rel_root)
         for name in sorted(files):
             if not name.lower().endswith('.md'):
                 continue
@@ -171,6 +178,11 @@ def scan_vault_inventory(vault_path: str,
                     domain = ''
             app_owned = (fm.get('managed_by') or '').strip().lower() \
                 == _wp.MANAGED_BY_GITCURATOR
+            if in_trash:
+                # v0.62.0 — the waiting room: counted (honestly), never
+                # listed, never a candidate, never shown to the LLM.
+                out['trash_notes'] += 1
+                continue
             in_root = rel_root == '.'
             folder_rel = '' if in_root else rel_root
             if folder_rel and folder_rel not in _PROTECTED_FOLDERS \
@@ -202,6 +214,10 @@ def scan_vault_inventory(vault_path: str,
                     f + '/' for f in _PROTECTED_FOLDERS))})
     out['folders'] = [{'rel': rel, 'note_count': n}
                       for rel, n in sorted(folder_counts.items())]
+    if out['trash_notes']:
+        log(f"🗑️ {out['trash_notes']} note(s) rest in the Trash folder — "
+            f"they await the deletion review (the same gate as your "
+            f"auto-delete marks)", "info")
     return out
 
 
@@ -256,14 +272,19 @@ def _digest_lines(candidates: List[Dict]) -> List[str]:
 def _sanitize_folder(rel: str) -> str:
     """One validated relative folder path (forward slashes, no
     traversal, no dot-folders, every cell a safe name). Returns '' when
-    the path is illegal — the caller drops the move."""
+    the path is illegal — the caller drops the move. v0.62.0 — the
+    trash law: no cell may read ``Trash`` (any spelling) — the trash
+    door is a DELETION gesture the owner performs by hand, never a
+    destination the plan may file into (a filing move into Trash
+    would be a deletion through the back door, past the gate)."""
     rel = (rel or '').strip().replace('\\', '/').strip('/')
     if not rel or rel == '.':
         return ''
     parts = [p.strip() for p in rel.split('/')]
     for p in parts:
         if not p or p.startswith('.') or p in _PROTECTED_FOLDERS \
-                or '..' in p or not _SAFE_FOLDER_NAME.match(p):
+                or '..' in p or not _SAFE_FOLDER_NAME.match(p) \
+                or p.lower() in _wp.TRASH_FOLDER_NAMES:
             return ''
     if parts[0].lower() == 'uncategorized':
         return ''       # never propose INTO the parking lot
@@ -405,6 +426,7 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
         'root_notes': inventory.get('root_notes') or 0,
         'uncategorized_notes': inventory.get('uncategorized_notes') or 0,
         'hand_notes': inventory.get('hand_notes') or 0,
+        'trash_notes': inventory.get('trash_notes') or 0,
         'folder_count': len(inventory.get('folders') or [])}
     candidates = _move_candidates(inventory, too_broad)
     if not candidates:
