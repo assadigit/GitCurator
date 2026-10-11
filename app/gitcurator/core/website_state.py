@@ -61,6 +61,12 @@ def _key(url) -> str:
 #: "addressed and processed" — never machine-fetched again.
 SETTLED_META_KEY = 'websites_settled_at'
 
+#: v0.64.1 — the meta key that stamps THE QUEUE-HISTORY SETTLEMENT (the
+#: second one-time pass, the websites twin of v0.63.3's repos extras):
+#: every link present in the bot's history at the queue door is settled
+#: — the never-batched history stops counting as pending work.
+QUEUE_HISTORY_SETTLED_META_KEY = 'websites_queue_history_settled_at'
+
 
 class WebsiteStateDB:
     """cache.db tables for the websites pipeline (same file as CacheDB and
@@ -353,6 +359,74 @@ class WebsiteStateDB:
             self.conn.commit()
         return {'settled': len(unique), 'retries_cleared': retries_cleared,
                 'already': False}
+
+    # -- v0.64.1 THE QUEUE-HISTORY SETTLEMENT --------------------------------
+
+    def settle_queue_history(self, extra_urls: Optional[Iterable[str]] = None
+                             ) -> Dict:
+        """v0.64.1 — THE QUEUE-HISTORY SETTLEMENT, one time, on the owner's word.
+
+        The owner's report (session, verbatim): "despite everything is
+        fetched and processed, somehow the app says 85 sites need
+        processing. it's probably false positive, because in the
+        procedure they'll get skipped nonetheless." The v0.63.2
+        settlement seeded only what the STATE knew (processed /
+        retry-queue / dismissed rows) plus the vault's own truth — so a
+        link the owner sent to the bot that never became a state row
+        (never batched, a batch the owner stopped midway, a note deleted
+        by hand outside the app) was left UN-settled and every queue
+        check counted it as PENDING forever. This second pass settles
+        every URL the queue door hands it — the FULL bot history at that
+        moment — exactly the extras the repos twin (v0.63.3's
+        settle_existing_repos) always took. Retry rows of exactly those
+        URLs resolve (their retries stop firing; the banner stops crying
+        for them), but the retry queue is NOT bulk-cleared: that clear
+        belonged to the first settlement, and post-law failures keep
+        their own honest 3-retry lifecycle. Guarded by the
+        ``websites_queue_history_settled_at`` meta key: a second call is
+        a no-op (``{'settled': 0, 'already': True}``), so every caller
+        may call it freely. Returns ``{'settled': n, 'already': bool}``
+        where ``settled`` counts the rows this pass actually inserted."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM website_state_meta WHERE key=?",
+                (QUEUE_HISTORY_SETTLED_META_KEY,)).fetchone()
+        if row:
+            return {'settled': 0, 'already': True}
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        urls: List[str] = [u for u in (extra_urls or []) if u]
+        # v0.64.0 — THE ONE SPELLING: whatever spelling the history
+        # carries, the ledger settles the CANONICAL key.
+        urls = [_normalize_url(u) for u in urls]
+        urls = [u for u in urls if u]
+        seen: set = set()
+        unique: List[str] = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                unique.append(u)
+        with self._lock:
+            before = self.conn.execute(
+                "SELECT COUNT(*) FROM websites_settled").fetchone()
+            before_n = int(before[0]) if before else 0
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO websites_settled (url, settled_at)"
+                " VALUES (?,?)", [(u, now_iso) for u in unique])
+            after = self.conn.execute(
+                "SELECT COUNT(*) FROM websites_settled").fetchone()
+            after_n = int(after[0]) if after else 0
+            # the settled URLs' retry rows resolve — a settled link's
+            # retries never fire again, and the banner never cries for
+            # one (the queue itself is NOT bulk-cleared: post-law
+            # failures keep their lifecycle)
+            for u in unique:
+                self.conn.execute(
+                    "DELETE FROM website_retry_queue WHERE url=?", (u,))
+            self.conn.execute(
+                "INSERT OR REPLACE INTO website_state_meta (key, value)"
+                " VALUES (?,?)", (QUEUE_HISTORY_SETTLED_META_KEY, now_iso))
+            self.conn.commit()
+        return {'settled': after_n - before_n, 'already': False}
 
     # -- v0.64.0 THE ONE SPELLING — the ledgers' healing pass ------------
 

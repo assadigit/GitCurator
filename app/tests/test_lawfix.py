@@ -492,12 +492,29 @@ class TestBotQueueLawSplit(unittest.TestCase):
         self.web_vault = os.path.join(self.tmp, 'web')
         os.makedirs(self.gh_vault)
         os.makedirs(self.web_vault)
+        # v0.64.1 — the queue door's settlements WRITE now (the
+        # queue-history pass lands the bot history in the settled
+        # ledger), so the state DB must land in THIS test's tmp — the
+        # phase4 pattern (website_state's own module global; a stray
+        # write into the real app/cache.db would poison every later
+        # suite run). The repos settlement's CacheDB gets the same
+        # redirect (the v0.63.3 pattern).
+        from gitcurator.core import website_state as _ws
+        from gitcurator.gui import cache_db as _cdb
+        self._orig_ws_app_dir = _ws.APP_DIR
+        _ws.APP_DIR = self.tmp
+        self._orig_cdb_app_dir = _cdb.APP_DIR
+        _cdb.APP_DIR = self.tmp
         self.lines = []
         self.log = type('Log', (), {
             'emit': staticmethod(lambda msg, level='info':
                                  self.lines.append(msg))})()
 
     def tearDown(self):
+        from gitcurator.core import website_state as _ws
+        from gitcurator.gui import cache_db as _cdb
+        _ws.APP_DIR = self._orig_ws_app_dir
+        _cdb.APP_DIR = self._orig_cdb_app_dir
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run(self, urls, non_github, blocked, website_blocked='unset'):
@@ -529,13 +546,27 @@ class TestBotQueueLawSplit(unittest.TestCase):
              'https://example.com/x'],
             blocked=L.platform_domains_from_config({}),
             website_blocked=L.blocked_domains_from_config({}))
-        # the GitHub repo link is PENDING — never blocked by the law
-        self.assertEqual(res['pending_urls'], ['https://github.com/owner/repo'])
+        # the law split's own point: the GitHub repo link is NEVER
+        # banned (blocked_count 0). v0.63.3's repos settlement settles
+        # it at this fresh machine's first door (the repo is in the
+        # bot's history = an "older one", addressed) — only repos added
+        # from now on count as pending work.
+        self.assertEqual(res['pending_urls'], [])
         self.assertEqual(res['blocked_count'], 0)
-        # gists + x.com are blocked at the websites layer; example.com flows
+        self.assertEqual(res['repos_settled_count'], 1)
+        # gists + x.com are blocked at the websites layer (the split's
+        # websites half — the full law, not the platform half)
         self.assertEqual(res['websites_blocked_count'], 2)
-        self.assertEqual(res['pending_website_urls'],
-                         ['https://example.com/x'])
+        # v0.64.1 — THE QUEUE-HISTORY SETTLEMENT spoke at this door (a
+        # fresh machine's first check): example.com/x is an OLD link —
+        # in the bot's history — so it lands in the settled bucket, not
+        # pending. Only links added from now on count as pending work
+        # (the new law's first-door shape, tests.test_queuehistory's
+        # own territory; the law split itself is what this test pins).
+        self.assertEqual(res['pending_website_urls'], [])
+        self.assertEqual(res['websites_settled_count'], 1)
+        self.assertTrue(any('QUEUE-HISTORY SETTLEMENT' in m
+                            for m in self.lines))
 
     def test_the_old_single_list_would_have_blocked_github(self):
         """Regression documentation: passing the FULL law as the repo

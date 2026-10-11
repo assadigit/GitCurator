@@ -143,6 +143,13 @@ class QueueFixBase(unittest.TestCase):
         # (normalize_website_url drops '/' only on non-root paths) — state
         # rows always store the pipeline's canonical form.
         state.dismiss("https://deleted.com/", "note deleted by owner")
+        # v0.64.1 — the queue-history settlement pre-stamped: this
+        # fixture models the machine AFTER both one-time passes ran, so
+        # the links below arrive "from now on" — without the stamp the
+        # queue door would settle the whole bot history on sight (the
+        # new law's first-door shape, tests.test_queuehistory's own
+        # territory).
+        state.settle_queue_history(extra_urls=[])
         state.close()
 
         def _factory(db_path="cache.db"):
@@ -254,7 +261,11 @@ class TestQueueWebsiteClassification(QueueFixBase):
         state = _orig(db_path=self.cache_db)
         # v0.63.2 — the machine settled BEFORE this link arrived (the
         # one-time migration; the queue door runs it on every check).
+        # v0.64.1 — the queue-history settlement is pre-stamped too (the
+        # same steady-state machine: only links added from now on are
+        # the queue's pending work).
         state.settle_existing()
+        state.settle_queue_history(extra_urls=[])
         state.mark_processed("https://flaky.org/",
                              os.path.join(rev, "flaky.md"), "", "", "failed")
         state.close()
@@ -675,6 +686,17 @@ class TestOffscreenMainWindowFlow(unittest.TestCase):
 
         def _factory(db_path="cache.db"):
             return _orig_state(db_path=cache_db)
+
+        # v0.64.1 — both one-time settlements pre-stamped: this flow
+        # models the owner's machine AFTER they ran (the links arrive
+        # "from now on"); the first-door shape — the whole history
+        # settling on sight — is tests.test_queuehistory's own law.
+        _pre = _orig_state(db_path=cache_db)
+        try:
+            _pre.settle_existing()
+            _pre.settle_queue_history(extra_urls=[])
+        finally:
+            _pre.close()
 
         with mock.patch.object(wj, "_run_telegram_worker",
                                return_value=fake), \

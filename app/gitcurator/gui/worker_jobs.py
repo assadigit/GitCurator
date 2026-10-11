@@ -299,11 +299,22 @@ def _bot_queue_job(api_id, api_hash, phone, proxy, bot_username, log_signal, cod
                 # " - " pile and every stored link stop counting as
                 # pending work. One time per machine; the meta guard
                 # runs before the file scans (the v0.06 rule).
+                # v0.64.1 — THE QUEUE-HISTORY SETTLEMENT rides the same
+                # door (queue_urls = the FULL bot history this worker
+                # just read): the links that never became state rows —
+                # never batched, stopped midway, notes deleted by hand
+                # — are settled too, so the classification stops
+                # counting them as PENDING (the owner's report:
+                # "despite everything is fetched and processed, somehow
+                # the app says 85 sites need processing… in the
+                # procedure they'll get skipped nonetheless"). The
+                # repos twin (v0.63.3) always took these extras.
                 if state is not None:
                     try:
                         _website_pipeline.settle_the_ledger(
                             state, website_vault_path,
-                            log=log_signal.emit)
+                            log=log_signal.emit,
+                            queue_urls=non_github)
                     except Exception:
                         pass
                 pending_web, web_in_vault, web_done, web_dismissed = [], 0, 0, 0

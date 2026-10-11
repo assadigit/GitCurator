@@ -1,3 +1,63 @@
+## [0.64.1] — The queue-history settlement: the false "N sites need processing" cry, closed — 2026-10-13
+
+**The owner's report (session, verbatim):** "Now fix this, despite
+everything is fetched and processed, somehow the app says 85 sites need
+processing. it's probably false positive, because in the procedure
+they'll get skipped nonetheless." The screenshot's shape: `📋 Queue: 0
+new repo(s) + 93 website link(s) pending`, `⏳ 93 pending`, `▶ PROCESS
+(93)`, `🟢 Fetched 93 website link(s) — click PROCESS to start.` —
+while the repos side of the very same screen said all caught up.
+
+**THE DISEASE.** v0.63.2's settlement seeded the settled ledger from
+what the STATE knew — `websites_processed`, the retry queue,
+`dismissed_urls` — plus the vault's own truth (master-table rows,
+`_review` notes). But a link the owner sent to the bot that never
+became a state row — never batched, a batch stopped midway, a note
+deleted by hand outside the app — was left UN-settled, and every queue
+check classified it as PENDING forever. The repos twin (v0.63.3's
+`settle_existing_repos`) always took the queue door's FULL bot history
+as extras; the websites half never did. Ninety-three old links, ninety-
+three false positives — the app crying work where the owner knew the
+procedure would only skip them.
+
+**THE QUEUE-HISTORY SETTLEMENT (`core/website_state.py` +
+`core/website_pipeline.py`).** A second one-time pass, its own meta
+key (`websites_queue_history_settled_at`), running at the queue door
+(`worker_jobs.py` passes the FULL non-GitHub bot history it just read;
+the GUI fallback in `bot_queue.py` runs the same healing for
+unclassified results): every link the bot's history carried at that
+moment is settled under the CANONICAL key (the one-spelling law rides
+free — the slash pair settles as one). The settled URLs' retry rows
+resolve (their retries stop firing, the banner stops crying for them),
+but the retry queue is NOT bulk-cleared — that clear belonged to the
+first settlement, and post-law failures keep their own honest 3-retry
+lifecycle. The honest line speaks once: `🤝 THE QUEUE-HISTORY
+SETTLEMENT (websites): N link(s) the bot already delivered are settled
+— they were never batched into a state row, so the queue kept counting
+them as pending; addressed and processed now, never counted or fetched
+again.`
+
+**THE DOORS THAT HONOR IT.** The queue classification moves the pile
+from "pending" to the settled bucket (the `📋 Queue:` line, the ⏳
+badge, the PROCESS count and the hero's "Fetched N" line all go quiet
+together); the caught-up report names the settled websites in one
+honest line (not a vanishing act — the false-positive report's own
+answer); "Process All" carries a second-layer split that drops settled
+website links from the payload with one line (the twin of the repos
+split, guarding any path that writes the list directly); and the
+pipeline's `run()` gate already skipped settled links before any fetch
+— the procedure's skip is now the count's truth too. Only websites
+added from now on are counted (♻️ revived in the master table
+un-settles any of them; 🖐 the hand still outranks the law).
+
+**Tests:** `tests/test_queuehistory.py` (25 cases — the second pass's
+ledger contract, the one-spelling ride-along, the retry-row resolution
+without the bulk clear, the owner's-machine door shape, the batch gate
+that skips without a fetch, the ♻️ door back, the source contracts for
+every door, and the release bookkeeping). Suite 2021 → 2046, all
+green; the bothdoors changelog window widened 140000 → 148000 (the
+v0.63.3 precedent).
+
 ## [0.64.0] — The one spelling, one note per site, and the regex brain — 2026-10-12
 
 **The owner's report (session, verbatim):** "One error: it processed a
