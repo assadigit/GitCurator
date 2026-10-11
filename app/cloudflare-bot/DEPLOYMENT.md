@@ -2349,3 +2349,87 @@ Once Worker + Dashboard are deployed and tested, the final step is **integrating
 > count and the settled line all go quiet together. ♻️ on the record
 > row in the vault's `_review/DECOMMISSIONED.md` brings any of them
 > back, fetched like new.
+
+---
+
+## 📦 v0.66.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE EMPTY-NOTES CLOSING + THE QUIET OPEN + THE DENSE PAGES)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.66.0 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim):** "In the github projects
+> repo, the app created some empty notes, which also changed the graph
+> look of the vault. is it necessary or some kind of bug? there are
+> many empty notes, which when you want to delete them, obsidian
+> [vaults] that some notes are linked to it. Fix it." — plus: the
+> quiet open ("the system, in the startup must not try to connect
+> itself, it must wait for user to click scan or fetch"), the dense
+> settings pages ("hide tips and explanations behind a '?' emoji, so
+> the browse fields are next to each other as much as possible … do
+> the same organization and tidyness for backup section as well"), the
+> vibrant progress bar, and the Scan button's icon.
+>
+> **The archaeology:** the empty notes were never written by the
+> batch — they were BRED by the v25-era master index
+> (`_generate_master_index`): `_index.md` + `_moc/*.md` hub notes
+> wiki-linked every note the walk found, INCLUDING notes hidden inside
+> `.trash` (the walk never skipped it), so every banished repo
+> re-appeared as a link to a file Obsidian cannot see — a ghost graph
+> node. Clicking a ghost link births an EMPTY note with the link's
+> name (the exact `repo_Category_tag` shape in the owner's
+> screenshots), and Obsidian then refuses to delete it cleanly (the
+> backlinks are the index/MOC files themselves).
+>
+> **The closing:** the generator is RETIRED; the batch's closing pass
+> is now the vault hygiene pass — the app-owned scaffold is removed
+> (frontmatter-proven; a hand-written `_index.md` is sacred), the
+> content-free ghost-born stubs (only `<repo>_<Category>_<tag>`-shaped
+> names, no frontmatter, ≤ one heading — the owner's own empty notes
+> are never touched) retire to `.trash/empty-stubs` recoverably, and
+> the legacy root reports retire to `.trash/retired-reports` while the
+> run reports themselves moved to the app's `reports/` folder (the
+> vault is the library, not the filing cabinet). The quiet open
+> retired the 2-second `_startup_auto_check` (proxy probe + modals +
+> a full Telegram bot-queue fetch) — the app opens Idle and silent.
+> The dense pages ride a new `help` button kind (a 22×22 '?' glyph
+> whose tooltip IS the explanation) across the Vault and Backup
+> settings; the progress bar wears its own vibrant segment tokens
+> (`bar_saved` / `bar_retry`); the Scan CTA carries the Lucide search
+> glyph.
+>
+> **The proof:** the REAL worker driven with the owner's distilled
+> vault shape (fake GitHub + fake LLM, zero network) — 12/12: no .md
+> at the vault root ever again; the scaffold, the ghost stub and the
+> legacy reports all retired; the real repo note AND the owner's own
+> heading-only note both survive; the new reports land in
+> `app/reports`; the undo list never touches `.trash`; a second batch
+> is a hygiene no-op.
+>
+> **The suite:** 2092 → **2144 tests, all green** (new
+> `tests/test_vaulthygiene.py` — 30 cases; `tests/test_quietopen.py`
+> — 5; `tests/test_denseui.py` — 16; one new swotfix law; 25 pin
+> files re-pointed 0.65.0 → 0.66.0; the bothdoors changelog window
+> widened 154000 → 160000). Offline golden 30/30, 0 invalid; worker
+> npm test 68/68.
+>
+> **CI:** green on the main push AND the v0.66.0 tag, first try
+> (runs 38115323557 + 38115474586 — 2144 tests, 89-module compile
+> gate, offline golden, worker 68).
+>
+> **Desktop release v0.66.0** (GitCurator-v0.66.0.zip, 136 files,
+> 1,161,275 bytes, sha256
+> `58e7b828044b7cc8ecad2abbdf8e02772e91dedf7b49f1a6b7687340db81a1bd`,
+> release 409447192, asset 629902520 — download round-trip
+> byte-identical).
+>
+> **The owner's home checklist:** unzip, `1-INSTALL.bat`,
+> `GitCurator.bat` — then simply run the next batch: the hygiene pass
+> sweeps the polluted vault clean on its own (the log tells the story
+> — "🧹 Vault hygiene: …"), the graph heals as the hub notes and
+> their ghost links leave, and any empty note still standing becomes
+> deletable without warnings. The app now opens quiet — the first
+> connection happens exactly when you click SYNC, Scan or Test
+> Connection.
