@@ -2270,3 +2270,82 @@ Once Worker + Dashboard are deployed and tested, the final step is **integrating
 > download round-trip byte-identical) + CI green on main AND the
 > v0.60.0 tag first try (runs 37966184109 + 37966183447 — 1721
 > tests, 86-module compile gate, offline golden 30/30).
+
+## 📦 v0.65.0 deploy record — the unchanged 0.32.0 worker (LIVE ✅ · desktop-only release · THE REPOS BANISHMENT)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.65.0 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's ask (session, verbatim):** "The same mechanism which we
+> created for websites to banish theme, delete from vault and never
+> fetch again, i want the same mechanism to be activated for github
+> projects vault. so for example i can banish an already processed
+> github repo, so it never fetches and processed."
+>
+> **The twin, law for law (all desktop side):** `core/repo_banish.py`
+> (new, network-free — the channel is injected) gives the
+> GitHub-projects vault the websites banishment's every door: the same
+> mark grammar (a repo note tagged 🗑️ / delete / auto_delete / banish /
+> blacklist / purge — frontmatter, block style, or the `#auto-delete`
+> body hashtag; a true `decommission:` / `banish:` / `blacklist:`
+> frontmatter key; the Trash-folder MOVE — the move is the verdict; or
+> a 🗑 row in the vault's own `_review/DECOMMISSIONED.md`), the same
+> Telegram confirmation gate (the count spoken FIRST, the ask over the
+> SAME `/api/banish` trio the Worker already serves — no worker change
+> needed, the repo URLs ride the existing message), and the same
+> burial: DB first (dismissed in note_state §4.4 + settled in the repos
+> ledger v0.63.3 + retry resolved + row forgotten), then the note file
+> leaves for `.trash/banished` and the record row lands in the vault's
+> own table (♻️ revivable). A leftover 404-quarantine row is subsumed
+> (the banishment is the stronger verdict). `processing_worker.py` runs
+> the pass at the start of every GitHub batch (GUI + CLI + headless),
+> before the settled ledger loads and the vault index rebuilds.
+>
+> **The real-run proof's own find — the idempotent-settle lock,
+> closed:** `settle_repos` committed only `if added`; an INSERT OR
+> IGNORE that ignores (the COMMON case here — banishing an
+> already-settled repo) left an open write transaction, locking
+> cache.db for NoteStateDB / WebsiteStateDB ("database is locked").
+> The commit is unconditional now (two-connection regression pin).
+>
+> **Real-run proof (this session):**
+> `/home/z/real-run/repos-banish-run.py` → `repos-banish-run.log` —
+> **14/14**: the already-processed shape; the mark → ONE pending ask;
+> count spoken before the ask (payload contract: url/title/marker/door);
+> the confirmed burial's every gate (note → .trash/banished, dismissed
+> + settled + resolved + forgotten, record row); the force-fed link
+> hits BOTH batch-loop skips; the queue ladder counts it SETTLED; a
+> planted retry row resolves; DECLINED keeps everything; the Trash-door
+> gesture; the table gestures (note via ledger row; DB-only when gone);
+> the hand-written keep; the subsumed quarantine; the ♻️ full cycle
+> (revive → re-mark → re-banish); the dry-run rehearsal.
+>
+> **The suite:** 2046 → **2092 tests, all green** (new
+> `tests/test_repobanish.py` — 46 cases incl. the lock regression; 25
+> pin files re-pointed 0.64.1 → 0.65.0; the bothdoors changelog window
+> widened 148000 → 154000). Offline golden 30/30, 0 invalid; worker
+> npm test 68/68.
+>
+> **CI:** green on the main merge AND the v0.65.0 tag, first try
+> (runs 38109808995 + 38109992060 — 2092 tests, 89-module compile
+> gate, offline golden, worker 68).
+>
+> **Desktop release v0.65.0** (GitCurator-v0.65.0-windows.zip, 136
+> files, 1,157,129 bytes, sha256
+> `738e4d616b36458e7ca3979ae820ef782c8b0e9365a40361d97bbe762acacf0b`,
+> release 409397282, asset 629716540 — download round-trip
+> byte-identical).
+>
+> **The owner's home checklist:** unzip, `1-INSTALL.bat`,
+> `GitCurator.bat` — then: open any repo note you no longer want, add
+> the tag `auto-delete` (or move it into the vault's root `Trash`
+> folder), run a batch; the Telegram ask arrives with the count and
+> the 🗑️ Delete / ✋ Keep buttons; confirm and the repo note leaves the
+> vault (`.trash/banished` keeps it recoverable), the repo is never
+> fetched / counted / retried again — the queue badge, the PROCESS
+> count and the settled line all go quiet together. ♻️ on the record
+> row in the vault's `_review/DECOMMISSIONED.md` brings any of them
+> back, fetched like new.
