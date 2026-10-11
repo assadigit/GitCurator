@@ -77,6 +77,7 @@ import webbrowser
 from typing import Callable, Dict, List, Optional
 
 from gitcurator.core import dryrun
+from gitcurator.core.links import normalize_website_url
 from gitcurator.core.storage import atomic_write_text
 
 # ---------------------------------------------------------------------------
@@ -200,7 +201,15 @@ def suggested_filename(url: str) -> str:
     """``hand-<domain-slug>-<hash8>.html`` — deterministic for one URL
     (the same link suggests the same name on every machine), short
     enough to type, and collision-proof (the md5 of the full URL
-    rides along; two pages on one domain can never collide)."""
+    rides along; two pages on one domain can never collide).
+    v0.64.0 — THE ONE SPELLING: the hash rides the CANONICAL form, so
+    ``https://site/`` and ``https://site`` suggest the ONE name (the
+    queue row, the delivered page, and the consume probe can never
+    disagree about which file is the page)."""
+    try:
+        url = normalize_website_url(url) or url
+    except Exception:
+        pass
     try:
         from urllib.parse import urlparse
         netloc = (urlparse(url or '').netloc or 'link').lower()
@@ -316,6 +325,25 @@ def enqueue_hand_delivery(vault_path: str, urls: List[str],
         u = (url or '').strip()
         if not u or not u.lower().startswith(('http://', 'https://')):
             continue
+        # v0.64.0 — THE ONE SPELLING at the queue's own door: the
+        # queue keys by the CANONICAL form, so a link enqueued as
+        # ``https://site/`` is delivered and consumed under the same
+        # key the pipeline probes (``https://site``) — one spelling,
+        # one row, one delivered page. A legacy row still resting
+        # under its raw spelling is re-keyed on sight (the heal).
+        try:
+            _canon = normalize_website_url(u)
+        except Exception:
+            _canon = u
+        if _canon and _canon != u and u in links \
+                and _canon not in links:
+            links[_canon] = links.pop(u)   # the heal: one key per link
+            u = _canon
+        elif _canon and _canon != u and _canon in links:
+            links.pop(u, None)            # both spellings: one row wins
+            u = _canon
+        elif _canon:
+            u = _canon
         if u in links and links[u].get('consumed'):
             # a re-enqueue of a consumed link resets it (the owner may
             # hand-deliver again — e.g. the page changed)
@@ -327,7 +355,8 @@ def enqueue_hand_delivery(vault_path: str, urls: List[str],
             continue
         if u in links:
             continue  # already queued — a no-op, never a duplicate
-        meta = {'wall': walls.get(u, ''), 'queued': now,
+        meta = {'wall': walls.get(url, '') or walls.get(u, ''),
+                'queued': now,
                 'suggested': suggested_filename(u)}
         if door:
             meta['door'] = door
@@ -626,6 +655,31 @@ def take_hand_delivered(vault_path: str, canonical: str,
     except Exception:
         return None
     meta = (queue.get('links') or {}).get(canonical)
+    if meta is None:
+        # v0.64.0 — THE ONE SPELLING's compat read: a queue row left
+        # under a legacy spelling (written before the canonical keys)
+        # still answers the canonical probe — found by folding every
+        # key, and healed in place so the next read pays no scan.
+        k = None
+        try:
+            for k, v in (queue.get('links') or {}).items():
+                if normalize_website_url(k) == canonical:
+                    meta = v
+                    break
+        except Exception:
+            meta = None
+            k = None
+        if meta is not None and k is not None:
+            try:
+                if not dryrun.is_enabled():
+                    queue['links'][canonical] = dict(meta)
+                    if k != canonical:
+                        queue['links'].pop(k, None)
+                    atomic_write_text(
+                        queue_path(vault_path),
+                        json.dumps(queue, indent=2, ensure_ascii=False))
+            except Exception:
+                pass    # the heal is best-effort; the lookup stands
     if not meta:
         return None
     if meta.get('consumed') and not allow_consumed:

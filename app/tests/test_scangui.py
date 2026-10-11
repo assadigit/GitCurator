@@ -63,6 +63,26 @@ _PLAN = {
                'from': '(vault root)', 'to': 'AI-Domain/Agents',
                'reason': 'it is an agents list'}],
     'new_folders': ['AI-Domain/Agents'],
+    # v0.64.0 — ONE NOTE PER SITE: the regex half's proposals ride the
+    # same plan (never the LLM's — the magnet panel's own rows)
+    'consolidations': [
+        {'site': 'cleanup.pictures',
+         'keep': {'file': 'Cleanup Pictures.md',
+                  'path': '/nowhere/Cleanup Pictures.md',
+                  'source': 'https://cleanup.pictures',
+                  'title': 'Cleanup Pictures', 'category': 'Design',
+                  'subcategory': 'Assets & Resources'},
+         'merge': [
+             {'file': 'Cleanup Pictures_v1.md',
+              'path': '/nowhere/Cleanup Pictures_v1.md',
+              'source': 'https://cleanup.pictures/',
+              'title': 'Cleanup Pictures'},
+             {'file': 'Cleanup Pictures_v2.md',
+              'path': '/nowhere/Cleanup Pictures_v2.md',
+              'source': 'https://cleanup.pictures/privacy',
+              'title': 'Cleanup Pictures privacy'}],
+         'urls': ['https://cleanup.pictures/',
+                  'https://cleanup.pictures/privacy']}],
     'summary': 'file the orphan with its kin',
     'inventory': {'total_notes': 12, 'root_notes': 1,
                   'uncategorized_notes': 2, 'hand_notes': 0,
@@ -85,6 +105,17 @@ class TestTheDisplayModel(unittest.TestCase):
         self.assertEqual(m['inventory']['trash_notes'], 1)
         self.assertTrue(m['has_deletions'])
         self.assertTrue(m['has_filing'])
+        # v0.64.0 — ONE NOTE PER SITE: the proposals flatten into one
+        # row per merged note, each carrying its site and its keeper
+        self.assertEqual(m['consolidations_total'], 2)
+        self.assertEqual(len(m['consolidations']), 2)
+        self.assertTrue(m['has_consolidations'])
+        self.assertEqual(m['consolidations'][0]['site'],
+                         'cleanup.pictures')
+        self.assertEqual(m['consolidations'][0]['keep'],
+                         'Cleanup Pictures.md')
+        self.assertEqual(m['consolidations'][0]['note'],
+                         'Cleanup Pictures_v1.md')
 
     def test_the_doors_ride_the_deletion_rows(self):
         m = plan_display_model(_PLAN)
@@ -199,6 +230,8 @@ class TestTheSectionPanels(unittest.TestCase):
         self.assertIn('plan_delete_card', cards)   # very pale red
         self.assertIn('plan_create_card', cards)   # very pale green
         self.assertIn('plan_move_card', cards)     # the neutral sheet
+        # v0.64.0 — ONE NOTE PER SITE: the magnet's very pale teal
+        self.assertIn('plan_consolidate_card', cards)
 
     def test_the_headings_are_big_and_tonal(self):
         from PyQt6.QtWidgets import QLabel
@@ -209,18 +242,21 @@ class TestTheSectionPanels(unittest.TestCase):
         self.assertIn('🗑️ Marked for deletion — 2', texts)
         self.assertIn('🌱 New folders to create — 1', texts)
         self.assertIn('🚚 Notes to re-file — 1', texts)
+        self.assertIn(
+            '🧲 Duplicate notes to merge (one note per site) — 2',
+            texts)
         self.assertTrue(any(t.startswith('🏛️ The library:')
                             for t in texts))
-        # the tones ride the headings (danger / grow / neutral)
+        # the tones ride the headings (danger / grow / magnet / neutral)
         tones = {l.property('tone') for l in heads}
-        self.assertEqual(tones, {'danger', 'grow', 'neutral'})
+        self.assertEqual(tones, {'danger', 'grow', 'magnet', 'neutral'})
 
     def test_each_list_rides_its_own_scroll(self):
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QScrollArea
         scrolls = [s for s in self._dialog().findChildren(QScrollArea)
                    if s.objectName() == 'plan_list']
-        self.assertEqual(len(scrolls), 3)          # one per panel
+        self.assertEqual(len(scrolls), 4)          # one per panel
         for s in scrolls:
             self.assertLessEqual(s.maximumHeight(), 200)
             self.assertEqual(s.verticalScrollBarPolicy(),
@@ -235,6 +271,22 @@ class TestTheSectionPanels(unittest.TestCase):
              'to': 'AI-Domain/Agents', 'reason': ''})
         self.assertTrue(text.startswith('🚚'))
 
+    def test_the_consolidation_rows_wear_the_magnet(self):
+        # v0.64.0 — ONE NOTE PER SITE's glyph: the duplicate pulls into
+        # its site's note (🧲 on the heading and every row).
+        dlg = self._dialog()
+        text, full = dlg._consolidation_line(
+            {'note': 'Cleanup Pictures_v1.md',
+             'keep': 'Cleanup Pictures.md',
+             'site': 'cleanup.pictures',
+             'source': 'https://cleanup.pictures/'})
+        self.assertTrue(text.startswith('🧲'))
+        self.assertIn('merges into Cleanup Pictures.md', text)
+        self.assertIn('cleanup.pictures', text)
+        self.assertIn('.trash/consolidated', full)
+        self.assertIn('blacklisted', full)   # the tooltip says NOT —
+        # the site is wanted, only the duplicate note goes
+
     def test_a_long_pile_scrolls_not_stretches(self):
         # forty rows in one panel: the scroll caps, the rows all live
         from PyQt6.QtWidgets import QLabel, QScrollArea
@@ -248,7 +300,8 @@ class TestTheSectionPanels(unittest.TestCase):
         dlg = ScanPlanDialog(parent, plan_display_model(plan))
         scrolls = [s for s in dlg.findChildren(QScrollArea)
                    if s.objectName() == 'plan_list']
-        move_scroll = scrolls[2]
+        # panels: delete, consolidate, create, move — the moves ride [3]
+        move_scroll = scrolls[3]
         self.assertLessEqual(move_scroll.maximumHeight(), 200)
         items = [l for l in dlg.findChildren(QLabel)
                  if l.objectName() == 'cc_item'
@@ -272,12 +325,16 @@ class TestTheThemeKnowsThePanels(unittest.TestCase):
     def test_the_panel_roles_live_in_the_theme_kit(self):
         src = self._read('app', 'gitcurator', 'gui', 'theme.py')
         for role in ('plan_delete_card', 'plan_create_card',
-                     'plan_move_card', 'plan_heading', 'plan_list'):
+                     'plan_consolidate_card', 'plan_move_card',
+                     'plan_heading', 'plan_list'):
             self.assertIn(role, src, f'the theme kit lost {role}')
         for token in ('plan_del_bg', 'plan_del_border',
-                      'plan_grow_bg', 'plan_grow_border'):
+                      'plan_grow_bg', 'plan_grow_border',
+                      'plan_mag_bg', 'plan_mag_border'):
             self.assertEqual(src.count(token), 3,   # LIGHT + DARK + QSS
                              f'{token} must live in both palettes + QSS')
+        # the magnet's tonal ink rides the heading roles
+        self.assertIn('tone="magnet"', src)
 
     def test_the_dialog_never_grows_a_private_stylesheet(self):
         src = self._read('app', 'gitcurator', 'gui',
@@ -598,7 +655,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0630(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')

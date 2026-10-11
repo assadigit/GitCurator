@@ -54,18 +54,31 @@ class VaultIndex:
     the Websites vault passes ``links.normalize_website_url`` (query params
     are part of a website's identity, unlike a GitHub repo's). The default
     keeps ``normalize_url`` — the GitHub vault's behavior is unchanged.
+
+    v0.64.0 — ONE NOTE PER SITE: the index also parses each note's
+    ``site_links: [..]`` frontmatter list (the links consolidated into
+    their site's note), so a consolidated URL reads "in the vault" exactly
+    like a note of its own would; and it keeps a SITE map (host → the
+    note that owns the site — app-owned, real, outside ``_review``), the
+    probe the pipeline's consolidation gate asks through
+    (:meth:`site_note_for`).
     """
 
     def __init__(self, vault_path: str, normalizer=None):
         self.vault_path = vault_path
         self._normalize = normalizer or normalize_url
         self._url_to_path = {}  # normalized_url -> note_path
+        self._site_to_path = {}  # site key (host minus www) -> note_path
         self._built = False
 
     def rebuild(self, log_signal=None):
-        """Scan the vault and build the index. Reads only the first 500 chars
-        of each .md file (frontmatter) for speed."""
+        """Scan the vault and build the index. Reads the head of each
+        .md file (frontmatter) for speed. v0.64.0 — the read grew to
+        4000 chars: the frontmatter's ``site_links:`` line (and the
+        ownership/status keys the site map reads) live past the old
+        800-char window on note-schema notes."""
         self._url_to_path = {}
+        self._site_to_path = {}
         if not self.vault_path or not os.path.isdir(self.vault_path):
             self._built = True
             return
@@ -84,7 +97,7 @@ class VaultIndex:
                 fpath = os.path.join(root, fname)
                 try:
                     with open(fpath, 'r', encoding='utf-8') as f:
-                        content = f.read(800)  # read enough for frontmatter
+                        content = f.read(4000)  # frontmatter + the site_links line
                     # Extract source: from frontmatter (first few lines)
                     match = re.search(r'^source:\s*(.+)$', content, re.MULTILINE)
                     if match:
@@ -95,12 +108,54 @@ class VaultIndex:
                         if normalized:
                             self._url_to_path[normalized] = fpath
                             count += 1
+                            self._register_site_note(fpath, content,
+                                                     source_url, normalized)
+                    # v0.64.0 — ONE NOTE PER SITE: the consolidated links
+                    # ride the site note's frontmatter list; each indexes
+                    # to the note that now carries it.
+                    for m in re.finditer(r'^site_links:\s*(.+)$',
+                                         content, re.MULTILINE):
+                        inner = m.group(1).strip()
+                        if inner.startswith('[') and inner.endswith(']'):
+                            inner = inner[1:-1]
+                        for item in inner.split(','):
+                            u = item.strip().strip('"').strip("'")
+                            if not u:
+                                continue
+                            nu = self._normalize(u)
+                            if nu:
+                                self._url_to_path.setdefault(nu, fpath)
                 except Exception:
                     pass
 
         self._built = True
         if log_signal:
             log_signal.emit(f"📚 Vault index: {count} notes indexed", "info")
+
+    def _register_site_note(self, fpath: str, content: str,
+                            source_url: str, normalized: str):
+        """v0.64.0 — ONE NOTE PER SITE's map half: register ``fpath`` as
+        the site's note when it is a REAL one (the app's own — the
+        ``managed_by`` line says so; outside ``_review``; not a failed
+        fetch). First-come-wins in the walk's deterministic order; the
+        map is a probe, never a gate — an empty map simply leaves the
+        law off."""
+        try:
+            if '/_review/' in fpath.replace('\\', '/'):
+                return
+            m = re.search(r'^managed_by:\s*(.+)$', content, re.MULTILINE)
+            if not m or 'gitcurator' not in (m.group(1) or '').lower():
+                return        # a hand-written note is the owner's, never the anchor
+            s = re.search(r'^fetch_status:\s*(.+)$', content, re.MULTILINE)
+            if s and (s.group(1) or '').strip().strip('"\'') \
+                    .lower() == 'failed':
+                return        # a failed placeholder is not the site's note
+            from gitcurator.core.links import site_key_of
+            key = site_key_of(normalized or source_url)
+            if key and key not in self._site_to_path:
+                self._site_to_path[key] = fpath
+        except Exception:
+            pass
 
     def has_url(self, url: str) -> bool:
         """Check if a URL (normalized) is already in the vault."""
@@ -110,9 +165,32 @@ class VaultIndex:
         """Get the note path for a URL, or None if not found."""
         return self._url_to_path.get(self._normalize(url))
 
+    def site_note_for(self, url: str) -> Optional[str]:
+        """v0.64.0 — ONE NOTE PER SITE's probe: the note that owns this
+        link's SITE (its host), or None when the vault holds no real
+        note for the site. The pipeline's consolidation gate asks
+        through this — a link whose site is already noted never gets a
+        second note."""
+        try:
+            from gitcurator.core.links import site_key_of
+            key = site_key_of(self._normalize(url) or url)
+            return self._site_to_path.get(key)
+        except Exception:
+            return None
+
     def add_url(self, url: str, path: str):
-        """Add a new URL→path mapping (called after writing a new note)."""
+        """Add a new URL→path mapping (called after writing a new note).
+        v0.64.0 — the site map learns the new note too (a later link of
+        the same site in the SAME batch must find it), by reading the
+        note's own frontmatter."""
         self._url_to_path[self._normalize(url)] = path
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read(4000)
+            self._register_site_note(path, content,
+                                     self._normalize(url), self._normalize(url))
+        except Exception:
+            pass
 
     @property
     def count(self) -> int:

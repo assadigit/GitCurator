@@ -1,3 +1,94 @@
+## [0.64.0] — The one spelling, one note per site, and the regex brain — 2026-10-12
+
+**The owner's report (session, verbatim):** "One error: it processed a
+same website two times , only one has slash, other doesnt :
+https://cleanup.pictures/ https://cleanup.pictures. Secondly, for same
+domains , do not define different notes, try to consolidate all of them
+in same note, if multiple links of that site exist for example x.com
+x.com/x x.com/y in one note. Also, for Deleting notes , the banishment
+method, it's not efficient to call LLM everytime. Instead use a Python
+Regex. to find 'auto-delete' tags for every note that has it, this way
+it can be nearly instant. also you can regex to find orphan and stray
+websites, that aren't in any sub folder. LLM must only do the thinking
+part, thinking about moving some websites into a more proper folder or
+creating new essential folders." Three laws, one release.
+
+**THE ONE SPELLING (`core/links.py`).** The root `/` is a trailing
+slash too. `normalize_website_url` kept it (it stripped trailing
+slashes only when the path was longer than one character), so
+`https://cleanup.pictures/` and `https://cleanup.pictures` were TWO
+canonical forms — two VaultIndex keys, two ledger rows, two fetches,
+two notes, for one site. Both spellings now fold to the bare domain
+(with a query riding the root the slash stays — the pretty form's own
+— and the bare-query spelling gains it, folding the two). The law
+spreads to every boundary: `WebsiteStateDB` normalizes every URL that
+crosses into or out of a ledger method (write and probe alike — a row
+written with one spelling answers a probe in the other);
+`normalize_ledger_keys()` (the healing pass) re-keys the historical
+rows on sight, merging duplicates under deterministic preferences (a
+live note beats a remembered one; more retry attempts beats fewer) —
+idempotent, cheap, called from `settle_the_ledger` at EVERY door,
+before the meta guard, so an already-settled machine still heals (the
+"🩹 The one spelling" line says so). The hand-delivery queue keys
+canonically now (the enqueue heals legacy spellings;
+`suggested_filename` hashes the canonical form), so the queue row, the
+delivered page, and the consume probe can never disagree about which
+file is the page.
+
+**ONE NOTE PER SITE (the fetch side).** The host — not the full URL —
+is the filing unit: `links.site_key_of` (host minus `www.`; subdomains
+stay distinct — the conservative reading that never merges two
+genuinely different sites). A link whose site already holds a REAL
+note in the vault never defines a second note: `add_site_links_to_note`
+(the ONE sanctioned rewrite of an existing note — append-only,
+byte-preserving) adds the URL to the note's frontmatter
+`site_links: [..]` list (the machine's half: VaultIndex parses it, so
+a consolidated link reads "in the vault") and to its body's "## Links
+on this site" section (the owner's half), the ledger row points at the
+site note, and neither the fetcher nor the LLM is ever asked (🧲 "the
+link joined it (one note per site)"). A failed `_review` placeholder
+of the same site rides the consolidation — swept, its retry resolved.
+The 🖐 hand outranks the gate (falls through to the full flow) where
+the site note acts as a SOFT LOCK: classifier and analyzer skipped,
+the fetched link joins the note, and `note_is_properly_stored` honors
+the `site_links` list, so the hand's harvest retires the gesture
+exactly as it would for a note of its own. The first note a batch
+writes anchors its site (the batch overlay), so x.com, x.com/x and
+x.com/y sent together land in ONE note.
+
+**THE REGEX BRAIN (the scan's own eyes).** The architecture the owner
+asked for, now documented and test-pinned: the DELETIONS are the tag
+grammar (`scan_pending_banishments` — pure regex, both doors); the
+STRAYS are the path-shape candidates (root / Uncategorized /
+category-root / too-broad — pure arithmetic); and the newest eye joins
+the same half — `scan_site_duplicates`: every app-owned note with an
+http source groups by its site key, and a group holding a REAL note
+plus any other note of the same site becomes ONE consolidation
+proposal (keep = the site-root note, then shortest path, then walk
+order; merge = every other note — the wall's placeholders included;
+hand-written and core notes never ride). The plan gains
+`consolidations`, computed BEFORE the filing decision, and the LLM is
+asked ONLY when filing candidates exist, proposing ONLY moves and
+folders — pinned by test ("the LLM is never asked for the regex half":
+a cleanly-filed vault with duplicate sites carries its consolidation
+plan while the LLM callable is never invoked). The apply pass enforces
+the confirmed proposals: the merged notes' URLs ride the kept note's
+links list, the merged FILES retire to `.trash/consolidated`
+(recoverable by hand, invisible to the vault — NOT the banishment's
+quarantine and NEVER a dismissal: the site is wanted, only the
+duplicate note goes), the state rows re-point at the kept note, retry
+rows resolve. The owner's exact slash-pair retires with no
+self-referential link (the keeper's own source already IS the link).
+The ScanPlanDialog gains the 🧲 panel — "Duplicate notes to merge (one
+note per site)" on a very pale teal wash (light + plum-night twins),
+its own scroll, the magnet on the heading and every row; the job logs
+each proposal and the closing line reports the merges.
+
+Suite 1953 → 2015 (tests/test_onespelling.py — 23 cases; 
+tests/test_sitenote.py — 27; +12 in test_vaultscan; +5 re-told pins in
+test_scangui). Desktop-only: the worker src diff is EMPTY (0.32.0
+stays).
+
 ## [0.63.3] — The settled repos ledger: the owner's law on old repos — 2026-10-12
 
 **The owner's report (session, verbatim):** "Do the same for github

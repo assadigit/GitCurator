@@ -77,6 +77,7 @@ from typing import Callable, Dict, List, Optional
 from gitcurator.core import dryrun as _dryrun
 from gitcurator.core import website_pipeline as _wp
 from gitcurator.core.llm_client import extract_json
+from gitcurator.core.storage import unique_path
 from gitcurator.core.website_directory import DIRECTORY_FILENAME
 
 #: v0.61.0 — the scan's own log prefix (the story the log tells).
@@ -114,14 +115,18 @@ def _read_prompt() -> str:
 
 def _parse_note_frontmatter(path: str) -> Dict:
     """The scan's frontmatter read: ``source``, ``category``,
-    ``subcategory``, ``managed_by``, ``kind``, ``tags`` — the same
-    string-scan style as the banishment's own parser (the house law:
-    core never grows a YAML dependency). Block-style tag lists are read
-    like ``_parse_banish_frontmatter`` reads them. v0.63.0 — ``kind``
-    joins the read (the core-note law: a ``kind: directory`` note is
-    the machinery's own catalog, never filing material)."""
+    ``subcategory``, ``managed_by``, ``kind``, ``tags``, and (v0.64.0)
+    ``fetch_status`` — the same string-scan style as the banishment's
+    own parser (the house law: core never grows a YAML dependency).
+    Block-style tag lists are read like ``_parse_banish_frontmatter``
+    reads them. v0.63.0 — ``kind`` joins the read (the core-note law:
+    a ``kind: directory`` note is the machinery's own catalog, never
+    filing material). v0.64.0 — ``fetch_status`` joins (ONE NOTE PER
+    SITE's scan: a failed placeholder is not a site's REAL note, but
+    it is a duplicate to retire when the site's real note exists)."""
     out: Dict = {'source': '', 'category': '', 'subcategory': '',
-                 'managed_by': '', 'kind': '', 'tags': []}
+                 'managed_by': '', 'kind': '', 'tags': [],
+                 'fetch_status': ''}
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             lines = f.read(200_000).splitlines()
@@ -152,7 +157,7 @@ def _parse_note_frontmatter(path: str) -> Dict:
             out['tags'] = [t.strip().strip('"').strip("'")
                            for t in inner.split(',') if t.strip()]
         elif key in ('source', 'category', 'subcategory', 'managed_by',
-                     'kind'):
+                     'kind', 'fetch_status'):
             out[key] = val
     return out
 
@@ -259,6 +264,7 @@ def scan_vault_inventory(vault_path: str,
                 'category': (fm.get('category') or '').strip(),
                 'subcategory': (fm.get('subcategory') or '').strip(),
                 'tags': fm.get('tags') or [],
+                'fetch_status': (fm.get('fetch_status') or '').strip(),
                 'app_owned': app_owned, 'folder': folder_rel,
                 'in_root': in_root, 'core': core,
                 'protected': folder_rel in _PROTECTED_FOLDERS
@@ -306,6 +312,104 @@ def _move_candidates(inventory: Dict, too_broad: int) -> List[Dict]:
                                   for b in broad):
             out.append(n)
     return out
+
+
+def scan_site_duplicates(inventory: Dict,
+                         log: Optional[Callable] = None) -> List[Dict]:
+    """v0.64.0 — ONE NOTE PER SITE, the scan's own eyes (the regex
+    half of the brain: pure frontmatter reads, no LLM anywhere).
+
+    The owner's report (session, verbatim): "for same domains, do not
+    define different notes, try to consolidate all of them in same
+    note" — and the same session's first report (the trailing-slash
+    pair) is exactly the shape this pass finds on his machine: two
+    notes, one site. Every app-owned note with an http source groups
+    by its site key (the host): a group holding a REAL note plus any
+    other note of the same site becomes ONE proposal —
+
+    * ``keep`` — the group's REAL note (app-owned, outside the
+      protected folders, fetch_status not 'failed'); the site-root
+      URL (the bare host) wins, then the shortest source path, then
+      the walk's own deterministic order;
+    * ``merge`` — every OTHER note of the group (real notes AND
+      failed ``_review`` placeholders — the wall's page is not a
+      second note either).
+
+    Hand-written notes never ride (the owner's own filing is his);
+    core notes never ride (the catalog is the library's front door);
+    a group of placeholders alone produces nothing (the review
+    machinery owns them). Returns the proposals in the walk's order;
+    never raises."""
+    log = log or (lambda *a, **k: None)
+    out: List[Dict] = []
+    try:
+        groups: Dict[str, List[Dict]] = {}
+        order: List[str] = []
+        for n in (inventory.get('notes') or []):
+            if not n.get('app_owned') or n.get('core'):
+                continue
+            src = (n.get('source') or '').strip()
+            if not src.lower().startswith(('http://', 'https://')):
+                continue
+            site = _wp_site_key(src)
+            if not site:
+                continue
+            if site not in groups:
+                groups[site] = []
+                order.append(site)
+            groups[site].append(n)
+        for site in order:
+            notes = groups[site]
+            if len(notes) < 2:
+                continue
+            real = [n for n in notes
+                    if not n.get('protected')
+                    and (n.get('fetch_status') or 'full') != 'failed']
+            if not real:
+                continue       # placeholders alone — the review owns them
+
+            def _rank(n: Dict):
+                try:
+                    from urllib.parse import urlparse
+                    path = (urlparse(n.get('source') or '').path or '') \
+                        .rstrip('/')
+                except Exception:
+                    path = 'z'
+                return (len(path), n.get('rel') or '')
+
+            keep = sorted(real, key=_rank)[0]
+            merge = [n for n in notes if n is not keep]
+            if not merge:
+                continue
+            out.append({
+                'site': site,
+                'keep': {'file': keep['file'], 'path': keep['path'],
+                         'source': keep['source'],
+                         'title': keep.get('title') or keep['file'],
+                         'category': keep.get('category') or '',
+                         'subcategory': keep.get('subcategory') or ''},
+                'merge': [{'file': m['file'], 'path': m['path'],
+                           'source': m['source'],
+                           'title': m.get('title') or m['file']}
+                          for m in merge],
+                'urls': [m['source'] for m in merge]})
+        if out:
+            log(f"🧲 {len(out)} site(s) hold more than one note — the "
+                f"plan consolidates each into its site's own note (the "
+                f"regex half of the scan, no LLM asked)", "info")
+    except Exception as e:
+        log(f"⚠️ Scan: the site-duplicates pass failed: {e}", "warning")
+    return out
+
+
+def _wp_site_key(url: str) -> str:
+    """The site key via the pipeline's own law (links.site_key_of —
+    imported lazily so vault_scan keeps its pure import surface)."""
+    try:
+        from gitcurator.core.links import site_key_of
+        return site_key_of(url)
+    except Exception:
+        return ''
 
 
 def _folder_tree_lines(inventory: Dict, too_broad: int) -> List[str]:
@@ -579,7 +683,19 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
     raises. Returns ``{'deletions': […], 'kept_handwritten': N,
     'moves': […], 'new_folders': […], 'summary': str,
     'inventory': {…}}`` — the shape the Telegram ask and the apply
-    pass both consume."""
+    pass both consume.
+
+    v0.64.0 — THE REGEX BRAIN, the scan's own split (the owner's law,
+    verbatim: "use a Python Regex to find 'auto-delete' tags … also
+    you can regex to find orphan and stray websites … LLM must only
+    do the thinking part"). The DELETIONS (tag grammar) and the
+    STRAYS (the path-shape candidates below) were always regex —
+    deterministic passes, no LLM anywhere. ONE NOTE PER SITE joins
+    the same half: ``consolidations`` is
+    :func:`scan_site_duplicates` (pure frontmatter reads), computed
+    BEFORE the filing so a cleanly-filed vault still gets its
+    duplicate-site proposals; the LLM is asked ONLY when filing
+    candidates exist, and it proposes ONLY moves and folders."""
     log = log or (lambda *a, **k: None)
     cfg = config or {}
     too_broad = int(cfg.get('scan_too_broad_threshold',
@@ -587,7 +703,8 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
     max_notes = int(cfg.get('scan_max_notes',
                             DEFAULT_MAX_NOTES) or DEFAULT_MAX_NOTES)
     out: Dict = {'deletions': [], 'kept_handwritten': 0, 'moves': [],
-                 'new_folders': [], 'summary': '', 'inventory': {}}
+                 'new_folders': [], 'consolidations': [], 'summary': '',
+                 'inventory': {}}
     if not vault_path or not os.path.isdir(vault_path):
         return out
     try:
@@ -607,6 +724,10 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
         'trash_notes': inventory.get('trash_notes') or 0,
         'core_notes': inventory.get('core_notes') or 0,
         'folder_count': len(inventory.get('folders') or [])}
+    # v0.64.0 — the regex half's newest eye: same-site notes become
+    # consolidation proposals BEFORE any filing decision (a clean
+    # vault with duplicate-site notes still gets its plan).
+    out['consolidations'] = scan_site_duplicates(inventory, log=log)
     candidates = _move_candidates(inventory, too_broad)
     if not candidates:
         return out
@@ -619,6 +740,35 @@ def build_scan_plan(vault_path: str, llm_call: Optional[Callable],
     out['new_folders'] = new_folders
     out['summary'] = str(data.get('summary') or '')[:400]
     return out
+
+
+def _retire_note_file(vault_path: str, path: str, subdir: str,
+                      log: Optional[Callable] = None) -> str:
+    """v0.64.0 — move ONE note file into ``<vault>/.trash/<subdir>/``
+    (the banishment's own mechanics, generalized: bytes read, written
+    at a unique destination, source removed — dry-run aware, honest
+    about what actually moved). Consolidation uses ``'consolidated'``
+    — the duplicates' retirement home, recoverable by hand, invisible
+    to the vault's walks. Returns the destination path, or '' when the
+    move did not land (a rehearsal reports '' — the honesty law)."""
+    log = log or (lambda *a, **k: None)
+    if not vault_path or not path or not os.path.isfile(path):
+        return ''
+    dst_dir = os.path.join(vault_path, '.trash', subdir or 'retired')
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        dst = unique_path(os.path.join(dst_dir, os.path.basename(path)))
+        _dryrun.makedirs(dst_dir, exist_ok=True)
+        _dryrun.write_text(dst, content)
+        _dryrun.remove(path)
+        if os.path.isfile(dst) and not os.path.exists(path):
+            return dst
+        return ''
+    except Exception as e:
+        log(f"⚠️ could not move {os.path.basename(path)} to "
+            f".trash/{subdir}: {e}", "warning")
+        return ''
 
 
 def apply_scan_plan(plan: Dict, vault_path: str, state,
@@ -634,13 +784,80 @@ def apply_scan_plan(plan: Dict, vault_path: str, state,
     (``consume_decommission_table`` + ``banish_marked_notes`` — the same
     passes a confirmed batch runs). Dry-run aware; never raises.
     Returns ``{'folders_created': N, 'notes_moved': N,
-    'moved': […], 'failed_moves': N, 'banished': N}``."""
+    'moved': […], 'failed_moves': N, 'banished': N}``.
+
+    v0.64.0 — ONE NOTE PER SITE's enforcement: each confirmed
+    consolidation appends the merged notes' URLs to the kept note's
+    links list (the append-only writer — the scan's ONE sanctioned
+    rewrite), retires the merged FILES into ``.trash/consolidated``
+    (recoverable by hand, invisible to the vault — NOT the
+    banishment's quarantine and NEVER a dismissal: the site is
+    wanted, only the duplicate note goes), re-points each merged
+    URL's state row at the kept note, and resolves its retry row.
+    ``report['consolidated']`` counts the retired notes."""
     log = log or (lambda *a, **k: None)
     report: Dict = {'folders_created': 0, 'notes_moved': 0, 'moved': [],
-                    'failed_moves': 0, 'banished': 0}
+                    'failed_moves': 0, 'banished': 0, 'consolidated': 0,
+                    'consolidations': []}
     if not vault_path or not os.path.isdir(vault_path):
         return report
     plan = plan or {}
+    # ---- v0.64.0 — the consolidations (ONE NOTE PER SITE) ---------------
+    for c in (plan.get('consolidations') or []):
+        if not isinstance(c, dict):
+            continue
+        keep = c.get('keep') or {}
+        keep_path = str(keep.get('path') or '')
+        if not keep_path or not os.path.isfile(keep_path):
+            log(f"⚠️ Scan plan: the consolidation's kept note is gone — "
+                f"nothing merged for {c.get('site') or 'the site'}",
+                "warning")
+            continue
+        urls = [u for u in (c.get('urls') or [])
+                if _wp.normalize_website_url(u or '')
+                != _wp.normalize_website_url(keep.get('source') or '')]
+        try:
+            _wp.add_site_links_to_note(keep_path, urls, log=log)
+        except Exception as e:
+            log(f"⚠️ Scan plan: the consolidation into "
+                f"{os.path.basename(keep_path)} failed: {e}", "warning")
+        for m in (c.get('merge') or []):
+            mpath = str((m or {}).get('path') or '')
+            if not mpath or not os.path.isfile(mpath):
+                continue        # already gone — a hand deletion mid-plan
+            dst = _retire_note_file(vault_path, mpath,
+                                    'consolidated', log=log)
+            if dst or _dryrun.is_enabled():
+                report['consolidated'] += 1
+                report['consolidations'].append(
+                    {'site': c.get('site') or '',
+                     'kept': os.path.basename(keep_path),
+                     'retired': os.path.basename(mpath)})
+                log(f"🧲 {os.path.basename(mpath)} merged into "
+                    f"{os.path.basename(keep_path)} (site: "
+                    f"{c.get('site') or '?'}) — the duplicate rests in "
+                    f".trash/consolidated, its link rides the kept note",
+                    "info")
+        # the ledger: every merged note's URL points at the kept note
+        # and its retry row resolves — the site is KNOWN, nothing
+        # dismissed. (The slash-pair twin rides here too: its canonical
+        # IS the keeper's own source, so it adds no link — but its old
+        # row, still pointing at the retired duplicate's file, must
+        # re-point at the note that now owns the site.)
+        cat = str(keep.get('category') or '')
+        sub = str(keep.get('subcategory') or '')
+        for m in (c.get('merge') or []):
+            if state is None:
+                break
+            try:
+                canon = _wp.normalize_website_url(
+                    str((m or {}).get('source') or ''))
+                if not canon:
+                    continue
+                state.mark_processed(canon, keep_path, cat, sub, 'full')
+                state.resolve_retry(canon)
+            except Exception:
+                pass    # bookkeeping never fails a consolidation
     # ---- the filing: folders first, then the moves ----------------------
     for rel in (plan.get('new_folders') or []):
         clean = _sanitize_folder(str(rel or ''))

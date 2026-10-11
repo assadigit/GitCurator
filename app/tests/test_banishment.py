@@ -1332,8 +1332,13 @@ class TestVerdictCount(_BanishCase):
         fetch = _FakeFetch(fail_paths=[])
         pipe = self.make_pipeline(fetch=fetch)
         pipe.run_due_retries()
-        self.assertIn('https://live.example/', fetch.calls)
-        self.assertNotIn('https://dead.example/', fetch.calls)
+        # v0.64.0 — THE ONE SPELLING: the retry queue holds the
+        # canonical key, so the fetcher is asked with the canonical
+        # spelling (no root slash).
+        self.assertIn(wp.normalize_website_url('https://live.example/'),
+                      fetch.calls)
+        self.assertNotIn(wp.normalize_website_url('https://dead.example/'),
+                         fetch.calls)
         self.assertIn(
             "1 link(s) already have their verdict", self.all_logs())
         self.assertIn(
@@ -1368,7 +1373,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0601(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

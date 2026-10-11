@@ -42,6 +42,9 @@ from gitcurator.core import dryrun
 from gitcurator.core import vault_scan as vs
 from gitcurator.core import website_pipeline as wp
 
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 # -- the fakes -------------------------------------------------------------
 
@@ -61,7 +64,7 @@ class _FakeLLM:
 
 
 def _note(path, url, managed='gitcurator', tags=None, body='',
-          category='', subcategory='', kind=''):
+          category='', subcategory='', kind='', fetch_status='full'):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tag_line = 'tags: [' + ', '.join(tags or []) + ']'
     kind_line = f'kind: "{kind}"' if kind else ''
@@ -72,7 +75,7 @@ source: "{url or ''}"
 category: "{category}"
 subcategory: "{subcategory}"
 {kind_line}
-fetch_status: "full"
+fetch_status: "{fetch_status}"
 managed_by: "{managed}"
 ---
 
@@ -770,7 +773,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_version_is_0611(self):
         # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
-        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
@@ -926,6 +929,251 @@ class TestScanCtaWiring(unittest.TestCase):
         # and calling the wrapper with the old single arg still works:
         r = w._fn({'website_vault_path': '/tmp/vault'})
         self.assertIsInstance(r, dict)
+
+
+# ---------------------------------------------------------------------------
+# v0.64.0 — THE REGEX BRAIN: the scan's own split (one note per site +
+# the LLM keeps only the thinking)
+# ---------------------------------------------------------------------------
+
+class TestTheRegexBrain(_ScanCase):
+    """The owner's law (verbatim): "use a Python Regex to find
+    'auto-delete' tags … also you can regex to find orphan and stray
+    websites … LLM must only do the thinking part, thinking about
+    moving some websites into a more proper folder or creating new
+    essential folders". The deletions, the strays, and the
+    consolidations are DETERMINISTIC passes — the LLM is never asked
+    for any of them."""
+
+    def _dupe_vault(self):
+        """The owner's exact shape: two notes for cleanup.pictures (one
+        slash apart) + two notes for xtools.example.net (two pages)."""
+        _note(os.path.join(self.vault, 'Design', 'Assets',
+                           'Cleanup Pictures.md'),
+              'https://cleanup.pictures', category='Design',
+              subcategory='Assets')
+        _note(os.path.join(self.vault, 'Design', 'Assets',
+                           'Cleanup Pictures_v1.md'),
+              'https://cleanup.pictures/', category='Design',
+              subcategory='Assets')
+        _note(os.path.join(self.vault, 'Design', 'Assets', 'X Tools.md'),
+              'https://xtools.example.net', category='Design',
+              subcategory='Assets')
+        _note(os.path.join(self.vault, 'Design', 'Assets',
+                           'X Tools_v1.md'),
+              'https://xtools.example.net/gradients', category='Design',
+              subcategory='Assets')
+
+    def test_the_owners_pair_becomes_one_proposal(self):
+        self._dupe_vault()
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        props = vs.scan_site_duplicates(inv, log=self.log)
+        self.assertEqual(len(props), 2)
+        by_site = {p['site']: p for p in props}
+        cp = by_site['cleanup.pictures']
+        self.assertEqual(cp['keep']['file'], 'Cleanup Pictures.md')
+        self.assertEqual([m['file'] for m in cp['merge']],
+                         ['Cleanup Pictures_v1.md'])
+        xt = by_site['xtools.example.net']
+        # the site-root URL wins the keep, the page notes merge
+        self.assertEqual(xt['keep']['file'], 'X Tools.md')
+        self.assertEqual(len(xt['merge']), 1)
+        self.assertTrue(any('🧲' in m for _l, m in self.logs))
+
+    def test_hand_notes_never_ride(self):
+        _note(os.path.join(self.vault, 'Design', 'Assets', 'App.md'),
+              'https://s.example', category='Design')
+        _note(os.path.join(self.vault, 'Design', 'Assets', 'Mine.md'),
+              'https://s.example/other', managed='human',
+              category='Design')
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        self.assertEqual(vs.scan_site_duplicates(inv), [])   # one app
+        # note + one hand note = no proposal (the hand note is his)
+
+    def test_core_notes_never_ride(self):
+        _note(os.path.join(self.vault, 'Website Directory.md'),
+              'https://dir.example', kind='directory')
+        _note(os.path.join(self.vault, 'Design', 'Assets', 'App.md'),
+              'https://dir.example/page', category='Design')
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        self.assertEqual(vs.scan_site_duplicates(inv), [])
+
+    def test_placeholders_alone_produce_nothing(self):
+        _note(os.path.join(self.vault, '_review', 'a.md'),
+              'https://w.example/one', fetch_status='failed')
+        _note(os.path.join(self.vault, '_review', 'b.md'),
+              'https://w.example/two', fetch_status='failed')
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        self.assertEqual(vs.scan_site_duplicates(inv), [])
+
+    def test_a_placeholder_merges_into_the_real_note(self):
+        _note(os.path.join(self.vault, 'Design', 'Assets', 'Real.md'),
+              'https://w.example', category='Design')
+        _note(os.path.join(self.vault, '_review', 'w.md'),
+              'https://w.example/walled', fetch_status='failed')
+        inv = vs.scan_vault_inventory(self.vault, log=self.log)
+        props = vs.scan_site_duplicates(inv)
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]['keep']['file'], 'Real.md')
+        self.assertEqual([m['file'] for m in props[0]['merge']], ['w.md'])
+
+    def test_the_llm_is_never_asked_for_the_regex_half(self):
+        """A cleanly-filed vault with duplicate sites (no move
+        candidates at all): the plan still carries the consolidations
+        and the LLM callable is NEVER invoked — the regex half needs
+        no thinking."""
+        self._dupe_vault()
+        calls = []
+
+        def llm(messages, task=None):
+            calls.append(1)
+            return '{}'
+
+        plan = vs.build_scan_plan(self.vault, llm_call=llm,
+                                  log=self.log)
+        self.assertEqual(len(plan['consolidations']), 2)
+        self.assertEqual(calls, [])    # never asked — the whole point
+        self.assertEqual(plan['moves'], [])
+        self.assertEqual(plan['new_folders'], [])
+
+    def test_the_deletions_are_the_grammar_not_the_llm(self):
+        """Source contract: the deletions ride scan_pending_banishments
+        (the regex grammar), the strays ride the path shape — neither
+        path touches the LLM."""
+        src = open(os.path.join(_REPO_ROOT, 'app', 'gitcurator',
+                                'core', 'vault_scan.py'),
+                   encoding='utf-8').read()
+        self.assertIn('scan_pending_banishments', src)
+        self.assertIn('scan_site_duplicates', src)
+        # the LLM pass proposes ONLY folders and moves
+        prompt = open(os.path.join(_REPO_ROOT, 'app', 'prompts',
+                                   's01_vaultscan.txt'),
+                      encoding='utf-8').read()
+        self.assertIn('NEVER propose deleting', prompt)
+        self.assertIn('"new_folders"', prompt)
+
+
+class TestTheConsolidationApply(_ScanCase):
+    """The confirmed plan's consolidation hands: links appended, files
+    retired to .trash/consolidated, ledger re-pointed, NOTHING
+    dismissed (the site is wanted — the difference from banishment)."""
+
+    def _dupe_vault(self):
+        keep = _note(os.path.join(self.vault, 'Design', 'Assets',
+                                  'X Tools.md'),
+                     'https://xtools.example.net', category='Design',
+                     subcategory='Assets')
+        dupe = _note(os.path.join(self.vault, 'Design', 'Assets',
+                                  'X Tools_v1.md'),
+                     'https://xtools.example.net/gradients',
+                     category='Design', subcategory='Assets')
+        return keep, dupe
+
+    def _plan(self):
+        keep, dupe = self._dupe_vault()
+        return {'deletions': [], 'moves': [], 'new_folders': [],
+                'consolidations': [{
+                    'site': 'xtools.example.net',
+                    'keep': {'file': 'X Tools.md', 'path': keep,
+                             'source': 'https://xtools.example.net',
+                             'title': 'X Tools', 'category': 'Design',
+                             'subcategory': 'Assets & Resources'},
+                    'merge': [{'file': 'X Tools_v1.md', 'path': dupe,
+                               'source':
+                                   'https://xtools.example.net/gradients',
+                               'title': 'X Tools'}],
+                    'urls': ['https://xtools.example.net/gradients']}]}, \
+            keep, dupe
+
+    def test_apply_merges_and_retires(self):
+        plan, keep, dupe = self._plan()
+        self.db.mark_processed(
+            'https://xtools.example.net/gradients', dupe,
+            'Design', 'Assets', 'failed')
+        self.db.enqueue_retry('https://xtools.example.net/gradients',
+                              'wall')
+        rep = vs.apply_scan_plan(plan, self.vault, self.db, log=self.log)
+        self.assertEqual(rep['consolidated'], 1)
+        # the duplicate retired (recoverable), the keeper stands
+        self.assertFalse(os.path.exists(dupe))
+        retired = os.path.join(self.vault, '.trash', 'consolidated',
+                               'X Tools_v1.md')
+        self.assertTrue(os.path.isfile(retired))
+        self.assertTrue(os.path.isfile(keep))
+        # the keeper carries the link in BOTH halves
+        with open(keep, encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('site_links: [https://xtools.example.net/gradients]',
+                      content)
+        self.assertIn(wp.SITE_LINKS_HEADING, content)
+        # the ledger row points at the keeper, the retry resolved
+        row = self.db.processed_row(
+            'https://xtools.example.net/gradients')
+        self.assertEqual(row['note_path'], keep)
+        self.assertIsNone(self.db.retry_row(
+            'https://xtools.example.net/gradients'))
+        # THE difference from banishment: nothing is dismissed — the
+        # site is wanted, only the duplicate note went
+        self.assertFalse(self.db.is_dismissed(
+            'https://xtools.example.net/gradients'))
+        self.assertTrue(any('🧲' in m for _l, m in self.logs))
+
+    def test_the_owners_slash_pair_adds_no_redundant_link(self):
+        """cleanup.pictures + cleanup.pictures/: the duplicate retires
+        and the keeper's OWN source already IS the link — no
+        self-referential site_links entry."""
+        keep = _note(os.path.join(self.vault, 'Design', 'Assets',
+                                  'Cleanup Pictures.md'),
+                     'https://cleanup.pictures', category='Design')
+        dupe = _note(os.path.join(self.vault, 'Design', 'Assets',
+                                  'Cleanup Pictures_v1.md'),
+                     'https://cleanup.pictures/', category='Design')
+        plan = {'deletions': [], 'moves': [], 'new_folders': [],
+                'consolidations': [{
+                    'site': 'cleanup.pictures',
+                    'keep': {'file': 'Cleanup Pictures.md', 'path': keep,
+                             'source': 'https://cleanup.pictures',
+                             'title': 'Cleanup', 'category': 'Design',
+                             'subcategory': ''},
+                    'merge': [{'file': 'Cleanup Pictures_v1.md',
+                               'path': dupe,
+                               'source': 'https://cleanup.pictures/',
+                               'title': 'Cleanup'}],
+                    'urls': ['https://cleanup.pictures/']}]}
+        rep = vs.apply_scan_plan(plan, self.vault, self.db, log=self.log)
+        self.assertEqual(rep['consolidated'], 1)
+        self.assertFalse(os.path.exists(dupe))
+        with open(keep, encoding='utf-8') as f:
+            content = f.read()
+        self.assertNotIn('site_links', content)   # no self-reference
+        self.assertNotIn(wp.SITE_LINKS_HEADING, content)
+        # the twin's ledger row still re-points at the keeper (its old
+        # row pointed at the retired duplicate's file)
+        row = self.db.processed_row('https://cleanup.pictures/')
+        self.assertIsNotNone(row)
+        self.assertEqual(row['note_path'], keep)
+
+    def test_dry_run_is_a_rehearsal(self):
+        plan, keep, dupe = self._plan()
+        dryrun.enable()
+        try:
+            rep = vs.apply_scan_plan(plan, self.vault, self.db,
+                                     log=self.log)
+        finally:
+            dryrun.disable()
+        self.assertGreaterEqual(rep['consolidated'], 1)   # the story
+        self.assertTrue(os.path.exists(dupe))             # the reality:
+        # nothing moved, nothing written
+        with open(keep, encoding='utf-8') as f:
+            self.assertNotIn('site_links', f.read())
+
+    def test_a_missing_keeper_is_a_quiet_skip(self):
+        plan, keep, dupe = self._plan()
+        os.remove(keep)
+        rep = vs.apply_scan_plan(plan, self.vault, self.db, log=self.log)
+        self.assertEqual(rep['consolidated'], 0)
+        self.assertTrue(os.path.exists(dupe))     # the merge was skipped
+        self.assertTrue(any('gone' in m for _l, m in self.logs))
 
 
 if __name__ == '__main__':

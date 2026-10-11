@@ -144,10 +144,37 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
                if isinstance(f, (str,))][:MAX_ROWS]
     folders_total = len(plan.get('new_folders') or []) \
         if isinstance(plan.get('new_folders'), list) else 0
+
+    # v0.64.0 — ONE NOTE PER SITE: the consolidation proposals flatten
+    # into one row per merged note (the proposal's own merge list),
+    # each carrying its site and the note that keeps it.
+    consolidations: List[Dict] = []
+    raw_cons = plan.get('consolidations') \
+        if isinstance(plan.get('consolidations'), list) else []
+    for c in raw_cons:
+        if not isinstance(c, dict):
+            continue
+        keep = c.get('keep') if isinstance(c.get('keep'), dict) else {}
+        for m in (c.get('merge') or []) if isinstance(c.get('merge'),
+                                                     list) else []:
+            if not isinstance(m, dict):
+                continue
+            consolidations.append({
+                'site': str(c.get('site') or ''),
+                'keep': str(keep.get('file') or ''),
+                'note': str(m.get('file') or ''),
+                'source': str(m.get('source') or '')})
+    consolidations = consolidations[:MAX_ROWS]
+    consolidations_total = 0
+    for c in raw_cons:
+        if isinstance(c, dict) and isinstance(c.get('merge'), list):
+            consolidations_total += len(c['merge'])
     return {
         'deletions': deletions, 'deletions_total': deletions_total,
         'moves': moves, 'moves_total': moves_total,
         'new_folders': folders, 'new_folders_total': folders_total,
+        'consolidations': consolidations,
+        'consolidations_total': consolidations_total,
         'summary': str(plan.get('summary') or '')[:400],
         'kept_handwritten': _safe_int(plan.get('kept_handwritten')),
         'inventory': {
@@ -159,6 +186,7 @@ def plan_display_model(plan: Optional[Dict]) -> Dict:
             'trash_notes': _safe_int(inv.get('trash_notes'))},
         'has_deletions': deletions_total > 0,
         'has_filing': (moves_total + folders_total) > 0,
+        'has_consolidations': consolidations_total > 0,
     }
 
 
@@ -245,6 +273,15 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
                       (model or {}).get('deletions') or [],
                       int((model or {}).get('deletions_total') or 0),
                       self._deletion_line)
+        # v0.64.0 — ONE NOTE PER SITE: the duplicates ride their own
+        # very-pale-teal panel under the 🧲 (the magnet — notes that
+        # pull together into one), between the deletions and the
+        # creations: the regex half's newest findings, never the LLM's.
+        self._section(card_lay, "plan_consolidate_card", "magnet",
+                      "🧲 Duplicate notes to merge (one note per site)",
+                      (model or {}).get('consolidations') or [],
+                      int((model or {}).get('consolidations_total') or 0),
+                      self._consolidation_line)
         self._section(card_lay, "plan_create_card", "grow",
                       "🌱 New folders to create",
                       (model or {}).get('new_folders') or [],
@@ -287,10 +324,12 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
 
         apply_btn = QPushButton("🗂️ Apply plan")
         apply_btn.setToolTip(
-            "Create the new folders, move the listed notes (files only — "
-            "never a byte rewritten), and run the marked deletions "
-            "through the same machinery a confirmed Telegram ask uses "
-            "(.trash/banished + never-fetch blacklist).")
+            "Merge the duplicate notes into their site's note (links "
+            "appended, duplicates resting in .trash/consolidated — never "
+            "blacklisted), create the new folders, move the listed notes "
+            "(files only — never a byte rewritten), and run the marked "
+            "deletions through the same machinery a confirmed Telegram "
+            "ask uses (.trash/banished + never-fetch blacklist).")
         apply_btn.clicked.connect(self._on_apply)
         main_window._style_btn(apply_btn, 'primary')
         btn_row.addWidget(apply_btn)
@@ -392,6 +431,19 @@ class ScanPlanDialog(_QT_DIALOG_BASE):
 
     def _folder_line(self, f):
         return f"📁 {f}", f"New folder: {f}"
+
+    def _consolidation_line(self, c: Dict):
+        # v0.64.0 — ONE NOTE PER SITE's row: the duplicate pulls into
+        # its site's note (🧲 on the heading and every row, the panel's
+        # own glyph law).
+        text = (f"🧲 {c.get('note', '')} → merges into "
+                f"{c.get('keep', '')} (site: {c.get('site', '')})")
+        full = (f"{c.get('note', '')}\nmerges into {c.get('keep', '')}\n"
+                f"site: {c.get('site', '')}\nsource: "
+                f"{c.get('source', '')}\n(the duplicate rests in "
+                f".trash/consolidated — recoverable by hand; the site "
+                f"is wanted, nothing is blacklisted)")
+        return text, full
 
     def _move_line(self, m: Dict):
         # v0.63.0 — the transportation glyph the owner asked for: notes

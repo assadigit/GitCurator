@@ -337,8 +337,11 @@ class TestConsumeFourColumns(_IconCase):
         report = wp.consume_decommission_table(self.db, self.vault,
                                                log=self.log)
         self.assertEqual(report['handed'], 1)
-        # queue.json has the row (the fourth door's memo)
-        self.assertIn(_URL, self.queue().get('links', {}))
+        # queue.json has the row (the fourth door's memo) — keyed by
+        # the CANONICAL form (v0.64.0 THE ONE SPELLING: the queue keys
+        # exactly like the pipeline probes)
+        self.assertIn(wp.normalize_website_url(_URL),
+                      self.queue().get('links', {}))
         # the row is stamped — and VISIBLE (the table was padded)
         self.assertIn('queued', self.table_text())
         # the log tells the fifth door's truth, not a Ctrl+S demand
@@ -370,7 +373,8 @@ class TestConsumeFourColumns(_IconCase):
         report = wp.consume_decommission_table(self.db, self.vault,
                                                log=self.log)
         self.assertEqual(report['handed'], 1)
-        self.assertIn(_URL, self.queue().get('links', {}))
+        self.assertIn(wp.normalize_website_url(_URL),
+                      self.queue().get('links', {}))
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +403,9 @@ class TestScanMasterHandRows(_IconCase):
         hd.enqueue_hand_delivery(self.vault, [_URL, _URL2],
                                  log=lambda *a, **k: None)
         queue = self.queue()
-        queue['links'][_URL]['consumed'] = '2026-10-07 20:00'
+        # v0.64.0 — the queue keys canonically (THE ONE SPELLING)
+        queue['links'][wp.normalize_website_url(_URL)]['consumed'] = \
+            '2026-10-07 20:00'
         with open(hd.queue_path(self.vault), 'w', encoding='utf-8') as f:
             json.dump(queue, f)
         sug = hd.suggested_filename(_URL2)
@@ -438,15 +444,21 @@ class TestPendingHandLinks(_IconCase):
                                  walls={_URL: _ERR},
                                  log=lambda *a, **k: None)
         pending = hd.pending_hand_links(self.vault)
-        self.assertEqual({p['url'] for p in pending}, {_URL, _URL2})
+        # v0.64.0 — the queue keys (and reports) the CANONICAL form
+        self.assertEqual(
+            {p['url'] for p in pending},
+            {wp.normalize_website_url(_URL), wp.normalize_website_url(_URL2)})
         by_url = {p['url']: p for p in pending}
-        self.assertEqual(by_url[_URL]['wall'], _ERR)
+        self.assertEqual(by_url[wp.normalize_website_url(_URL)]['wall'],
+                         _ERR)
 
     def test_consumed_and_landed_links_are_not_pending(self):
         hd.enqueue_hand_delivery(self.vault, [_URL, _URL2],
                                  log=lambda *a, **k: None)
         queue = self.queue()
-        queue['links'][_URL]['consumed'] = '2026-10-07 20:00'
+        # v0.64.0 — the queue keys canonically (THE ONE SPELLING)
+        queue['links'][wp.normalize_website_url(_URL)]['consumed'] = \
+            '2026-10-07 20:00'
         with open(hd.queue_path(self.vault), 'w', encoding='utf-8') as f:
             json.dump(queue, f)
         page = os.path.join(hd.hand_delivery_dir(self.vault),
@@ -649,7 +661,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0520(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
 
     def test_changelog_mentions_the_law(self):
         text = self._read('CHANGELOG.md')

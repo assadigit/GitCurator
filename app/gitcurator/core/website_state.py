@@ -18,9 +18,43 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
 from gitcurator.constants import APP_DIR
+from gitcurator.core.links import normalize_website_url as _normalize_url
 
 MAX_FETCH_RETRIES = 3            # SPEC: retried automatically up to 3 times
 RETRY_BACKOFF_DAYS = 2           # "over several days"
+
+#: v0.64.0 — the column lists the healing pass writes back (the two
+#: simplest tables share the first-wins preference; the URL column is
+# always rewritten to the canonical key).
+_TABLE_COLS = {
+    'dismissed_urls': ('url', 'reason', 'dismissed_at'),
+    'websites_settled': ('url', 'settled_at'),
+}
+
+
+def _row_note_alive(row) -> bool:
+    """v0.64.0 — does a processed row's note still exist on disk? (the
+    healing pass's preference: a live note beats a remembered one)."""
+    try:
+        path = str(row[1] or '')
+        return bool(path) and os.path.isfile(path)
+    except Exception:
+        return False
+
+def _key(url) -> str:
+    """v0.64.0 — THE ONE SPELLING at the state DB's own boundary: every
+    URL that crosses into or out of a ledger method is normalized
+    FIRST, so a row written as ``https://site/`` answers a probe for
+    ``https://site`` (and every other spelling) — the tables hold one
+    canonical key per link, whatever spelling the caller carried.
+    Broken input returns the raw string unchanged (the old behavior:
+    the row simply never matches)."""
+    try:
+        u = str(url or '').strip()
+        return _normalize_url(u) if u else ''
+    except Exception:
+        return str(url or '')
+
 
 #: v0.63.2 — the meta key that stamps THE SETTLEMENT (one-time): every
 #: website the system already knew when the owner's law arrived is
@@ -105,7 +139,7 @@ class WebsiteStateDB:
                 "INSERT OR REPLACE INTO websites_processed "
                 "(url, note_path, category, subcategory, fetch_status,"
                 " processed_at) VALUES (?,?,?,?,?,?)",
-                (url, note_path, category, subcategory, fetch_status,
+                (_key(url), note_path, category, subcategory, fetch_status,
                  datetime.now().isoformat(timespec='seconds')))
             self.conn.commit()
 
@@ -118,7 +152,7 @@ class WebsiteStateDB:
         with self._lock:
             row = self.conn.execute(
                 "SELECT attempts, first_failed_at FROM website_retry_queue"
-                " WHERE url=?", (url,)).fetchone()
+                " WHERE url=?", (_key(url),)).fetchone()
             attempts = (row[0] + 1) if row else 1
             first_failed = (row[1] if row and row[1] else now_iso)
             next_at = (now + timedelta(days=RETRY_BACKOFF_DAYS * attempts)) \
@@ -127,7 +161,8 @@ class WebsiteStateDB:
                 "INSERT OR REPLACE INTO website_retry_queue "
                 "(url, attempts, last_error, next_attempt_at, first_failed_at,"
                 " last_failed_at) VALUES (?,?,?,?,?,?)",
-                (url, attempts, error[:500], next_at, first_failed, now_iso))
+                (_key(url), attempts, error[:500], next_at, first_failed,
+                 now_iso))
             self.conn.commit()
 
     def resolve_retry(self, url: str) -> None:
@@ -137,7 +172,7 @@ class WebsiteStateDB:
         AND stays queued for its automatic retries."""
         with self._lock:
             self.conn.execute("DELETE FROM website_retry_queue WHERE url=?",
-                              (url,))
+                              (_key(url),))
             self.conn.commit()
 
     def dismiss(self, url: str, reason: str = "note deleted by owner") -> None:
@@ -145,7 +180,8 @@ class WebsiteStateDB:
             self.conn.execute(
                 "INSERT OR REPLACE INTO dismissed_urls (url, reason,"
                 " dismissed_at) VALUES (?,?,?)",
-                (url, reason[:200], datetime.now().isoformat(timespec='seconds')))
+                (_key(url), reason[:200],
+                 datetime.now().isoformat(timespec='seconds')))
             self.conn.commit()
 
     def undismiss(self, url: str) -> bool:
@@ -155,7 +191,7 @@ class WebsiteStateDB:
         True when a dismissal was actually removed."""
         with self._lock:
             cur = self.conn.execute(
-                "DELETE FROM dismissed_urls WHERE url=?", (url,))
+                "DELETE FROM dismissed_urls WHERE url=?", (_key(url),))
             self.conn.commit()
             return bool(cur.rowcount)
 
@@ -170,7 +206,7 @@ class WebsiteStateDB:
         with self._lock:
             row = self.conn.execute(
                 "SELECT note_path, fetch_status FROM websites_processed"
-                " WHERE url=?", (url,)).fetchone()
+                " WHERE url=?", (_key(url),)).fetchone()
             if not row:
                 return False
             path, status = row
@@ -178,7 +214,7 @@ class WebsiteStateDB:
                     or '_review' not in str(path or '').replace('\\', '/'):
                 return False
             self.conn.execute(
-                "DELETE FROM websites_processed WHERE url=?", (url,))
+                "DELETE FROM websites_processed WHERE url=?", (_key(url),))
             self.conn.commit()
             return True
 
@@ -198,7 +234,7 @@ class WebsiteStateDB:
         True when a row was removed."""
         with self._lock:
             cur = self.conn.execute(
-                "DELETE FROM websites_processed WHERE url=?", (url,))
+                "DELETE FROM websites_processed WHERE url=?", (_key(url),))
             self.conn.commit()
             return bool(cur.rowcount)
 
@@ -209,16 +245,21 @@ class WebsiteStateDB:
         addressed — the owner's law: never machine-fetched again)?"""
         with self._lock:
             row = self.conn.execute(
-                "SELECT 1 FROM websites_settled WHERE url=?", (url,)).fetchone()
+                "SELECT 1 FROM websites_settled WHERE url=?",
+                (_key(url),)).fetchone()
         return row is not None
 
     def settle_urls(self, urls: Iterable[str]) -> int:
         """v0.63.2 — add URLs to the settled ledger (idempotent). Returns
-        how many rows were actually inserted."""
+        how many rows were actually inserted. v0.64.0 — THE ONE
+        SPELLING: every URL is normalized before it lands (a link the
+        owner re-sends as ``https://site/`` settles under the same key
+        as ``https://site`` — one spelling, one row, one verdict)."""
         now_iso = datetime.now().isoformat(timespec='seconds')
         added = 0
         with self._lock:
             for u in (urls or []):
+                u = _normalize_url(u) if u else ''
                 if not u:
                     continue
                 cur = self.conn.execute(
@@ -237,7 +278,7 @@ class WebsiteStateDB:
         was actually removed."""
         with self._lock:
             cur = self.conn.execute(
-                "DELETE FROM websites_settled WHERE url=?", (url,))
+                "DELETE FROM websites_settled WHERE url=?", (_key(url),))
             self.conn.commit()
             return bool(cur.rowcount)
 
@@ -289,6 +330,11 @@ class WebsiteStateDB:
             for u in (extra_urls or []):
                 if u:
                     urls.append(u)
+            # v0.64.0 — THE ONE SPELLING: whatever spelling a row (or a
+            # caller's extra) carries, the ledger settles the CANONICAL
+            # key — both spellings of one link are one settled verdict.
+            urls = [_normalize_url(u) for u in urls]
+            urls = [u for u in urls if u]
             seen: set = set()
             unique = []
             for u in urls:
@@ -307,6 +353,122 @@ class WebsiteStateDB:
             self.conn.commit()
         return {'settled': len(unique), 'retries_cleared': retries_cleared,
                 'already': False}
+
+    # -- v0.64.0 THE ONE SPELLING — the ledgers' healing pass ------------
+
+    def normalize_ledger_keys(self) -> Dict:
+        """v0.64.0 — THE ONE SPELLING's healing pass: re-key every
+        ledger row under the fixed normalizer.
+
+        The owner's report (session, verbatim): "it processed a same
+        website two times, only one has slash, other doesnt". The old
+        normalizer kept the ROOT slash, so ``https://cleanup.pictures/``
+        and ``https://cleanup.pictures`` lived as two keys in every
+        table — two settled rows, two processed rows, two retries, two
+        notes. With the root slash now stripped, every historical
+        spelling is re-keyed to the one canonical form; when both
+        spellings of one link already exist, the rows MERGE under a
+        deterministic preference (a processed row whose note exists on
+        disk beats one whose does not; a retry row with more attempts
+        beats one with fewer — the closer to retirement wins; the
+        dismissed and settled tables keep the first row by key order).
+        Idempotent and cheap (a SELECT over each table; rows whose key
+        already normalizes to itself are untouched), so every door may
+        call it freely — the first door after the upgrade heals the
+        machine's whole history in one pass. Returns
+        ``{'rekeyed': n, 'merged': m}``; never raises on the caller's
+        head (a broken table is skipped, the old keys keep working)."""
+        rekeyed = 0
+        merged = 0
+        try:
+            with self._lock:
+                # ---- websites_processed: prefer a live note on disk ----
+                rows = self.conn.execute(
+                    "SELECT url, note_path, category, subcategory,"
+                    " fetch_status, processed_at FROM websites_processed"
+                    " ORDER BY url").fetchall()
+                by_key: Dict[str, tuple] = {}
+                for r in rows:
+                    key = _normalize_url(r[0]) if r[0] else ''
+                    if not key:
+                        continue
+                    if key == r[0]:
+                        by_key[key] = r           # already canonical
+                        continue
+                    prev = by_key.get(key)
+                    if prev is None or _row_note_alive(r) \
+                            and not _row_note_alive(prev):
+                        by_key[key] = r           # the better row wins
+                    merged += 1 if prev is not None else 0
+                    rekeyed += 1
+                if any(_normalize_url(r[0]) != r[0] for r in rows if r[0]):
+                    self.conn.execute("DELETE FROM websites_processed")
+                    self.conn.executemany(
+                        "INSERT OR REPLACE INTO websites_processed"
+                        " (url, note_path, category, subcategory,"
+                        " fetch_status, processed_at) VALUES (?,?,?,?,?,?)",
+                        [(k,) + tuple(v)[1:] for k, v in by_key.items()])
+                # ---- website_retry_queue: more attempts wins ----------
+                rows = self.conn.execute(
+                    "SELECT url, attempts, last_error, next_attempt_at,"
+                    " first_failed_at, last_failed_at FROM"
+                    " website_retry_queue ORDER BY url").fetchall()
+                by_key = {}
+                for r in rows:
+                    key = _normalize_url(r[0]) if r[0] else ''
+                    if not key:
+                        continue
+                    if key == r[0]:
+                        by_key[key] = r
+                        continue
+                    prev = by_key.get(key)
+                    if prev is None or (r[1] or 0) > (prev[1] or 0):
+                        by_key[key] = r
+                    merged += 1 if prev is not None else 0
+                    rekeyed += 1
+                if any(_normalize_url(r[0]) != r[0] for r in rows if r[0]):
+                    self.conn.execute("DELETE FROM website_retry_queue")
+                    self.conn.executemany(
+                        "INSERT OR REPLACE INTO website_retry_queue"
+                        " (url, attempts, last_error, next_attempt_at,"
+                        " first_failed_at, last_failed_at)"
+                        " VALUES (?,?,?,?,?,?)",
+                        [(k,) + tuple(v)[1:] for k, v in by_key.items()])
+                # ---- dismissed_urls + websites_settled: first wins -----
+                for table in ('dismissed_urls', 'websites_settled'):
+                    rows = self.conn.execute(
+                        f"SELECT * FROM {table} ORDER BY url").fetchall()
+                    changed = False
+                    kept: Dict[str, tuple] = {}
+                    for r in rows:
+                        key = _normalize_url(r[0]) if r[0] else ''
+                        if not key:
+                            kept.setdefault(r[0], r)
+                            continue
+                        if key == r[0]:
+                            kept.setdefault(key, r)
+                            continue
+                        changed = True
+                        rekeyed += 1
+                        if key in kept:
+                            merged += 1
+                        else:
+                            kept[key] = (key,) + tuple(r[1:])
+                    if changed:
+                        self.conn.execute(f"DELETE FROM {table}")
+                        self.conn.executemany(
+                            f"INSERT OR REPLACE INTO {table}"
+                            f" ({', '.join(_TABLE_COLS[table])})"
+                            " VALUES ("
+                            + ','.join('?' * len(_TABLE_COLS[table])) + ")",
+                            [tuple(v) for v in kept.values()])
+                self.conn.commit()
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+        return {'rekeyed': rekeyed, 'merged': merged}
 
     # -- v0.19.0 proxy-epoch meta + retry re-arm --------------------------
 
@@ -340,7 +502,7 @@ class WebsiteStateDB:
             cur = self.conn.execute(
                 "UPDATE website_retry_queue"
                 " SET attempts=0, next_attempt_at=? WHERE url=?",
-                (now_iso, url))
+                (now_iso, _key(url)))
             self.conn.commit()
             return bool(cur.rowcount)
 
@@ -410,14 +572,16 @@ class WebsiteStateDB:
     def is_processed(self, url: str) -> bool:
         with self._lock:
             row = self.conn.execute(
-                "SELECT 1 FROM websites_processed WHERE url=?", (url,)).fetchone()
+                "SELECT 1 FROM websites_processed WHERE url=?",
+                (_key(url),)).fetchone()
         return row is not None
 
     def processed_row(self, url: str) -> Optional[Dict]:
         with self._lock:
             row = self.conn.execute(
                 "SELECT url, note_path, category, subcategory, fetch_status,"
-                " processed_at FROM websites_processed WHERE url=?", (url,)).fetchone()
+                " processed_at FROM websites_processed WHERE url=?",
+                (_key(url),)).fetchone()
         if not row:
             return None
         return {'url': row[0], 'note_path': row[1], 'category': row[2],
@@ -427,7 +591,8 @@ class WebsiteStateDB:
     def is_dismissed(self, url: str) -> bool:
         with self._lock:
             row = self.conn.execute(
-                "SELECT 1 FROM dismissed_urls WHERE url=?", (url,)).fetchone()
+                "SELECT 1 FROM dismissed_urls WHERE url=?",
+                (_key(url),)).fetchone()
         return row is not None
 
     def dismissed_row(self, url: str) -> Optional[Dict]:
@@ -438,7 +603,7 @@ class WebsiteStateDB:
         with self._lock:
             row = self.conn.execute(
                 "SELECT url, reason, dismissed_at FROM dismissed_urls"
-                " WHERE url=?", (url,)).fetchone()
+                " WHERE url=?", (_key(url),)).fetchone()
         if not row:
             return None
         return {'url': row[0], 'reason': row[1], 'dismissed_at': row[2]}
@@ -448,7 +613,7 @@ class WebsiteStateDB:
             row = self.conn.execute(
                 "SELECT url, attempts, last_error, next_attempt_at,"
                 " first_failed_at, last_failed_at FROM website_retry_queue"
-                " WHERE url=?", (url,)).fetchone()
+                " WHERE url=?", (_key(url),)).fetchone()
         if not row:
             return None
         return {'url': row[0], 'attempts': row[1], 'last_error': row[2],
