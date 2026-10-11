@@ -5,6 +5,126 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.64.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE ONE SPELLING + ONE NOTE PER SITE + THE REGEX BRAIN)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.64.0 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim — three reports, one
+> session):**
+>
+> 1. "One error: it processed a same website two times , only one has
+>    slash, other doesnt :
+>    https://cleanup.pictures/
+>    https://cleanup.pictures"
+> 2. "Secondly, for same domains , do not define different notes, try
+>    to consolidate all of them in same note, if multiple links of
+>    that site exist for example
+>    x.com
+>    x.com/x
+>    x.com/y
+>    in one note"
+> 3. "Also, for Deleting notes , the banishment method, it's not
+>    efficient to call LLM everytime. Instead use a Python Regex. to
+>    find \"auto-delete\" tags for every note that has it, this way
+>    it can be nearly instant. also you can regex to find orphan and
+>    stray websites, that aren't in any sub folder. LLM must only do
+>    the thinking part, thinking about moving some websites into a
+>    more proper folder or creating new essential folders."
+>
+> **The answer, all on the desktop side — three laws, three commits:**
+>
+> 1. **THE ONE SPELLING** (`core/links.py` + the state ledgers): the
+>    root `/` is a trailing slash too — `https://cleanup.pictures/`
+>    and `https://cleanup.pictures` are ONE canonical form. The old
+>    normalizer kept the root slash, so the two spellings made two
+>    VaultIndex keys, two ledger rows, two fetches, two notes. The
+>    fix spreads to every boundary: `WebsiteStateDB` normalizes every
+>    URL crossing into or out of a ledger method (write and probe
+>    alike); `normalize_ledger_keys()` (the healing pass) re-keys the
+>    historical rows on sight — idempotent, cheap, called from
+>    `settle_the_ledger` at EVERY door, before the meta guard, so the
+>    owner's already-settled machine still heals in one 🩹 line; the
+>    hand-delivery queue keys canonically (`suggested_filename`
+>    hashes the canonical form, so the queue row, the delivered page
+>    and the consume probe can never disagree).
+>
+> 2. **ONE NOTE PER SITE** (`core/website_pipeline.py` +
+>    `gui/vault_index.py`): the host — not the full URL — is the
+>    filing unit. `links.site_key_of` (host minus `www.`; subdomains
+>    stay distinct). A link whose site already holds a REAL note never
+>    defines a second note: `add_site_links_to_note` (the ONE
+>    sanctioned rewrite — append-only, byte-preserving) adds the URL
+>    to the note's frontmatter `site_links:` list and its body's
+>    "## Links on this site" section, the ledger row points at the
+>    site note, and neither the fetcher nor the LLM is ever asked
+>    (🧲 "the link joined it (one note per site)"). A failed `_review`
+>    placeholder of the same site rides the consolidation; the 🖐 hand
+>    outranks the gate and finishes through the doors under a SOFT
+>    LOCK (classifier + analyzer skipped, `note_is_properly_stored`
+>    honors the site_links list, the gesture retires); the batch
+>    overlay anchors a brand-new site so x.com, x.com/x and x.com/y
+>    sent together land in ONE note.
+>
+> 3. **THE REGEX BRAIN** (`core/vault_scan.py` + the scan modal): the
+>    architecture the owner asked for, documented and test-pinned.
+>    The DELETIONS are the tag grammar (`scan_pending_banishments` —
+>    pure regex, both doors); the STRAYS are the path-shape
+>    candidates; the newest eye, `scan_site_duplicates`, joins the
+>    same half — every app-owned note with an http source groups by
+>    its site key, and a group holding a REAL note plus any other
+>    note of the same site becomes ONE consolidation proposal. The
+>    plan gains `consolidations` computed BEFORE the filing decision;
+>    the LLM is asked ONLY when filing candidates exist and proposes
+>    ONLY moves and folders (pinned: never invoked for the regex
+>    half). The apply pass merges the confirmed proposals: the merged
+>    notes' URLs ride the kept note's links list, the merged FILES
+>    retire to `.trash/consolidated` (recoverable, NEVER blacklisted —
+>    the site is wanted), the state rows re-point, retry rows resolve.
+>    The owner's exact slash-pair retires with no self-referential
+>    link. The ScanPlanDialog gains the 🧲 magnet panel on very pale
+>    teal (light + plum-night twins), its own scroll, the magnet on
+>    the heading and every row.
+>
+> **Real-run proof (this session):** `/home/z/real-run/one-note-run.py`
+> → `one-note-run.log` — **11/11**: the pair folds to one canonical
+> form; one note answers both spellings; the settled pair is skipped
+> before the fetcher; the x.com example lands in ONE note; the batch
+> overlay; the slash-pair vault yields a consolidation proposal with
+> the LLM never asked; apply merges + retires to .trash/consolidated;
+> nothing dismissed, ledger re-pointed, retry resolved; the stale
+> slash-spelled settled row re-keys at the door; a consolidated link
+> is a PROPER delivery; the hand queue keys canonically.
+>
+> **The suite:** 1953 → **2021 tests, all green** (new
+> `tests/test_onespelling.py` — 26 cases; `tests/test_sitenote.py` —
+> 30; +11 in `test_vaultscan`; +1 in `test_scangui`; the bookkeeping
+> beats; 21 pin files re-pointed). Offline golden 30/30, 0 invalid;
+> worker npm test 68/68.
+>
+> **CI:** green on the main merge AND the v0.64.0 tag, first try
+> (runs 38102738490 + 38102927211 — 2021 tests, 88-module compile
+> gate, offline golden, worker 68).
+>
+> **Desktop release v0.64.0** (GitCurator-v0.64.0-windows.zip, 135
+> files, 1,143,906 bytes, sha256
+> `ce19a9e0c0fb1bab9c59899cc4017e5b72b189a581286dcae0a4014c3ca8d28a`,
+> release 409330960, asset 629498053 — download round-trip
+> byte-identical).
+>
+> **The owner's home checklist:** unzip, `1-INSTALL.bat`,
+> `GitCurator.bat` — then: the first sync's settlement door heals the
+> ledger spellings (🩹 one line); the first [Scan] proposes merging
+> his cleanup.pictures pair (🧲 panel — Apply merges them into one
+> note, the duplicate rests in .trash/consolidated); any new link of
+> a known site joins its site's note instantly, no second note ever.
+> No worker action: 0.32.0 stays live.
+
+---
+
 ## 📦 v0.63.3 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE SETTLED REPOS LEDGER)
 
 > **Live in production** at
