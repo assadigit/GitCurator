@@ -130,6 +130,38 @@ class ThemeMixin:
         _theme.repolish(btn)
         return btn
 
+    def _make_help_button(self, tip: str):
+        """v0.66.0 — the '?' affordance (the owner's ask, verbatim: "hide
+        tips and explanations behind a '?' emoji, so the browse fields
+        are next to each other as much as possible").
+
+        A compact 22×22 round glyph whose tooltip IS the explanation:
+        hover shows it, a click flashes it at the cursor (touch users),
+        and the settings rows lose their paragraph walls. The tooltip
+        text is capped defensively so a page can never overflow."""
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtWidgets import QToolTip
+        text = str(tip or '').strip()
+        if len(text) > 900:
+            text = text[:880].rstrip() + '…'
+        btn = QPushButton("?")
+        btn.setFixedSize(22, 22)
+        btn.setToolTip(text)
+        btn.setAccessibleName("Help")
+        btn.setStatusTip(text.splitlines()[0][:120] if text else "Help")
+        btn.setCursor(Qt.CursorShape.WhatsThisCursor)
+        btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._style_btn(btn, 'help')
+
+        def _flash(_checked=False):
+            try:
+                QToolTip.showText(QCursor.pos(), text, btn)
+            except Exception:
+                pass    # never let a help click break a page
+
+        btn.clicked.connect(_flash)
+        return btn
+
     def _refresh_button_styles(self):
         """Re-apply tracked button variants after a theme change.
 
@@ -328,6 +360,11 @@ class ThemeMixin:
             _icons.set_btn_icon(self.settings_btn, 'settings', accent, 16)
             # Test Connectivity: activity glyph in the active accent.
             _icons.set_btn_icon(self.test_btn, 'activity', accent, 18)
+            # v0.66.0 — the Scan CTA joins its siblings: the search glyph
+            # in the active accent (the owner's ask: "add an icon for scan
+            # button just like you did for sync and test connection").
+            if hasattr(self, 'scan_btn'):
+                _icons.set_btn_icon(self.scan_btn, 'search', accent, 18)
             # Hero state glyph (fetching's gray loader stays neutral;
             # v0.32: 'running' wears the white Stop square on the danger
             # fill — the same button, no separate STOP control).

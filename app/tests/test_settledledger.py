@@ -603,7 +603,7 @@ class TestSourceContracts(unittest.TestCase):
             self.assertIn(marker, src)
 
     def test_version_and_changelog_beat(self):
-        self.assertEqual(self._read("VERSION").strip(), "0.65.0")
+        self.assertEqual(self._read("VERSION").strip(), "0.66.0")
         text = self._read("CHANGELOG.md")
         self.assertIn("## [0.63.2]", text)
         self.assertIn("settled", text.lower())

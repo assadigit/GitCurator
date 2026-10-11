@@ -505,7 +505,7 @@ class TestSourceContracts(unittest.TestCase):
         self.assertIn("REPOS_SETTLED_META_KEY = 'repos_settled_at'", src)
 
     def test_version_and_changelog_beat(self):
-        self.assertEqual(self._read("VERSION").strip(), "0.65.0")
+        self.assertEqual(self._read("VERSION").strip(), "0.66.0")
         text = self._read("CHANGELOG.md")
         self.assertIn("## [0.63.3]", text)
         self.assertIn("settled", text.lower())
@@ -521,7 +521,7 @@ class TestSourceContracts(unittest.TestCase):
     def test_the_user_agent_string_beats(self):
         src = self._read("app", "gitcurator", "cloud",
                          "cloudflare_sync.py")
-        self.assertIn("GitCurator/0.65.0", src)
+        self.assertIn("GitCurator/0.66.0", src)
 
 
 if __name__ == "__main__":

@@ -89,164 +89,278 @@ from gitcurator.gui.worker_jobs import _run_telegram_worker
 
 class WorkerReportsMixin:
     # ---- moved verbatim; see module docstring ----
+    @classmethod
+    def _reports_dir(cls) -> str:
+        """v0.66.0 — where the run reports live: the app's ``reports/``
+        folder by default, overridable via the ``reports_dir`` config key
+        (a relative value resolves against the app dir). The vault root
+        is NEVER a reports home — the vault is the library, not the
+        filing cabinet."""
+        return os.path.join(APP_DIR, 'reports')
+
+    def _reports_dir_for(self) -> str:
+        """The CONFIG-aware reports dir (``reports_dir`` overrides the
+        default; empty/relative values fall back to the app's folder)."""
+        override = str((self.config or {}).get('reports_dir') or '').strip()
+        if override and os.path.isabs(override):
+            return override
+        return self._reports_dir()
+
     def _generate_master_index(self):
-        """Generate/update master index (_index.md) + per-category MOCs (_moc/).
-        Incremental — adds new entries with timestamps, keeps old entries."""
+        """v0.66.0 — RETIRED (kept as the compat shim: the batch's call
+        site and the CLI twins still speak the old name). The v25-era
+        master index (_index.md) + per-category MOCs (_moc/*.md) are the
+        owner's reported graph pollution: every note in the vault gained
+        a backlink to a hub file, every banished note in .trash became a
+        GHOST node (the walk never skipped .trash), and clicking a ghost
+        link created an EMPTY note that Obsidian then refuses to delete
+        cleanly ("some notes are linked to it"). The pass now runs the
+        hygiene cleanup instead — see _vault_hygiene_pass."""
+        return self._vault_hygiene_pass()
+
+    # v0.66.0 — the folders the hygiene walk never enters (system /
+    # hidden / app-machinery folders — the same set the rest of the
+    # vault walks honor, plus the Library mirror tree).
+    _HYGIENE_SKIP_DIRS = ('.obsidian', '.git', '.trash', '_missing',
+                          '_moc', '_inbox', 'attachments', 'Library',
+                          '__pycache__')
+
+    # An EMPTY STUB: no frontmatter, under 256 bytes, and nothing but
+    # blank lines + at most one heading line (the shape Obsidian leaves
+    # when a ghost [[wiki-link]] is clicked into existence). Anything
+    # richer — frontmatter, body text, a list — is somebody's writing
+    # and is never touched.
+    _STUB_MAX_BYTES = 256
+
+    @classmethod
+    def _is_empty_stub(cls, content: str) -> bool:
+        """True when a note is content-free: no frontmatter, no body —
+        blank lines and at most one heading line (the shape Obsidian
+        leaves when a ghost [[wiki-link]] is clicked into existence —
+        an empty file, whitespace, or a lone auto-generated heading).
+        Anything richer — frontmatter, body text, a list — is somebody's
+        writing and is never touched. Never raises."""
+        if content is None:
+            return True
+        if content.startswith('---'):
+            return False        # frontmatter = a structured file, never ours to judge
+        headings = 0
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith('#'):
+                headings += 1
+                if headings > 1:
+                    return False
+                continue
+            return False            # real content — somebody's writing
+        return True
+
+    @classmethod
+    def _has_note_name_shape(cls, fname: str) -> bool:
+        """True when a filename carries the app's canonical note shape:
+        ``<repo>_<Category>_<tag>.md`` — a CATEGORY_KEY appears as an
+        underscore-delimited segment. The ghost-link children inherit
+        their names from the retired index's ``[[wiki-links]]``, which
+        came from the app's own note filenames — so THIS shape, plus
+        content-free, is the fingerprint of the empty notes the owner
+        reported. An owner's own filename (my-thoughts.md, ideas.md)
+        never carries a category segment and is never touched."""
+        stem = fname[:-3] if fname.endswith('.md') else fname
+        if '_' not in stem:
+            return False
+        parts = stem.split('_')
+        return any(p in CATEGORY_KEYS for p in parts)
+
+    def _vault_hygiene_pass(self):
+        """v0.66.0 — THE GRAPH'S CLEAN HANDS (the owner's report, verbatim:
+        "the app created some empty notes, which also changed the graph
+        look of the vault … when you want to delete them, Obsidian
+        [warns] that some notes are linked to it. Fix it.").
+
+        What the old reporting left in the vault, and what this pass
+        does about it — every step dry-run aware, never raises, and
+        NOTHING the app cannot prove it owns (or that is not literally
+        content-free) is ever touched:
+
+        1. ``_index.md`` + ``_moc/*.md`` — the retired master-index
+           scaffold. Removed ONLY when the frontmatter proves the app
+           wrote it (``type: master-index`` / ``type: moc``); the empty
+           ``_moc/`` folder goes too. This heals the backlink walls:
+           repo notes become deletable again, and the ghost
+           ``[[wiki-links]]`` that bred empty notes are gone.
+        2. Empty stub notes — content-free .md files carrying the app's
+           note-name shape (``<repo>_<Category>_<tag>.md`` — the
+           Obsidian-born children of clicked ghost links; no frontmatter,
+           ≤ one heading line) — RETIRED into ``.trash/empty-stubs/``
+           (recoverable by hand, invisible to the vault's walks). An
+           owner's own empty note (any other filename) is never touched.
+        3. Legacy root reports — the accumulated
+           ``_processing_report_*.md`` notes and
+           ``processing_summary_*.txt`` files the pre-v0.66 batches
+           dropped at the vault root (one per batch — graph nodes and
+           root clutter alike). New reports live in ``app/reports/``;
+           the legacy pile is retired to ``.trash/retired-reports/``.
+
+        The manifest (``links_manifest.json``) and the undo list
+        (``_undo_last_batch.txt``) are WORKING FILES, not notes — they
+        stay (Obsidian does not index .json/.txt by default).
+        """
         try:
             vault_path = self.config.get('vault_path', '')
             if not vault_path or not os.path.isdir(vault_path):
                 return
+            removed_index = 0      # _index.md + MOC files (app-owned)
+            retired_stubs = 0      # content-free notes → .trash/empty-stubs
+            retired_reports = 0    # legacy root reports → .trash/retired-reports
 
-            moc_dir = os.path.join(vault_path, "_moc")
-            # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-            _dryrun.makedirs(moc_dir, exist_ok=True)
+            def _log(msg, level='info'):
+                try:
+                    self.log_message.emit(msg, level)
+                except Exception:
+                    pass
 
-            # Scan vault for all notes
-            notes_by_category = {}
-            review_notes = []
-            all_notes = []
+            def _frontmatter_type(path):
+                """The ``type:`` frontmatter value, or '' — head-read
+                only, never raises."""
+                try:
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as f:
+                        head = f.read(400)
+                except OSError:
+                    return ''
+                if not head.startswith('---'):
+                    return ''
+                m = re.search(r'^type:\s*(.+)$', head, re.MULTILINE)
+                return m.group(1).strip().strip('"\'') if m else ''
 
+            def _retire(path, subdir):
+                """Move one file into <vault>/.trash/<subdir>/ — bytes
+                preserved, name uniquified, dry-run aware. Returns True
+                when the move landed (or was rehearsed)."""
+                dst_dir = os.path.join(vault_path, '.trash', subdir)
+                try:
+                    _dryrun.makedirs(dst_dir, exist_ok=True)
+                    dst = _storage.unique_path(
+                        os.path.join(dst_dir, os.path.basename(path)))
+                    _dryrun.move(path, dst)
+                    return True
+                except Exception:
+                    return False
+
+            # ---- 1. the retired master-index scaffold -------------------
+            index_path = os.path.join(vault_path, '_index.md')
+            if os.path.isfile(index_path) \
+                    and _frontmatter_type(index_path) == 'master-index':
+                _dryrun.remove(index_path)
+                removed_index += 1
+            moc_dir = os.path.join(vault_path, '_moc')
+            if os.path.isdir(moc_dir):
+                for fname in os.listdir(moc_dir):
+                    if not fname.endswith('.md'):
+                        continue
+                    fpath = os.path.join(moc_dir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    if _frontmatter_type(fpath) == 'moc':
+                        _dryrun.remove(fpath)
+                        removed_index += 1
+                # prune the folder when the app's files were its only
+                # residents (an owner file keeps the folder — sacred).
+                # os.remove cannot take a directory — rmdir only succeeds
+                # when it is genuinely empty, so an owner file keeps the
+                # folder by construction.
+                try:
+                    if _dryrun.is_enabled():
+                        _dryrun.record(
+                            'remove', moc_dir,
+                            note='delete the emptied _moc folder')
+                    elif not os.listdir(moc_dir):
+                        os.rmdir(moc_dir)
+                except Exception:
+                    pass
+
+            # ---- 2. the Obsidian-born empty stubs ----------------------
+            # (anywhere in the visible vault — root included: a clicked
+            # ghost link births its empty note wherever Obsidian stands)
+            stub_targets = []
             for root, dirs, files in os.walk(vault_path):
-                # Skip _moc, _inbox, attachments folders
-                if any(skip in root for skip in ['_moc', '_inbox', 'attachments', '.obsidian']):
-                    continue
+                dirs[:] = [d for d in dirs
+                           if d not in self._HYGIENE_SKIP_DIRS]
                 for fname in files:
                     if not fname.endswith('.md'):
                         continue
                     fpath = os.path.join(root, fname)
                     try:
-                        with open(fpath, 'r', encoding='utf-8') as f:
-                            content = f.read(800)
-                        cat_match = re.search(r'category:\s*(.+)', content)
-                        cat = cat_match.group(1).strip() if cat_match else "Uncategorized"
-                        stars_match = re.search(r'stars:\s*(\d+)', content)
-                        stars = int(stars_match.group(1)) if stars_match else 0
-                        lang_match = re.search(r'primary_language:\s*(.+)', content)
-                        lang = lang_match.group(1).strip() if lang_match else "N/A"
-                        cred_match = re.search(r'credibility_score:\s*([\d.]+)', content)
-                        cred = float(cred_match.group(1)) if cred_match else 0
-                        source_match = re.search(r'source:\s*(.+)', content)
-                        source = source_match.group(1).strip() if source_match else ""
+                        if os.path.getsize(fpath) > self._STUB_MAX_BYTES:
+                            continue
+                        with open(fpath, 'r', encoding='utf-8',
+                                  errors='replace') as f:
+                            content = f.read(self._STUB_MAX_BYTES + 1)
+                    except OSError:
+                        continue
+                    if self._is_empty_stub(content) \
+                            and self._has_note_name_shape(fname):
+                        stub_targets.append(fpath)
+            for fpath in stub_targets:
+                if _retire(fpath, 'empty-stubs'):
+                    retired_stubs += 1
 
-                        note_info = {
-                            'name': fname[:-4],  # without .md
-                            'category': cat,
-                            'stars': stars,
-                            'language': lang,
-                            'credibility': cred,
-                            'source': source,
-                            'path': fpath,
-                        }
-                        all_notes.append(note_info)
-                        if cat not in notes_by_category:
-                            notes_by_category[cat] = []
-                        notes_by_category[cat].append(note_info)
-                        if '_review' in root:
-                            review_notes.append(note_info)
-                    except Exception:
-                        pass
+            # ---- 3. the legacy root reports ----------------------------
+            for fname in os.listdir(vault_path):
+                fpath = os.path.join(vault_path, fname)
+                if fname.startswith('_processing_report_') \
+                        and fname.endswith('.md') and os.path.isfile(fpath):
+                    if _retire(fpath, 'retired-reports'):
+                        retired_reports += 1
+                elif fname.startswith('processing_summary_') \
+                        and fname.endswith('.txt') and os.path.isfile(fpath):
+                    if _retire(fpath, 'retired-reports'):
+                        retired_reports += 1
 
-            # Generate master _index.md (full regeneration — it's a dashboard)
-            index_path = os.path.join(vault_path, "_index.md")
-            lines = []
-            lines.append("---")
-            lines.append("type: master-index")
-            lines.append(f"last_updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            lines.append(f"total_projects: {len(all_notes)}")
-            lines.append("---")
-            lines.append("")
-            lines.append("# 📚 Projects Master Index")
-            lines.append("")
-            lines.append(f"> Auto-generated. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            lines.append(f"> Total projects: **{len(all_notes)}** | Categories: **{len(notes_by_category)}** | Review queue: **{len(review_notes)}**")
-            lines.append("")
-            lines.append("## 📁 By Category")
-            lines.append("")
-            for cat in sorted(notes_by_category.keys()):
-                notes = notes_by_category[cat]
-                lines.append(f"### {cat} ({len(notes)})")
-                lines.append(f"→ [[_moc/{_safe_moc_name(cat)}|View MOC]]")
-                lines.append("")
-                # Top 5 by stars
-                top = sorted(notes, key=lambda x: -x['stars'])[:5]
-                for n in top:
-                    lines.append(f"- [[{n['name']}]] — ⭐ {n['stars']} · 🔧 {n['language']} · 📊 {n['credibility']}/100")
-                if len(notes) > 5:
-                    lines.append(f"- ... and {len(notes) - 5} more in [[_moc/{_safe_moc_name(cat)}|MOC]]")
-                lines.append("")
-
-            # Review queue
-            if review_notes:
-                lines.append("## 🔍 Review Queue")
-                lines.append("")
-                for n in review_notes:
-                    lines.append(f"- [[{n['name']}]] — ⚠️ Low confidence")
-                lines.append("")
-
-            # Top credibility
-            if all_notes:
-                top_cred = sorted(all_notes, key=lambda x: -x['credibility'])[:10]
-                lines.append("## 🏆 Top Credibility (Top 10)")
-                lines.append("")
-                for i, n in enumerate(top_cred, 1):
-                    lines.append(f"{i}. [[{n['name']}]] — 📊 {n['credibility']}/100")
-                lines.append("")
-
-            # By language
-            lang_counts = {}
-            for n in all_notes:
-                lang = n['language']
-                lang_counts[lang] = lang_counts.get(lang, 0) + 1
-            if lang_counts:
-                lines.append("## 💻 By Language")
-                lines.append("")
-                for lang, count in sorted(lang_counts.items(), key=lambda x: -x[1]):
-                    lines.append(f"- {lang}: {count} projects")
-                lines.append("")
-
-            lines.append("---")
-            lines.append(f"*This index is auto-updated after each processing run.*")
-
-            # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-            _dryrun.write_text(index_path, '\n'.join(lines))
-
-            # Generate per-category MOCs
-            for cat, notes in notes_by_category.items():
-                moc_filename = _safe_moc_name(cat) + '.md'
-                moc_path = os.path.join(moc_dir, moc_filename)
-
-                moc_lines = []
-                moc_lines.append("---")
-                moc_lines.append("type: moc")
-                moc_lines.append(f"category: {cat}")
-                moc_lines.append(f"last_updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-                moc_lines.append(f"project_count: {len(notes)}")
-                moc_lines.append("---")
-                moc_lines.append("")
-                moc_lines.append(f"# 📁 {cat}")
-                moc_lines.append("")
-                moc_lines.append(f"> {len(notes)} projects in this category")
-                moc_lines.append("")
-                moc_lines.append("## Projects")
-                moc_lines.append("")
-                for n in sorted(notes, key=lambda x: -x['stars']):
-                    moc_lines.append(f"- [[{n['name']}]] — ⭐ {n['stars']} · 🔧 {n['language']} · 📊 {n['credibility']}/100")
-                moc_lines.append("")
-                moc_lines.append(f"← Back to [[_index|Master Index]]")
-
-                # v0.09.5 — Phase 0 (dry-run): recorded, not performed.
-                _dryrun.write_text(moc_path, '\n'.join(moc_lines))
-
-            self.log_message.emit(
-                f"📚 Master index updated: {len(all_notes)} projects, {len(notes_by_category)} MOCs generated",
-                "success"
-            )
+            # ---- the honest summary -------------------------------------
+            if removed_index:
+                _log(f"🧹 Vault hygiene: the retired master index "
+                     f"({removed_index} file(s) — _index.md/_moc) left the "
+                     f"vault — its links no longer weld your graph or block "
+                     f"note deletions", "info")
+            if retired_stubs:
+                _log(f"🧹 Vault hygiene: {retired_stubs} empty stub note(s) "
+                     f"(content-free — the ghost-link children) retired to "
+                     f".trash/empty-stubs — recoverable by hand", "info")
+            if retired_reports:
+                _log(f"🧹 Vault hygiene: {retired_reports} legacy report "
+                     f"file(s) retired from the vault root to "
+                     f".trash/retired-reports (new reports live in the app's "
+                     f"reports folder, not your vault)", "info")
+            if not (removed_index or retired_stubs or retired_reports):
+                try:
+                    self.log_message.emit(
+                        "🧹 Vault hygiene: clean — no index scaffold, no "
+                        "empty stubs, no legacy reports in the vault.",
+                        "info")
+                except Exception:
+                    pass
         except Exception as e:
-            self.log_message.emit(f"Failed to generate master index: {e}", "warning")
+            try:
+                self.log_message.emit(
+                    f"⚠️ Vault hygiene pass skipped: {e}", "warning")
+            except Exception:
+                pass
 
     def _generate_final_report(self, link_tracker_report=None):
-        """v25 pre-flight: generate a comprehensive Markdown report in the
-        vault root after processing finishes.
+        """v25 pre-flight: generate a comprehensive Markdown report after
+        processing finishes.
+
+        v0.66.0 — THE VAULT IS THE LIBRARY, NOT THE FILING CABINET: the
+        report now lives in the app's own ``app/reports/`` folder (next
+        to the recall + golden artifacts) instead of the vault root —
+        one .md per batch used to accumulate as graph nodes and root
+        clutter in the owner's Obsidian vault (his report: "the app
+        created some empty notes, which also changed the graph look of
+        the vault"). The legacy root pile is retired by the hygiene
+        pass; this writer never touches the vault again.
 
         The report always runs — even if some links failed — so the user has
         a complete audit trail. It includes:
@@ -265,7 +379,11 @@ class WorkerReportsMixin:
                 return None
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_path = os.path.join(vault_path, f"_processing_report_{timestamp}.md")
+            reports_dir = self._reports_dir_for()
+            # v0.66.0 — dry-run aware: a rehearsal records, never creates.
+            _dryrun.makedirs(reports_dir, exist_ok=True)
+            report_path = os.path.join(
+                reports_dir, f"_processing_report_{timestamp}.md")
 
             processed = getattr(self, '_processed_log', [])
             total = self.total
@@ -557,7 +675,13 @@ class WorkerReportsMixin:
 
     def _generate_summary_log(self):
         """Generate a .txt summary of processed repos after a run.
-        Saved in the vault root as 'processing_summary_YYYYMMDD_HHMMSS.txt'."""
+
+        v0.66.0 — THE VAULT IS THE LIBRARY: the summary now lives in
+        the app's ``app/reports/`` folder (was the vault root — one
+        .txt per batch accumulated as root clutter and rode every
+        VaultSeal commit). The rotation keeps the newest
+        ``summary_keep_last`` (default 10) there; the legacy root pile
+        is retired by the hygiene pass."""
         try:
             vault_path = self.config.get('vault_path', '')
             if not vault_path or not os.path.isdir(vault_path):
@@ -565,7 +689,10 @@ class WorkerReportsMixin:
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"processing_summary_{timestamp}.txt"
-            filepath = os.path.join(vault_path, filename)
+            reports_dir = self._reports_dir_for()
+            # v0.66.0 — dry-run aware: a rehearsal records, never creates.
+            _dryrun.makedirs(reports_dir, exist_ok=True)
+            filepath = os.path.join(reports_dir, filename)
 
             processed = getattr(self, '_processed_log', [])
             total = self.total
@@ -627,21 +754,24 @@ class WorkerReportsMixin:
             _dryrun.write_text(filepath, '\n'.join(lines))
 
             # v0.26.0 — SWOT fix (the v0.06 P3 item): run summaries used
-            # to accumulate in the vault root forever (and VaultSeal
-            # committed every one of them). Keep only the newest
-            # ``summary_keep_last`` (default 10). The matcher is the exact
-            # processing_summary_*.txt pattern — nothing else is ever
-            # touched, and dry-run records the removals instead of
-            # performing them. ``summary_keep_last`` <= 0 keeps everything.
+            # to accumulate forever (and VaultSeal committed every one of
+            # them). Keep only the newest ``summary_keep_last`` (default
+            # 10). v0.66.0 — the rotation now reads the app's reports
+            # folder (the writer's new home); the vault root is never
+            # listed again (its legacy pile belongs to the hygiene pass).
+            # The matcher is the exact processing_summary_*.txt pattern —
+            # nothing else is ever touched, and dry-run records the
+            # removals instead of performing them.
+            # ``summary_keep_last`` <= 0 keeps everything.
             keep = int((self.config or {}).get('summary_keep_last', 10) or 0)
             if keep > 0:
                 try:
                     existing = sorted(
-                        f for f in os.listdir(vault_path)
+                        f for f in os.listdir(reports_dir)
                         if f.startswith('processing_summary_')
                         and f.endswith('.txt'))
                     for old_name in existing[:-keep]:
-                        _dryrun.remove(os.path.join(vault_path, old_name))
+                        _dryrun.remove(os.path.join(reports_dir, old_name))
                 except OSError:
                     pass
 

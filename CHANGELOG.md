@@ -1,3 +1,108 @@
+## [0.66.0] — The empty notes closed, the quiet open, and the dense pages — 2026-10-15
+
+**The owner's report (session, verbatim):** "In the github projects
+repo, the app created some empty notes, which also changed the graph
+look of the vault. is it necessary or some kind of bug? there are
+many empty notes, which when you want to delete them, obsidian
+[vaults] that some notes are linked to it. Fix it."
+
+**THE ARCHAEOLOGY (`gui/worker/reports.py`).** The empty notes were
+never written by the batch — they were BRED by the v25-era master
+index. `_generate_master_index` wrote `_index.md` at the vault root
+plus one `_moc/<Category>.md` per category, and those hub notes
+`[[wiki-linked]]` to EVERY note the walk found — including notes
+inside `.trash/` (the walk never skipped it), so every banished repo
+(v0.65) re-appeared as a link to a file Obsidian cannot see: a GHOST
+node in the graph, faded and clickable. Clicking one births an EMPTY
+note with the link's name — the exact `repo_Category_tag` shape in
+the owner's screenshots — and Obsidian then refuses to delete it
+cleanly ("some notes are linked to it": the backlinks are the index
+and the MOCs themselves). The graph's look changed twice over: the
+hub-and-spoke welding of every real note, and the ghost constellation
+of every retired one.
+
+**THE CLOSING — THE HYGIENE PASS (`_vault_hygiene_pass`).** The
+generator is RETIRED (the compat shim keeps the old call sites
+working); the batch's closing pass now heals the vault instead of
+polluting it. ① The app-owned scaffold — `_index.md` and `_moc/*.md`,
+proven by their own `type: master-index` / `type: moc` frontmatter
+(a hand-written file with the same name is sacred and stays) — is
+REMOVED: the backlink walls fall, repo notes become deletable again,
+and no new ghost links are ever written. ② The ghost-born empty stub
+notes — content-free files (no frontmatter, blank lines and at most
+one heading) whose names carry the app's canonical
+`<repo>_<Category>_<tag>` shape, the fingerprint of the clicked ghost
+link — are RETIRED to `.trash/empty-stubs/`, bytes preserved,
+recoverable by hand, invisible to every walk; the owner's own empty
+note under any other filename is never touched (the sacred law,
+tested). ③ The legacy root reports — the accumulated
+`_processing_report_*.md` (one per batch, a graph node each) and
+`processing_summary_*.txt` — retire to `.trash/retired-reports/`.
+
+**THE VAULT IS THE LIBRARY, NOT THE FILING CABINET.** The run reports
+themselves moved OUT of the vault: `_generate_final_report` and
+`_generate_summary_log` now write into the app's own `reports/`
+folder (overridable via the `reports_dir` config key — absolute paths
+only; the FIFO rotation `summary_keep_last` follows them there).
+What stays in the vault root is exactly what Obsidian never indexes
+as a note: `links_manifest.json` (the LinkTracker's manifest) and
+`_undo_last_batch.txt` (the undo list — whose walk now skips `.trash`,
+so undo can never offer to delete a retired stub out of its
+recoverable home).
+
+**THE QUIET OPEN (`main_window/ui.py`, `bot_queue.py`).** The owner's
+law, verbatim: "the system, in the startup must not try to connect
+itself, it must wait for user to click scan or fetch." The old
+2-second `_startup_auto_check` — a proxy socket probe with its
+"Proxy Required" / "Proxy Unreachable" MODALS, then a full Telegram
+bot-queue fetch — is RETIRED. The app opens Idle and silent; every
+connection is a click (SYNC's bot fetch, Scan's vault pass, Test
+Connection). The passive proxy-status dot stays (a local status
+painting, never a pipeline connection).
+
+**THE DENSE PAGES (`main_window/ui.py`, `backup_seal.py`, `theme.py`
++ the kit).** The owner's ask: "hide tips and explanations behind a
+'?' emoji, so the browse fields are next to each other as much as
+possible … do the same organization and tidyness for backup section
+as well. it's too confusing." A new `help` button kind joins the
+design system — a compact 22×22 round '?' glyph whose tooltip IS the
+explanation (hover shows it, a click flashes it at the cursor for
+touch users) — and every paragraph wall moved behind one: the
+Websites-vault law list (the always-banned domains), the Library
+mirror hint, the pipelines story, the backup-folder OneDrive tip, the
+FIFO rotation, the VaultSeal and Good Repos intros, and the Dashboard
+note. The Vault page's pickers are one row each (combo + Browse +
+Remove + '?', field + Browse + '?'), the "(new — the Phase 2
+pipeline)"-style release-history labels are gone ("Websites vault",
+"Manual Notes vault" — the labels say what the things ARE), and the
+Backup page wears the same tidiness end to end.
+
+**THE VIBRANT BAR + THE SCAN GLYPH.** The progress bar's segments
+have their OWN theme tokens now — `bar_saved` / `bar_retry`, vivid
+green and amber in both modes (the result mode used to paint with the
+status-TEXT tones; the light-mode retry segment read as dark brown
+mud — the owner's call: "use a more vibrant color, it's too dark and
+ugly") — and the batch fill brightened (`#7C3AED` light / `#A78BFA`
+dark). The Scan CTA finally carries its glyph: the Lucide `search`
+icon in the active accent, joining SYNC's refresh and Test
+Connection's activity.
+
+**PROOF.** Suite 2092 → 2144, all green: new `tests/test_vaulthygiene`
+(30 — the pass law by law: the scaffold removed and the backlinks
+healed, an owner file inside `_moc/` keeps the folder, the stubs
+retired recoverably, frontmatter/body/two-headings are writing and
+never touched, dry-run rehearses, handwritten index/MOC files are
+sacred), `tests/test_quietopen` (5 — the auto-check method is gone,
+nothing is scheduled at startup, the click doors stay wired),
+`tests/test_denseui` (16 — the '?' affordance, the dense rows, the
+absent paragraph walls, the vibrant tokens, the scan glyph), and one
+new swotfix law (the reports home is outside the vault). Real-run
+proof 12/12 on the REAL worker with the owner's distilled vault
+shape: no .md at the root ever again, the scaffold and the ghost stub
+and the legacy reports all retired, the real note and the owner's own
+heading-only note both survive, the new reports land in `app/reports`,
+and a second batch is a hygiene no-op.
+
 ## [0.65.0] — The repos banishment: the websites' trash door, activated for the GitHub vault — 2026-10-14
 
 **The owner's ask (session, verbatim):** "The same mechanism which we

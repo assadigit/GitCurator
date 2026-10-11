@@ -11,6 +11,7 @@ Each test locks one weakness/threat fix from the v0.26.0 SWOT pass:
 
 import ast
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -117,9 +118,17 @@ class TestVerifySslFlag(unittest.TestCase):
 
 
 class TestSummaryCap(unittest.TestCase):
-    """v0.26.0: per-run processing_summary_*.txt files in the vault root
-    are capped to ``summary_keep_last`` (default 10) — they used to
-    accumulate forever and VaultSeal committed every one."""
+    """v0.26.0: per-run processing_summary_*.txt files are capped to
+    ``summary_keep_last`` (default 10) — they used to accumulate forever
+    and VaultSeal committed every one.
+
+    v0.66.0 — THE VAULT IS THE LIBRARY: the summaries (and the .md run
+    reports) now live in the app's ``reports/`` folder (or the
+    ``reports_dir`` config override — which is how these tests stay
+    hermetic), not the vault root — one .md per batch in the owner's
+    Obsidian vault was graph-node pollution. The cap itself is
+    unchanged; the rotation reads the reports folder (its writer's new
+    home), and the vault root is never listed again."""
 
     def _worker_stub(self, config, vault):
         from gitcurator.gui.worker.reports import WorkerReportsMixin
@@ -137,63 +146,79 @@ class TestSummaryCap(unittest.TestCase):
 
         return _Stub()
 
-    def test_prune_keeps_newest_n(self):
+    def _setup(self, n, pattern, extra_cfg=None):
+        """A hermetic reports dir + n seeded summaries + the stub.
+        The reports folder is a SIBLING of the vault (never inside it —
+        the vault root must stay empty for the empty-root assertion)."""
         import tempfile
-        with tempfile.TemporaryDirectory() as vault:
-            for i in range(12):
-                name = f"processing_summary_2026010{i // 10}{i % 10}_0000{i:02d}.txt"
-                with open(os.path.join(vault, name), "w",
-                          encoding="utf-8") as f:
-                    f.write("old")
-            # a lookalike file that must NEVER be touched
-            keep_me = os.path.join(vault, "processing_summary_notes.md")
-            with open(keep_me, "w", encoding="utf-8") as f:
-                f.write("not a run summary")
-            stub = self._worker_stub({'summary_keep_last': 5, 'vault_path': vault,
-                                      'pipelines': {}}, vault)
-            out = stub._generate_summary_log()
-            self.assertTrue(out and os.path.isfile(out))
-            remaining = sorted(f for f in os.listdir(vault)
-                               if f.startswith("processing_summary_")
-                               and f.endswith(".txt"))
-            self.assertEqual(len(remaining), 5,
-                             "keep=5 keeps the 5 NEWEST files total "
-                             "(including the one just written)")
-            self.assertTrue(os.path.isfile(keep_me),
-                            "the lookalike is never touched")
+        tmp = tempfile.mkdtemp(prefix='swot-cap-')
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        vault = os.path.join(tmp, 'vault')
+        reports = os.path.join(tmp, 'reports')
+        os.makedirs(vault, exist_ok=True)
+        os.makedirs(reports, exist_ok=True)
+        for i in range(n):
+            with open(os.path.join(reports, pattern(i)), "w",
+                      encoding="utf-8") as f:
+                f.write("old")
+        cfg = {'vault_path': vault, 'reports_dir': reports,
+               'pipelines': {}}
+        cfg.update(extra_cfg or {})
+        return vault, reports, self._worker_stub(cfg, vault)
+
+    def _txt_in(self, d):
+        return sorted(f for f in os.listdir(d)
+                      if f.startswith("processing_summary_")
+                      and f.endswith(".txt"))
+
+    def test_prune_keeps_newest_n(self):
+        vault, reports, stub = self._setup(
+            12, lambda i:
+            f"processing_summary_2026010{i // 10}{i % 10}_0000{i:02d}.txt",
+            {'summary_keep_last': 5})
+        # a lookalike file that must NEVER be touched
+        keep_me = os.path.join(reports, "processing_summary_notes.md")
+        with open(keep_me, "w", encoding="utf-8") as f:
+            f.write("not a run summary")
+        out = stub._generate_summary_log()
+        self.assertTrue(out and os.path.isfile(out))
+        self.assertTrue(out.startswith(reports),
+                        "the summary lands in the reports folder, "
+                        "not the vault")
+        remaining = self._txt_in(reports)
+        self.assertEqual(len(remaining), 5,
+                         "keep=5 keeps the 5 NEWEST files total "
+                         "(including the one just written)")
+        self.assertTrue(os.path.isfile(keep_me),
+                        "the lookalike is never touched")
+        # the vault root never received a single file
+        self.assertEqual(os.listdir(vault), [])
 
     def test_default_cap_is_ten(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as vault:
-            for i in range(20):
-                name = f"processing_summary_2026010{i // 10}{i % 10}_0000{i % 10:02d}.txt"
-                with open(os.path.join(vault, name), "w",
-                          encoding="utf-8") as f:
-                    f.write("old")
-            stub = self._worker_stub({'vault_path': vault}, vault)
-            stub._generate_summary_log()
-            remaining = [f for f in os.listdir(vault)
-                         if f.startswith("processing_summary_")
-                         and f.endswith(".txt")]
-            self.assertEqual(len(remaining), 10,
-                             "default keep=10: the 10 newest, including "
-                             "the one just written")
+        vault, reports, stub = self._setup(
+            20, lambda i:
+            f"processing_summary_2026010{i // 10}{i % 10}_0000{i % 10:02d}.txt")
+        stub._generate_summary_log()
+        remaining = self._txt_in(reports)
+        self.assertEqual(len(remaining), 10,
+                         "default keep=10: the 10 newest, including "
+                         "the one just written")
 
     def test_zero_disables_pruning(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as vault:
-            for i in range(14):
-                name = f"processing_summary_20260101_0000{i:02d}.txt"
-                with open(os.path.join(vault, name), "w",
-                          encoding="utf-8") as f:
-                    f.write("old")
-            stub = self._worker_stub(
-                {'summary_keep_last': 0, 'vault_path': vault}, vault)
-            stub._generate_summary_log()
-            remaining = [f for f in os.listdir(vault)
-                         if f.startswith("processing_summary_")
-                         and f.endswith(".txt")]
-            self.assertEqual(len(remaining), 15, "keep everything + new")
+        vault, reports, stub = self._setup(
+            14, lambda i: f"processing_summary_20260101_0000{i:02d}.txt",
+            {'summary_keep_last': 0})
+        stub._generate_summary_log()
+        remaining = self._txt_in(reports)
+        self.assertEqual(len(remaining), 15, "keep everything + new")
+
+    def test_the_default_reports_home_is_outside_the_vault(self):
+        from gitcurator.gui.worker.reports import WorkerReportsMixin
+        from gitcurator.constants import APP_DIR
+        default = WorkerReportsMixin._reports_dir()
+        self.assertTrue(os.path.isabs(default))
+        self.assertEqual(default, os.path.join(APP_DIR, 'reports'))
+        self.assertNotIn('vault', default.lower())
 
 
 class TestDevToolImportHygiene(unittest.TestCase):

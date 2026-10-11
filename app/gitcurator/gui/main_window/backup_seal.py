@@ -73,32 +73,47 @@ class BackupSealMixin:
         layout.setSpacing(8)
 
         # ---- 💾 Vault Backup (local zip + FIFO rotation) ----
+        # v0.66.0 — THE DENSE PAGE (the owner's ask, verbatim: "do the same
+        # organization and tidyness for backup section as well. it's too
+        # confusing"): every paragraph wall rides behind a '?' glyph, the
+        # rows stay compact, and each group says what it DOES.
         status_group = QGroupBox("Vault Backup")
         status_layout = QVBoxLayout(status_group)
         status_layout.setSpacing(6)
 
         # Backup folder picker — the section's one input row.
         folder_row = QHBoxLayout()
+        folder_row.setSpacing(6)
         folder_row.addWidget(QLabel("Backup folder:"))
         self.backup_folder_input = QLineEdit()
-        self.backup_folder_input.setPlaceholderText("e.g., C:\\Users\\You\\OneDrive\\Vault-Backups")
+        self.backup_folder_input.setPlaceholderText("where the vault zips land")
         self.backup_folder_input.setText(self.config.get('backup_folder', ''))
         folder_row.addWidget(self.backup_folder_input, 1)
 
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._backup_browse_folder)
+        self._style_btn(browse_btn, 'secondary')
         folder_row.addWidget(browse_btn)
+        folder_row.addWidget(self._make_help_button(
+            "💡 Backup folder — where the timestamped vault zips land.\n"
+            "Any folder works: a OneDrive/Dropbox/Drive sync folder uploads "
+            "your zips to the cloud automatically. Zero setup, no OAuth."))
         status_layout.addLayout(folder_row)
 
         # Rotation + status dot on ONE row (v32.2 compaction).
         keep_row = QHBoxLayout()
+        keep_row.setSpacing(6)
         keep_row.addWidget(QLabel("Keep last:"))
         self.backup_max_input = QLineEdit()
         self.backup_max_input.setPlaceholderText("10")
         self.backup_max_input.setMaximumWidth(60)
         self.backup_max_input.setText(str(self.config.get('backup_max', 10)))
         keep_row.addWidget(self.backup_max_input)
-        keep_row.addWidget(QLabel("backups (FIFO rotation)"))
+        keep_row.addWidget(QLabel("backups"))
+        keep_row.addWidget(self._make_help_button(
+            "Keep last N backups — FIFO rotation: when a new zip lands and "
+            "more than N exist, the OLDEST is removed. 0 or less keeps "
+            "everything."))
         keep_row.addStretch()
         self.backup_status_label = QLabel("● Disabled")
         self._set_status(self.backup_status_label, 'error', strong=True)
@@ -119,6 +134,9 @@ class BackupSealMixin:
         self.backup_restore_btn = QPushButton("Restore")
         self._style_btn(self.backup_restore_btn, 'secondary')
         self.backup_restore_btn.clicked.connect(self._backup_restore)
+        self.backup_restore_btn.setToolTip(
+            "Pick a backup ZIP and extract it to a NEW folder next to the "
+            "current vault — the current vault is never touched")
         btn_row.addWidget(self.backup_restore_btn)
 
         btn_row.addStretch()
@@ -129,15 +147,6 @@ class BackupSealMixin:
         btn_row.addWidget(self.backup_enabled_check)
         status_layout.addLayout(btn_row)
 
-        # One wrapped note (was a 2-line hard-wrapped paragraph).
-        info_label = QLabel(
-            "💡 Any folder works — a OneDrive/Dropbox/Drive sync folder "
-            "uploads your zips to the cloud automatically. Zero setup, no OAuth."
-        )
-        info_label.setWordWrap(True)
-        info_label.setObjectName("info_note")
-        status_layout.addWidget(info_label)
-
         layout.addWidget(status_group)
 
         # ---- VaultSeal (v31): automatic GitHub mirror ----
@@ -145,8 +154,9 @@ class BackupSealMixin:
         seal_layout = QVBoxLayout(seal_group)
         seal_layout.setSpacing(6)
 
-        # Both settings on ONE row (v32.2 compaction).
+        # Both settings on ONE row (v32.2 compaction) + the story behind '?'.
         seal_checks_row = QHBoxLayout()
+        seal_checks_row.setSpacing(6)
         self.vaultseal_enabled_check = QCheckBox("Seal after every run")
         self.vaultseal_enabled_check.setToolTip(
             "Commit the whole vault to git after every run and push it to a "
@@ -161,9 +171,16 @@ class BackupSealMixin:
         self.vaultseal_push_check.setChecked((self.config.get('vaultseal') or {}).get('auto_push', True))
         seal_checks_row.addWidget(self.vaultseal_push_check)
         seal_checks_row.addStretch()
+        seal_checks_row.addWidget(self._make_help_button(
+            "💡 VaultSeal — Obsidian's free tier has no sync.\n"
+            "VaultSeal commits the whole vault after every run and pushes it "
+            "to a PRIVATE repository (full history, restore with git clone). "
+            "Machine state (workspace.json, .trash) is excluded; an "
+            "unchanged vault is a no-op."))
         seal_layout.addLayout(seal_checks_row)
 
         repo_row = QHBoxLayout()
+        repo_row.setSpacing(6)
         repo_row.addWidget(QLabel("Backup repo:"))
         self.vaultseal_repo_input = QLineEdit()
         self.vaultseal_repo_input.setPlaceholderText("auto — derived from the vault folder name")
@@ -200,17 +217,6 @@ class BackupSealMixin:
         seal_btn_row.addWidget(self.vaultseal_status_label)
         seal_layout.addLayout(seal_btn_row)
 
-        # One wrapped note (was a 4-line hard-wrapped paragraph).
-        seal_info = QLabel(
-            "💡 Obsidian's free tier has no sync — VaultSeal commits the whole "
-            "vault after every run and pushes it to a PRIVATE repository (full "
-            "history, restore with git clone). Machine state (workspace.json, "
-            ".trash) is excluded; an unchanged vault is a no-op."
-        )
-        seal_info.setWordWrap(True)
-        seal_info.setObjectName("info_note")
-        seal_layout.addWidget(seal_info)
-
         layout.addWidget(seal_group)
 
         self._vaultseal_refresh_status()
@@ -220,8 +226,9 @@ class BackupSealMixin:
         good_layout = QVBoxLayout(good_group)
         good_layout.setSpacing(6)
 
-        # Both settings on ONE row (v32.2 compaction).
+        # Both settings on ONE row (v32.2 compaction) + the story behind '?'.
         good_checks_row = QHBoxLayout()
+        good_checks_row.setSpacing(6)
         self.goodrepos_enabled_check = QCheckBox("Publish after every run")
         self.goodrepos_enabled_check.setToolTip(
             "Publish the curated directory to a PUBLIC GitHub repo after "
@@ -236,9 +243,16 @@ class BackupSealMixin:
         self.goodrepos_push_check.setChecked((self.config.get('goodrepos') or {}).get('auto_push', True))
         good_checks_row.addWidget(self.goodrepos_push_check)
         good_checks_row.addStretch()
+        good_checks_row.addWidget(self._make_help_button(
+            "💡 Good Repos — every curated repo becomes an entry in a "
+            "browsable, emoji-rich README directory (organized like "
+            "AI → Skills → …) with the full notes mirrored into category "
+            "folders.\nPUBLIC by design — everyone can browse and benefit "
+            "from your curation."))
         good_layout.addLayout(good_checks_row)
 
         good_repo_row = QHBoxLayout()
+        good_repo_row.setSpacing(6)
         good_repo_row.addWidget(QLabel("Directory repo:"))
         self.goodrepos_repo_input = QLineEdit()
         self.goodrepos_repo_input.setPlaceholderText("good-repos")
@@ -260,17 +274,6 @@ class BackupSealMixin:
         good_btn_row.addWidget(self.goodrepos_status_label)
         good_layout.addLayout(good_btn_row)
 
-        # One wrapped note (was a 4-line hard-wrapped paragraph).
-        good_info = QLabel(
-            "💡 Every curated repo becomes an entry in a browsable, emoji-rich "
-            "README directory (organized like AI → Skills → …) with the full "
-            "notes mirrored into category folders. PUBLIC by design — "
-            "everyone can browse and benefit from your curation."
-        )
-        good_info.setWordWrap(True)
-        good_info.setObjectName("info_note_indigo")
-        good_layout.addWidget(good_info)
-
         layout.addWidget(good_group)
 
         self._goodrepos_refresh_status()
@@ -280,8 +283,9 @@ class BackupSealMixin:
         dash_layout = QVBoxLayout(dash_group)
         dash_layout.setSpacing(6)
 
-        # URL + action on ONE row (v32.2 compaction — was 2 rows).
+        # URL + action on ONE row (v32.2 compaction — was 2 rows) + '?'.
         dash_row = QHBoxLayout()
+        dash_row.setSpacing(6)
         dash_row.addWidget(QLabel("Worker URL:"))
         self.dash_worker_url_input = QLineEdit()
         self.dash_worker_url_input.setPlaceholderText("https://github-to-obsidian-bot.your-subdomain.workers.dev")
@@ -292,16 +296,11 @@ class BackupSealMixin:
         self._style_btn(open_dash_btn, 'secondary')
         open_dash_btn.clicked.connect(self._open_dashboard_from_backup_tab)
         dash_row.addWidget(open_dash_btn)
+        dash_row.addWidget(self._make_help_button(
+            "📊 Dashboard — bot stats, pending links and recent activity, "
+            "served by your Cloudflare Worker (no separate deployment "
+            "needed)."))
         dash_layout.addLayout(dash_row)
-
-        # One wrapped note (was 2 hard-wrapped lines).
-        dash_info = QLabel(
-            "📊 Bot stats, pending links and recent activity — served by your "
-            "Cloudflare Worker, no separate deployment needed."
-        )
-        dash_info.setWordWrap(True)
-        dash_info.setObjectName("info_note_indigo")
-        dash_layout.addWidget(dash_info)
 
         layout.addWidget(dash_group)
 

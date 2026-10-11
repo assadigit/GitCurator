@@ -394,7 +394,7 @@ class TestSourceContracts(unittest.TestCase):
         self.assertIn("def settle_queue_history", state)
 
     def test_version_and_changelog_beat(self):
-        self.assertEqual(self._read("VERSION").strip(), "0.65.0")
+        self.assertEqual(self._read("VERSION").strip(), "0.66.0")
         text = self._read("CHANGELOG.md")
         self.assertIn("## [0.64.1]", text)  # history stays
         self.assertIn("queue-history", text.lower())

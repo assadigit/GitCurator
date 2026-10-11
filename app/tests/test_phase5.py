@@ -700,6 +700,10 @@ class TestGuiWiring(unittest.TestCase):
     def test_vault_page_mentions_the_mirror_tool(self):
         # refactor/gui-app-split: the GUI source moved out of the single
         # app.py — the same expectations scan the code's new home(s).
+        # v0.66.0 — the dense Vault page: the mention moved from the
+        # always-visible manual_mirror_hint label into the row's '?'
+        # help tooltip (the owner's ask: tips behind a '?' emoji). The
+        # promise is unchanged — the tool is named, Library/ is named.
         gui_dir = os.path.join(_APP_ROOT, 'gitcurator', 'gui')
         parts = []
         for rel in ('app.py', 'dialogs.py'):
@@ -715,7 +719,6 @@ class TestGuiWiring(unittest.TestCase):
                               encoding='utf-8') as f:
                         parts.append(f.read())
         src = "\n".join(parts)
-        self.assertIn('manual_mirror_hint', src)
         self.assertIn('tools/mirror_manual.py', src)
         self.assertIn('Library/ mirror', src)
 

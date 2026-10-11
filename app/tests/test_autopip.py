@@ -382,7 +382,7 @@ class TestSourceContracts(unittest.TestCase):
             return f.read()
 
     def test_version_is_0470(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.65.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.66.0')
 
     def test_changelog_has_the_beat(self):
         text = self._read('CHANGELOG.md')

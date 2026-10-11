@@ -410,7 +410,7 @@ class TestSourceContracts(unittest.TestCase):
         self.assertIn("repo link{'s' if count != 1 else ''}", src)
 
     def test_version_and_changelog_beat(self):
-        self.assertEqual(self._read("VERSION").strip(), "0.65.0")
+        self.assertEqual(self._read("VERSION").strip(), "0.66.0")
         text = self._read("CHANGELOG.md")
         self.assertIn("## [0.63.1]", text)
         self.assertIn("retry", text.lower())

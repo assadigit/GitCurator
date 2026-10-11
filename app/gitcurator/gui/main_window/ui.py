@@ -126,16 +126,20 @@ class SegmentBar(QProgressBar):
         if self._seg_total > 0:
             # Result mode: green saved (left) · track gap · amber
             # needs-retry (right). A one-sided result fills its side
-            # edge-to-edge with no gap.
+            # edge-to-edge with no gap. v0.66.0 — the segments paint from
+            # the bar's OWN vibrant tokens (bar_saved / bar_retry), not
+            # the status-TEXT tones: the owner's call ("a more vibrant
+            # color, it's too dark and ugly") — the old deep-mint /
+            # brown-butters read as mud at 12px tall.
             failed = max(0, self._seg_total - self._seg_done)
             gap = 2.0 if (self._seg_done and failed) else 0.0
             usable = w - gap
             dw = usable * (self._seg_done / self._seg_total)
             fw = usable * (failed / self._seg_total)
             if self._seg_done:
-                p.fillRect(QRectF(0.0, 0.0, dw, h), QColor(t['success']))
+                p.fillRect(QRectF(0.0, 0.0, dw, h), QColor(t['bar_saved']))
             if failed:
-                p.fillRect(QRectF(w - fw, 0.0, fw, h), QColor(t['warning']))
+                p.fillRect(QRectF(w - fw, 0.0, fw, h), QColor(t['bar_retry']))
         else:
             # Batch mode: the ordinary accent fill (value/maximum).
             vmax = self.maximum()
@@ -276,6 +280,13 @@ class UiMixin:
         self._settings_pages.append((self._wrap_scroll(proxy_tab), "Proxy"))
 
         # ---- Tab 3: Vault ----
+        # v0.66.0 — THE DENSE PAGE (the owner's ask, verbatim: "hide tips
+        # and explanations behind a '?' emoji, so the browse fields are
+        # next to each other as much as possible. remove unnecessary text
+        # like '(new — the Phase 2 pipeline)'"). Every paragraph wall
+        # moved behind a '?' glyph; every picker is one row (field +
+        # Browse side by side); every label says what the thing IS, not
+        # its release history.
         vault_tab = QWidget()
         vault_layout = QVBoxLayout(vault_tab)
         self.vault_combo = QComboBox()
@@ -287,25 +298,32 @@ class UiMixin:
         # Settings viewport. The popup still shows full paths.
         self.vault_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.vault_combo.setMinimumContentsLength(28)
+        self.vault_combo.setToolTip(
+            "The GitHub projects vault: every repo link becomes a curated "
+            "note in this vault's category folders.\nPick from the list, "
+            "browse for a folder, or type a path.")
         self.populate_vaults()
 
-        vault_buttons = QHBoxLayout()
+        # one row: the combo + Browse + Remove, side by side
+        vault_row = QHBoxLayout()
+        vault_row.setSpacing(6)
+        vault_row.addWidget(QLabel("GitHub vault:"), 0)
+        vault_row.addWidget(self.vault_combo, 1)
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self.browse_vault)
         self._style_btn(browse_btn, 'secondary')
+        vault_row.addWidget(browse_btn)
         remove_btn = QPushButton("Remove")
         remove_btn.clicked.connect(self.remove_vault)
         self._style_btn(remove_btn, 'danger')
-        vault_buttons.addWidget(browse_btn)
-        vault_buttons.addWidget(remove_btn)
-        vault_buttons.addStretch()
-
-        # v31.1: '✅ Validate Vault' moved to the global 'More' menu.
-
+        vault_row.addWidget(remove_btn)
+        vault_row.addWidget(self._make_help_button(
+            "GitHub vault — where the repo notes live.\n"
+            "Pick an Obsidian vault (discovered automatically), Browse "
+            "for its folder, or type the path.\nRemove takes it off the "
+            "list only — the folder itself is never deleted."))
         vault_layout.setSpacing(8)
-        vault_layout.addWidget(QLabel("Select your Obsidian vault:"))
-        vault_layout.addWidget(self.vault_combo)
-        vault_layout.addLayout(vault_buttons)
+        vault_layout.addLayout(vault_row)
 
         # v0.10.0 — Phase 1 (vault settings, SPEC §6 Phase 1): the two NEW
         # vault paths, the websites backup repo, and the pipeline switches.
@@ -313,76 +331,92 @@ class UiMixin:
         # "found" — and blank paths degrade gracefully: nothing is written
         # anywhere until the pipeline owning that vault is switched ON.
 
-        # --- Websites vault (the Phase 2 pipeline; folder may not exist yet) ---
-        web_group = QGroupBox("Websites vault (new — the Phase 2 pipeline)")
+        # --- Websites vault (folder may not exist yet) ---
+        web_group = QGroupBox("Websites vault")
         web_layout = QVBoxLayout(web_group)
         web_layout.setSpacing(6)
         web_row = QHBoxLayout()
+        web_row.setSpacing(6)
         self.website_vault_input = QLineEdit(
             (self.config.get('website_vault_path') or '').strip())
-        self.website_vault_input.setPlaceholderText(
-            "path to the Websites vault — the folder does not need to exist yet")
+        self.website_vault_input.setPlaceholderText("path to the Websites vault")
+        self.website_vault_input.setToolTip(
+            "The Websites vault: non-GitHub links become curated website "
+            "notes here.\nThe folder does not need to exist yet — the "
+            "pipeline creates it on the first run.")
         web_row.addWidget(self.website_vault_input, 1)
         web_browse = QPushButton("Browse...")
         self._style_btn(web_browse, 'secondary')
         web_browse.clicked.connect(self.browse_website_vault)
         web_row.addWidget(web_browse)
+        web_row.addWidget(self._make_help_button(
+            "Websites vault — where website notes live.\n"
+            "The folder does not need to exist yet; the pipeline creates "
+            "it on the first run. Empty = the Websites pipeline has "
+            "nowhere to write (links keep going to the _inbox tables)."))
         web_layout.addLayout(web_row)
         self.website_vault_status = QLabel("● —")
         self._set_status(self.website_vault_status, 'muted', strong=True)
         web_layout.addWidget(self.website_vault_status)
         web_repo_row = QHBoxLayout()
+        web_repo_row.setSpacing(6)
         web_repo_row.addWidget(QLabel("Backup repo:"))
         self.website_repo_input = QLineEdit(
             (self.config.get('website_repo_name') or '').strip())
-        self.website_repo_input.setPlaceholderText(
-            "private GitHub repo for the Websites vault backup")
+        self.website_repo_input.setPlaceholderText("private GitHub backup repo")
+        self.website_repo_input.setToolTip(
+            "The private GitHub repo the Websites vault is mirrored to "
+            "after every run. 'auto' derives the name from the vault "
+            "folder.")
         web_repo_row.addWidget(self.website_repo_input, 1)
+        web_repo_row.addWidget(self._make_help_button(
+            "Backup repo — the private GitHub repo the Websites vault is "
+            "mirrored to after every run (full history; restore with a "
+            "git clone). Empty = auto (derived from the vault folder "
+            "name)."))
         web_layout.addLayout(web_repo_row)
         # v0.28.0 — THE LAW: these domains are ALWAYS banned from the
         # Websites vault and cannot be removed — x/twitter, the GitHub
         # group, HuggingFace, Instagram, Facebook, LinkedIn (the owner's
         # law, 2026-10-01). The field below only ADDS more; the app also
         # sweeps any legacy banned-domain notes out of the vault.
-        web_law_label = QLabel(
-            "🔒 Always banned (the law — cannot be removed): "
-            + ', '.join(_links.LAW_BLOCKED_DOMAINS))
-        web_law_label.setWordWrap(True)
-        web_law_label.setObjectName("law_note")
-        web_law_label.setToolTip(
-            "Links on these domains never enter the Websites vault: never "
-            "fetched, never noted, never retried. Existing notes for them "
-            "are swept to the vault's .trash on the next run. The record "
-            "lives on: the _inbox platform tables and the bot's ledger "
-            "keep every link.")
-        web_layout.addWidget(web_law_label)
+        # v0.66.0 — the whole list rides behind ONE '?' glyph (the dense
+        # page); the field placeholder says the essentials.
         web_blocked_row = QHBoxLayout()
+        web_blocked_row.setSpacing(6)
         web_blocked_row.addWidget(QLabel("Blocked domains:"))
         self.web_blocked_input = QLineEdit(
             ', '.join(_links.blocked_domains_from_config(self.config)))
         self.web_blocked_input.setPlaceholderText(
-            "EXTRA domains to ban beyond the law (e.g. reddit.com) — "
-            "the law list above always applies")
+            "extra domains to ban (the always-banned law list applies)")
         self.web_blocked_input.setToolTip(
             "EXTRA domains the Websites pipeline refuses, on top of the "
-            "always-banned law list above. Links on them are recorded in "
-            "the _inbox platform tables only — never fetched, never "
-            "turned into notes, never retried. Subdomains count "
-            "(www.x.com matches x.com). The law entries above cannot be "
-            "removed; the field can only add more.")
+            "always-banned law list (behind the '?' here). Links on them "
+            "are recorded in the _inbox platform tables only — never "
+            "fetched, never turned into notes, never retried. Subdomains "
+            "count (www.x.com matches x.com).")
         web_blocked_row.addWidget(self.web_blocked_input, 1)
+        web_blocked_row.addWidget(self._make_help_button(
+            "🔒 Always banned (the law — cannot be removed):\n"
+            + ', '.join(_links.LAW_BLOCKED_DOMAINS)
+            + "\n\nLinks on these domains never enter the Websites vault: "
+              "never fetched, never noted, never retried. Existing notes "
+              "for them are swept to the vault's .trash on the next run. "
+              "The record lives on: the _inbox platform tables and the "
+              "bot's ledger keep every link.\n\nThe 'Blocked domains' "
+              "field only ADDS more; the law list always applies."))
         web_layout.addLayout(web_blocked_row)
         # v0.21.0 — self domains: hosts that belong to THIS deployment
         # (the Telegram bot's own worker). Its auth links (…/auth/?token=…)
         # land in the same chat the curator reads; they are never fetched,
         # never noted — the _inbox row (token scrubbed) is the record.
         web_self_row = QHBoxLayout()
+        web_self_row.setSpacing(6)
         web_self_row.addWidget(QLabel("Self domains:"))
         self.web_self_input = QLineEdit(
             ', '.join(_links.self_domains_from_config(self.config)))
         self.web_self_input.setPlaceholderText(
-            "the app's OWN hosts — never fetched (default: the bot's "
-            "workers.dev URL) — empty = none")
+            "the app's own hosts — never fetched (empty = none)")
         self.web_self_input.setToolTip(
             "Links on these domains belong to this deployment (the bot's "
             "auth/OAuth handoff links) — never fetched, never turned into "
@@ -390,34 +424,43 @@ class UiMixin:
             "values scrubbed. Subdomains count. Empty field = no self "
             "domains.")
         web_self_row.addWidget(self.web_self_input, 1)
+        web_self_row.addWidget(self._make_help_button(
+            "Self domains — hosts that belong to THIS deployment (the "
+            "Telegram bot's own worker).\nIts auth links (…/auth/?token=…) "
+            "land in the same chat the curator reads; they are never "
+            "fetched, never noted — the _inbox row (token scrubbed) is "
+            "the record. Default: the bot's workers.dev URL. Empty = none."))
         web_layout.addLayout(web_self_row)
         vault_layout.addWidget(web_group)
 
         # --- Manual Notes vault (owner-owned; the app writes only the
         #     read-only Library/ mirror there — v0.14.0 Phase 5) ---
-        manual_group = QGroupBox("Manual Notes vault (yours — the app writes only its Library/ mirror)")
+        manual_group = QGroupBox("Manual Notes vault")
         manual_layout = QVBoxLayout(manual_group)
         manual_layout.setSpacing(6)
         manual_row = QHBoxLayout()
+        manual_row.setSpacing(6)
         self.manual_vault_input = QLineEdit(
             (self.config.get('manual_vault_path') or '').strip())
-        self.manual_vault_input.setPlaceholderText(
-            "path to your Manual Notes vault (receives the read-only Library/ mirror)")
+        self.manual_vault_input.setPlaceholderText("path to your Manual Notes vault")
+        self.manual_vault_input.setToolTip(
+            "Your own vault: the app writes only the read-only Library/ "
+            "mirror there — never your notes.")
         manual_row.addWidget(self.manual_vault_input, 1)
         manual_browse = QPushButton("Browse...")
         self._style_btn(manual_browse, 'secondary')
         manual_browse.clicked.connect(self.browse_manual_vault)
         manual_row.addWidget(manual_browse)
+        manual_row.addWidget(self._make_help_button(
+            "Manual Notes vault — yours; the app writes only the "
+            "read-only Library/ mirror there (a synced copy of the "
+            "curated notes), never your own writing.\n"
+            "Library mirror: run tools/mirror_manual.py — dry-run first, "
+            "then --apply. Only Library/ is ever touched."))
         manual_layout.addLayout(manual_row)
         self.manual_vault_status = QLabel("● —")
         self._set_status(self.manual_vault_status, 'muted', strong=True)
         manual_layout.addWidget(self.manual_vault_status)
-        self.manual_mirror_hint = QLabel(
-            "Library mirror: run tools/mirror_manual.py — dry-run first, "
-            "then --apply. Only Library/ is ever touched.")
-        self.manual_mirror_hint.setWordWrap(True)
-        self.manual_mirror_hint.setObjectName("muted_note")
-        manual_layout.addWidget(self.manual_mirror_hint)
         vault_layout.addWidget(manual_group)
 
         # --- Pipeline switches ---
@@ -425,23 +468,27 @@ class UiMixin:
         pipes_layout = QVBoxLayout(pipes_group)
         pipes_layout.setSpacing(6)
         _pipes_cfg = self.config.get('pipelines') or {}
-        self.pipeline_github_check = QCheckBox(
-            "GitHub projects — the existing pipeline")
+        self.pipeline_github_check = QCheckBox("GitHub projects")
+        self.pipeline_github_check.setToolTip(
+            "Repo links become curated notes in the GitHub vault.")
         self.pipeline_github_check.setChecked(_pipes_cfg.get('github', True))
         self.pipeline_websites_check = QCheckBox(
-            "Websites — the new pipeline (v0.11.0: non-GitHub links become notes)")
+            "Websites (non-GitHub links become notes)")
+        self.pipeline_websites_check.setToolTip(
+            "Non-GitHub links are fetched and become classified notes in "
+            "the Websites vault. OFF = they keep going to the _inbox "
+            "tables.")
         self.pipeline_websites_check.setChecked(_pipes_cfg.get('websites', False))
         pipes_layout.addWidget(self.pipeline_github_check)
         pipes_layout.addWidget(self.pipeline_websites_check)
-        pipes_info = QLabel(
-            "💡 The GitHub switch is ON by default and keeps today's behavior "
-            "exactly. The Websites switch runs the Phase 2 pipeline: fetched, "
-            "classified notes in the Websites vault (OFF = non-GitHub links "
-            "keep going to the _inbox tables, like before). Both OFF = a SYNC "
-            "processes nothing.")
-        pipes_info.setWordWrap(True)
-        pipes_info.setObjectName("info_note")
-        pipes_layout.addWidget(pipes_info)
+        pipes_layout.addWidget(self._make_help_button(
+            "💡 Pipelines — what a SYNC processes.\n"
+            "GitHub (ON by default): repo links become curated notes in "
+            "the GitHub vault — today's behavior exactly.\n"
+            "Websites: non-GitHub links are fetched and become classified "
+            "notes in the Websites vault (OFF = they keep going to the "
+            "_inbox tables, like before).\n"
+            "Both OFF = a SYNC processes nothing."))
         vault_layout.addWidget(pipes_group)
 
         # Live status while typing; save once on commit (Enter / focus-out /
@@ -1807,10 +1854,14 @@ class UiMixin:
         # previous session's record (the log always reopens empty).
         self._restore_last_sync()
 
-        # Auto-check bot queue on startup (after proxy validation)
-        # (QTimer comes from the module-level PyQt6 wildcard import — the old
-        # local re-import here shadowed the earlier _run_mirror_timer usage.)
-        QTimer.singleShot(2000, self._startup_auto_check)
+        # v0.66.0 — THE QUIET OPEN (the owner's law, verbatim: "the
+        # system, in the startup must not try to connect itself, it must
+        # wait for user to click scan or fetch"). The old 2-second
+        # `_startup_auto_check` — a proxy socket probe plus error modals
+        # plus a full Telegram bot-queue fetch the moment the window
+        # appeared — is RETIRED. The app opens Idle and silent; every
+        # connection (SYNC's bot fetch, Scan's vault pass, Test
+        # Connection) happens only when the owner clicks for it.
 
     # ------------------------------------------------------------------
     # v33 wireframe-redesign helpers (pure GUI chrome — no pipeline logic)
@@ -2182,7 +2233,8 @@ class UiMixin:
     def _toggle_log_panel(self):
         """v33: the Progress Logs panel is a permanent fixture of the main
         view (wireframe redesign) — nothing to toggle. Kept as a safe no-op
-        because _startup_auto_check still calls it."""
+        for the callers that still speak the old name (v0.66.0: the
+        startup auto-check that used it is retired — the quiet open)."""
         pass
 
     def _set_log_filter(self, filter_type):

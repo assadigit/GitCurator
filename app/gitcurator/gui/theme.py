@@ -113,7 +113,9 @@ LIGHT: Dict[str, str] = {
     "plan_mag_bg":      "#E7F2F2",  # very pale teal — the consolidations panel
     "plan_mag_border":  "#C8E1E1",
     "progress_track":  "#E3DACA",
-    "progress_chunk":  "#5F54B4",
+    "progress_chunk":  "#7C3AED",   # v0.66.0 — the vibrant fill (was the muted #5F54B4; the owner's call: "a more vibrant color, it's too dark and ugly")
+    "bar_saved":       "#22C55E",   # v0.66.0 — the result-mode's saved segment, vibrant green (fills, not text — AA not required)
+    "bar_retry":       "#F59E0B",   # v0.66.0 — the result-mode's retry segment, vivid amber (was the muddy #75510A brown)
     "progress_text":   "#514A63",
     "pipeline_caption": "#57506B",
     "scroll":        "#DCD4C4",
@@ -196,7 +198,9 @@ DARK: Dict[str, str] = {
     "plan_mag_bg":      "#1F3535",  # teal-tinted plum — the consolidations panel
     "plan_mag_border":  "#2E4A4A",
     "progress_track":  "#17131F",
-    "progress_chunk":  "#C4BCF5",
+    "progress_chunk":  "#A78BFA",   # v0.66.0 — the vibrant violet fill (was the washed #C4BCF5)
+    "bar_saved":       "#4ADE80",   # v0.66.0 — the result-mode's saved segment, vivid mint on plum
+    "bar_retry":       "#FBBF24",   # v0.66.0 — the result-mode's retry segment, vivid amber on plum
     "progress_text":   "#DDD7EC",
     "pipeline_caption": "#C9C2DC",
     "scroll":        "#7A7199",
@@ -513,6 +517,14 @@ def _button_qss(t: Dict[str, str]) -> str:
             QPushButton[btn_kind="icon"] {{ background-color: {t['sheet']}; color: {t['accent']}; border: 1px solid {t['icon_border']}; font-size: 16px; font-weight: 600; padding: 0; border-radius: 8px; }}
             QPushButton[btn_kind="icon"]:hover {{ background-color: {t['sheet_hover']}; border-color: {t['accent']}; }}
             QPushButton[btn_kind="icon"]:pressed {{ background-color: {t['sheet_hover']}; }}
+            /* v0.66.0 — the '?' affordance (the owner's ask: "hide tips and
+               explanations behind a '?' emoji"): a compact 22×22 round
+               glyph that carries its explanation as the tooltip. Quiet on
+               the page, loud on hover — the settings rows stay dense. */
+            QPushButton[btn_kind="help"] {{ background-color: transparent; color: {t['text_muted']}; border: 1px solid {t['border']}; font-size: 12px; font-weight: 700; padding: 0; border-radius: 11px; }}
+            QPushButton[btn_kind="help"]:hover {{ background-color: {t['ghost_hover_bg']}; color: {t['accent']}; border-color: {t['accent']}; }}
+            QPushButton[btn_kind="help"]:pressed {{ background-color: {t['ghost_hover_bg']}; }}
+            QPushButton[btn_kind="help"]:focus {{ outline: 2px solid {t['accent']}; outline-offset: 2px; }}
             /* v0.34 (follow-up review): the icon buttons (gear + theme
                toggle) carry Qt.TabFocus focus POLICY in ui.py — a mouse
                click can never focus them, so this :focus outline appears

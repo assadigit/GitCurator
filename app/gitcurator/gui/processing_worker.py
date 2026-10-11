@@ -1751,7 +1751,12 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
             new_files = []
             if vault_path and os.path.isdir(vault_path) and batch_files:
                 for root, dirs, files in os.walk(vault_path):
-                    if any(skip in root for skip in ['.obsidian', 'attachments']):
+                    # v0.66.0 — .trash is skipped too: the hygiene pass's
+                    # retired stubs/reports are NOT "new notes the batch
+                    # wrote" — the undo list must never offer to delete
+                    # them out of their recoverable retirement home.
+                    if any(skip in root for skip in
+                            ['.obsidian', 'attachments', '.trash']):
                         continue
                     for f in files:
                         if f.endswith('.md'):
@@ -1808,12 +1813,19 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         # Generate summary txt log
         summary_path = self._generate_summary_log()
 
-        # Generate master index + MOCs (incremental, with timestamps)
-        self._generate_master_index()
+        # v0.66.0 — the vault hygiene pass (the retired master-index call
+        # site): the _index.md/_moc scaffold is gone; instead the pass
+        # removes the app-owned scaffold left by older versions, retires
+        # the Obsidian-born empty stub notes (the ghost-link children)
+        # to .trash/empty-stubs, and clears the legacy root reports out
+        # of the vault (the owner's graph pollution report, fixed).
+        self._vault_hygiene_pass()
 
-        # v25 pre-flight: comprehensive final report — saved in the vault
-        # root as _processing_report_YYYYMMDD_HHMMSS.md. Always generated
-        # (even if some links failed) so the user has a complete audit
+        # v25 pre-flight: comprehensive final report — saved in the app's
+        # reports folder as _processing_report_YYYYMMDD_HHMMSS.md (v0.66.0:
+        # out of the vault — the vault is the library, not the filing
+        # cabinet). Always generated (even if some links failed) so the
+        # user has a complete audit
         # trail of what was processed, what was skipped, and what needs
         # retry. Includes the LinkTracker verification report when present.
         _report_path = ""  # v0.39.0 — captured for the batch summary (modal)

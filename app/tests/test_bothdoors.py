@@ -353,16 +353,17 @@ class TestSourceContracts(unittest.TestCase):
         # again).
         with open(os.path.join(_REPO_ROOT, '..', 'VERSION'),
                   encoding='utf-8') as fh:
-            self.assertEqual(fh.read().strip(), '0.65.0')
+            self.assertEqual(fh.read().strip(), '0.66.0')
         with open(os.path.join(_REPO_ROOT, '..', 'CHANGELOG.md'),
                   encoding='utf-8', errors='replace') as fh:
             # v0.57.0 — the window widened (72000 → 120000); v0.63.1
             # widened it again (120000 → 132000); v0.63.3 widened it
             # once more (132000 → 140000); v0.64.1 widened it once
             # again (140000 → 148000); v0.65.0 widened it once more
-            # (148000 → 154000): each new entry pushes
+            # (148000 → 154000); v0.66.0 widened it once more
+            # (154000 → 160000): each new entry pushes
             # the both-doors era deeper into the history
-            head = fh.read(154000)
+            head = fh.read(160000)
         self.assertIn('[0.47.0]', head)
         self.assertIn('[0.46.0]', head)
         self.assertIn('[0.45.0]', head)
