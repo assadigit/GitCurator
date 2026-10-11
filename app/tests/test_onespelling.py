@@ -486,5 +486,36 @@ class TestTheVaultIndexKeys(unittest.TestCase):
         self.assertEqual(idx.count, 1)   # one note, not two
 
 
+# ---------------------------------------------------------------------------
+# 8. release bookkeeping (the house ritual)
+# ---------------------------------------------------------------------------
+
+class TestReleaseBookkeeping(unittest.TestCase):
+
+    def setUp(self):
+        self.root = _REPO_ROOT
+
+    def _read(self, *parts):
+        with open(os.path.join(self.root, *parts), 'r',
+                  encoding='utf-8') as f:
+            return f.read()
+
+    def test_version_is_0640(self):
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
+
+    def test_changelog_has_the_spelling(self):
+        text = self._read('CHANGELOG.md')
+        self.assertIn('## [0.64.0]', text)
+        self.assertIn('THE ONE SPELLING', text)
+        flat = ' '.join(text.split())
+        self.assertIn('only one has slash', flat)   # the report, verbatim
+
+    def test_ci_and_agents_know_the_module(self):
+        ci = self._read('.github', 'workflows', 'ci.yml')
+        self.assertIn('tests.test_onespelling', ci)
+        agents = self._read('AGENTS.md')
+        self.assertIn('tests.test_onespelling', agents)
+
+
 if __name__ == '__main__':      # pragma: no cover
     unittest.main()

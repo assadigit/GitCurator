@@ -773,7 +773,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
 
     def test_version_is_0611(self):
         # v0.61.1 — the Scan-CTA crash fix (see TestScanCtaWiring below).
-        self.assertEqual(self._read('VERSION').strip(), '0.63.3')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
 
     def test_the_prompt_exists_and_names_the_law(self):
         text = self._read('app', 'prompts', 's01_vaultscan.txt')
@@ -1147,6 +1147,11 @@ class TestTheConsolidationApply(_ScanCase):
             content = f.read()
         self.assertNotIn('site_links', content)   # no self-reference
         self.assertNotIn(wp.SITE_LINKS_HEADING, content)
+        # the twin's ledger row still re-points at the keeper (its old
+        # row pointed at the retired duplicate's file)
+        row = self.db.processed_row('https://cleanup.pictures/')
+        self.assertIsNotNone(row)
+        self.assertEqual(row['note_path'], keep)
 
     def test_dry_run_is_a_rehearsal(self):
         plan, keep, dupe = self._plan()

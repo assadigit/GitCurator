@@ -838,15 +838,20 @@ def apply_scan_plan(plan: Dict, vault_path: str, state,
                     f"{c.get('site') or '?'}) — the duplicate rests in "
                     f".trash/consolidated, its link rides the kept note",
                     "info")
-        # the ledger: every merged URL points at the kept note, its
-        # retry row resolves — the site is KNOWN, nothing dismissed
+        # the ledger: every merged note's URL points at the kept note
+        # and its retry row resolves — the site is KNOWN, nothing
+        # dismissed. (The slash-pair twin rides here too: its canonical
+        # IS the keeper's own source, so it adds no link — but its old
+        # row, still pointing at the retired duplicate's file, must
+        # re-point at the note that now owns the site.)
         cat = str(keep.get('category') or '')
         sub = str(keep.get('subcategory') or '')
-        for u in urls:
+        for m in (c.get('merge') or []):
             if state is None:
                 break
             try:
-                canon = _wp.normalize_website_url(u)
+                canon = _wp.normalize_website_url(
+                    str((m or {}).get('source') or ''))
                 if not canon:
                     continue
                 state.mark_processed(canon, keep_path, cat, sub, 'full')
