@@ -5,6 +5,97 @@ Estimated time: 30-45 minutes.
 
 ---
 
+## 📦 v0.64.1 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE QUEUE-HISTORY SETTLEMENT)
+
+> **Live in production** at
+> `https://github-to-obsidian-bot.aliassadi-plus.workers.dev`
+> (version ID `d79e8e15-…` — the v0.61.0 deployment; v0.64.1 is a
+> DESKTOP-ONLY release: the worker src diff is EMPTY, 0.32.0 stays,
+> no deploy was made — the ritual's law for desktop-only releases).
+>
+> **The owner's report (session, verbatim):** "Now fix this, despite
+> everything is fetched and processed, somehow the app says 85 sites
+> need processing. it's probably false positive, because in the
+> procedure they'll get skipped nonetheless." The screenshot's shape:
+> `📋 Queue: 0 new repo(s) + 93 website link(s) pending`, `⏳ 93
+> pending`, `▶ PROCESS (93)`, `🟢 Fetched 93 website link(s) — click
+> PROCESS to start.` — while the repos side of the same screen said
+> all caught up.
+>
+> **The disease:** v0.63.2's settlement seeded the settled ledger from
+> what the STATE knew (processed / retry-queue / dismissed rows) plus
+> the vault's truth (master-table rows, `_review` notes) — while the
+> repos twin (v0.63.3's `settle_existing_repos`) always took the queue
+> door's FULL bot history as extras. A website link the owner sent to
+> the bot that never became a state row — never batched, a batch
+> stopped midway, a note deleted by hand outside the app — stayed
+> UN-settled, and every queue check classified it as PENDING forever.
+> Ninety-three old links, ninety-three false positives.
+>
+> **The fix — THE QUEUE-HISTORY SETTLEMENT** (all desktop side):
+> `WebsiteStateDB.settle_queue_history` (a second one-time pass, its
+> own meta key `websites_queue_history_settled_at`) settles every URL
+> the queue door hands it — `worker_jobs.py` passes the FULL
+> non-GitHub bot history it just read; the GUI fallback in
+> `bot_queue.py` runs the same healing for unclassified results.
+> Canonical keys (the one-spelling law rides free — the slash pair
+> settles as one). The settled URLs' retry rows resolve (their
+> retries stop firing, the banner stops crying for them), but the
+> retry queue is NOT bulk-cleared — post-law failures keep their own
+> honest 3-retry lifecycle. The honest 🤝 line speaks once at the
+> door; the classification moves the pile from "pending" to the
+> settled bucket (the 📋 line, the ⏳ badge, the PROCESS count and the
+> hero's "Fetched N" line all go quiet together); the caught-up
+> report names the settled websites in one honest line; "Process All"
+> carries a second-layer split that drops settled website links from
+> the payload; and the pipeline's `run()` gate already skipped
+> settled links before any fetch — the procedure's skip is now the
+> count's truth too. Only websites added from now on are counted (♻️
+> revived in the master table un-settles any of them; 🖐 the hand
+> still outranks the law).
+>
+> **Real-run proof (this session):**
+> `/home/z/real-run/queue-history-run.py` →
+> `queue-history-run.log` — **12/12**: the owner's machine shape (the
+> v0.63.2 stamp present) still heals; the settlement speaks once (94
+> rows for the 93-site history + the slash pair); the worker's exact
+> classification loop returns ZERO pending; the second door is silent
+> and cheap; a settled history link force-fed into a batch is skipped
+> before any fetch; the Process All split drops it from the payload; a
+> link added from now on is fetched and noted; the mid-flight walled
+> link settles with its retry row resolved; a fresh failure keeps its
+> retry row AND its pending count; ♻️ revived un-settles and re-fetches
+> like new; the slash pair settles as ONE verdict.
+>
+> **The suite:** 2021 → **2046 tests, all green** (new
+> `tests/test_queuehistory.py` — 25 cases; fallout re-told:
+> `test_lawfix`'s split test + the state-DB redirection the writing
+> door now deserves, `test_websitesqueuefix`'s steady-state
+> pre-stamps, `test_onespelling`'s guard pin; 25 pin files re-pointed
+> 0.64.0 → 0.64.1; the bothdoors changelog window widened 140000 →
+> 148000). Offline golden 30/30, 0 invalid; worker npm test 68/68.
+>
+> **CI:** green on the main merge AND the v0.64.1 tag, first try
+> (runs 38107316249 + 38107324995 — 2046 tests, 88-module compile
+> gate, offline golden, worker 68).
+>
+> **Desktop release v0.64.1** (GitCurator-v0.64.1-windows.zip, 135
+> files, 1,146,508 bytes, sha256
+> `d8b5a8fc0b536c5167b9e26713c975282921f666607c32d209c3aea52e530ba5`,
+> release 409370528, asset 629630696 — download round-trip
+> byte-identical).
+>
+> **The owner's home checklist:** unzip, `1-INSTALL.bat`,
+> `GitCurator.bat` — then: the first sync's queue door speaks the 🤝
+> QUEUE-HISTORY SETTLEMENT line once (the never-batched history lands
+> in the settled ledger); the ⏳ badge, the PROCESS count and the 📋
+> queue line all go quiet together — "all caught up", with the
+> settled bucket's own honest line; a website added from now on is
+> fetched (and its failures earn their own 3 retries); ♻️ revive still
+> un-settles any link the owner wants re-fetched.
+
+---
+
 ## 📦 v0.64.0 deploy record — the unchanged 0.32.0 worker, LIVE and verified (LIVE ✅ · desktop-only release · THE ONE SPELLING + ONE NOTE PER SITE + THE REGEX BRAIN)
 
 > **Live in production** at
