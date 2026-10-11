@@ -655,7 +655,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0630(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.64.1')
+        self.assertEqual(self._read('VERSION').strip(), '0.65.0')
 
     def test_ci_and_agents_know_the_module(self):
         ci = self._read('.github', 'workflows', 'ci.yml')

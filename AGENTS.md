@@ -40,13 +40,13 @@ QT_QPA_PLATFORM=offscreen python -m unittest tests.test_core tests.test_e2e \
   tests.test_vaultscan tests.test_trashdoor tests.test_scangui \
   tests.test_retrycry tests.test_settledledger tests.test_reposettled \
   tests.test_onespelling tests.test_sitenote \
-  tests.test_queuehistory
+  tests.test_queuehistory tests.test_repobanish
 ```
 
 That exact module list lives in `.github/workflows/ci.yml` (also: the
 compile step of the audited modules and the offline golden run —
 `python gitcurator/tools/run_golden_websites.py --offline`). The suite is
-**2046 tests, zero network** (v0.64.1; tests.test_reviewretry,
+**2092 tests, zero network** (v0.65.0; tests.test_reviewretry,
 tests.test_bothdoors, tests.test_decommission, tests.test_thirddoor,
 tests.test_ladder, tests.test_autopip, tests.test_mastertable,
 tests.test_handdelivery, tests.test_reviewtable, tests.test_fifthdoor,
@@ -56,7 +56,8 @@ tests.test_handharvest, tests.test_noteredo, tests.test_banishment,
 tests.test_channelua, tests.test_trashdoor, tests.test_vaultscan,
 tests.test_retrycry, tests.test_settledledger,
 tests.test_reposettled, tests.test_onespelling,
-tests.test_sitenote and tests.test_queuehistory
+tests.test_sitenote, tests.test_queuehistory and
+tests.test_repobanish
 are pure stdlib — they run even where the Qt-importing modules cannot;
 tests.test_scangui's display-model layer + theme source-contract are
 pure too, the rest is Qt-guarded). New modules

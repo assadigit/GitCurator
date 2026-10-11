@@ -783,6 +783,47 @@ class ProcessingWorker(WorkerLlmMixin, WorkerGithubMetaMixin, WorkerNotesMixin, 
         _dead_threshold = dead_link_threshold(self.config)
         dead_urls = cache.get_dead_url_set(_dead_threshold)
         dead_skipped = 0
+        # v0.65.0 — THE REPOS BANISHMENT, the batch's opening gate (the
+        # GitHub vault's own twin of the Websites pipeline's banishment
+        # gate — the owner's ask, verbatim: "The same mechanism which we
+        # created for websites to banish theme, delete from vault and
+        # never fetch again, i want the same mechanism to be activated
+        # for github projects vault. so for example i can banish an
+        # already processed github repo, so it never fetches and
+        # processed."). Runs BEFORE the settled ledger is loaded (a
+        # freshly banished repo joins it this same batch — the skip
+        # below fires for a link fed to THIS run too) and BEFORE the
+        # vault index is rebuilt (the index reflects the post-banishment
+        # library). The ♻️ revive rows run first (the owner's explicit
+        # hand, ungated); then the marked repo notes are counted, the
+        # count SPOKEN, and the ask rides the same Telegram round-trip
+        # the websites gate uses (built lazily — only when there is
+        # something to ask); NOTHING is removed until the owner answers.
+        # A dry-run rehearses it all (the DB writes land in the shadow
+        # cache, the file move is recorded not performed, note_state is
+        # never written). Bookkeeping — never a batch killer.
+        _repo_banish_report: Dict = {}
+        if _github_pipeline_on:
+            _rvault = str((self.config or {}).get('vault_path')
+                          or '').strip()
+
+            def _repo_banish_factory():
+                # the channel is built ONLY when the scan found marks —
+                # a clean vault never pays the CloudflareSync handshake
+                from gitcurator.integrations import banish_confirm as _bc
+                return _bc.make_telegram_confirm(
+                    self.config, log=self.log_message.emit)
+
+            try:
+                from gitcurator.core import repo_banish as _repo_banish
+                _repo_banish_report = _repo_banish.run_repo_banishment_pass(
+                    cache, note_state_db, _rvault,
+                    log=self.log_message.emit, config=self.config,
+                    banish_confirm_factory=_repo_banish_factory) or {}
+            except Exception as _rb_err:
+                self.log_message.emit(
+                    f"⚠️ Repos banishment pass skipped: {_rb_err}",
+                    "warning")
         # v0.63.3 — THE SETTLED REPOS LEDGER, the run gate (the repos
         # twin of the Websites pipeline's settled skip in
         # WebsitePipeline.run). The owner's report (session, verbatim):

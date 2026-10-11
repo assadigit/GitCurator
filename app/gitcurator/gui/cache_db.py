@@ -305,6 +305,45 @@ class CacheDB:
             self.cursor.execute("DELETE FROM processed_repos WHERE repo_id = ?", (repo_id,))
             self.conn.commit()
 
+    def processed_row_for(self, url: str) -> Optional[Dict]:
+        """v0.65.0 — the processed_repos row for one URL (the repos
+        banishment's note finder: the row names the repo, the row's
+        note_path holds the file). URL-keyed (the burial knows the URL,
+        never the repo_id) and normalized through the same link grammar
+        every repos door uses. Returns ``None`` when the URL was never
+        processed — never raises."""
+        try:
+            with self._lock:
+                self.cursor.execute(
+                    "SELECT repo_id, url, owner, repo_name, note_path, "
+                    "category FROM processed_repos WHERE url = ?",
+                    (normalize_url(url),))
+                row = self.cursor.fetchone()
+            if not row:
+                return None
+            return {'repo_id': row[0], 'url': row[1], 'owner': row[2],
+                    'repo_name': row[3], 'note_path': row[4],
+                    'category': row[5]}
+        except Exception:
+            return None
+
+    def forget_processed_url(self, url: str) -> bool:
+        """v0.65.0 — THE REPOS BANISHMENT's ledger forget: the
+        processed_repos row for one URL is deleted (the ledger must not
+        outlive the note it pointed at — the v0.57 false-success law's
+        repos twin; the banishment calls it right after the note file
+        leaves the library). Returns True when a row was actually
+        removed; never raises."""
+        try:
+            with self._lock:
+                cur = self.cursor.execute(
+                    "DELETE FROM processed_repos WHERE url = ?",
+                    (normalize_url(url),))
+                self.conn.commit()
+                return bool(cur.rowcount)
+        except Exception:
+            return False
+
     def is_note_valid(self, repo_id: int) -> bool:
         """Check if the note file for a cached repo still exists on disk.
         Returns False if the repo isn't cached OR if the note file is missing."""
@@ -701,7 +740,17 @@ class CacheDB:
         """v0.63.3 — add repos to the settled ledger (idempotent; the
         owner's verdict doors use this — the manual-resolve dialog's
         "Mark as Processed" / "Decommission"). Returns how many rows were
-        actually inserted."""
+        actually inserted.
+
+        v0.65.0 — the commit is UNCONDITIONAL now: an INSERT OR IGNORE
+        that ignores (the idempotent no-op — the COMMON case, e.g. the
+        repos banishment settling an already-settled repo) still opens
+        a write transaction, and a commit skipped "because nothing was
+        added" left that transaction open — cache.db stayed write-locked
+        for every OTHER connection (NoteStateDB, WebsiteStateDB) until
+        some later write happened to commit. Found by the v0.65.0
+        real-run proof: a no-op settle followed by a note-state
+        dismissal answered "database is locked"."""
         now_iso = datetime.now().isoformat(timespec='seconds')
         added = 0
         with self._lock:
@@ -712,8 +761,7 @@ class CacheDB:
                     "INSERT OR IGNORE INTO repos_settled (url, settled_at)"
                     " VALUES (?,?)", (normalize_url(u), now_iso))
                 added += cur.rowcount or 0
-            if added:
-                self.conn.commit()
+            self.conn.commit()
         return added
 
     def unsettle_repo(self, url: str) -> bool:
