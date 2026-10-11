@@ -739,9 +739,12 @@ class TestWorkerRouters(unittest.TestCase):
         w = self._worker(cfg)
         w.progress_updated = _Prog()
         w.status_updated = _Stat()
+        # v0.64.0 — ONE NOTE PER SITE: two links of the SAME host now
+        # consolidate into one note, so the per-link progress test rides
+        # two DIFFERENT sites (the bar's law is the subject here).
         w._non_github_urls = ['https://example.com/alpha',
                               'https://banned.example/nope',
-                              'https://example.com/beta']
+                              'https://other.example.com/beta']
         # the batch starts as the _run_impl shape: total covers all three
         # links; position 0 (no GitHub loop — websites-only batch)
         w.total = 3
@@ -773,7 +776,8 @@ class TestWorkerRouters(unittest.TestCase):
         self.assertEqual(progress, [(1, 2), (2, 2)],
                          f"progress emissions wrong: {progress}")
         self.assertEqual(
-            status, ['https://example.com/alpha', 'https://example.com/beta'])
+            status, ['https://example.com/alpha',
+                     'https://other.example.com/beta'])
         self.assertEqual(w._current_position, 2)
 
 

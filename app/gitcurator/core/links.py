@@ -242,6 +242,27 @@ def domain_of(url: str) -> str:
         return ''
 
 
+def site_key_of(url: str) -> str:
+    """v0.64.0 — ONE NOTE PER SITE: the site's own identity for a
+    website URL — the lowercased host with a leading ``www.`` dropped
+    (the same fold the canonical form already makes).
+
+    The owner's law (session, verbatim): \"for same domains , do not
+    define different notes, try to consolidate all of them in same
+    note, if multiple links of that site exist for example x.com
+    x.com/x x.com/y in one note\". The host — not the full URL — is
+    the filing unit: ``x.com/x`` and ``x.com/y`` are two LINKS of ONE
+    site, one note. Deliberately NOT the registrable domain: distinct
+    subdomains (``blog.x.com`` vs ``x.com``) stay distinct sites —
+    the conservative reading of \"same domains\" that can never merge
+    two genuinely different sites by accident. '' when unparseable.
+    """
+    host = domain_of(url)
+    if host.startswith('www.'):
+        host = host[4:]
+    return host
+
+
 # ---------------------------------------------------------------------------
 # v0.20.0 — Blocked domains (the X fix) → superseded by the v0.28.0 LAW
 # ---------------------------------------------------------------------------

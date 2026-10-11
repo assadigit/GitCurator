@@ -273,7 +273,8 @@ class WorkerWebsitePhaseMixin:
                     state=state,
                     log=self.log_message.emit,
                     note_state_db=note_state_db,
-                    banish_confirm=_banish_fn)
+                    banish_confirm=_banish_fn,
+                    site_note_for=index.site_note_for)
 
                 # v0.60.1 — the bar's own honesty (the owner's report,
                 # verbatim: "it still counts decommissioned links as

@@ -33,6 +33,7 @@ messages -> str callable) and ``vault_index_has`` (dedupe probe).
 """
 
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -49,7 +50,7 @@ from gitcurator.core import web_extract as _web_extract
 from gitcurator.core import web_fetch as _web_fetch
 from gitcurator.core import links as _links
 from gitcurator.core.links import (
-    is_gist_url, normalize_website_url,
+    is_gist_url, normalize_website_url, site_key_of,
 )
 from gitcurator.core.note_builder import (
     sanitize_body_text, sanitize_seq_item, sanitize_short_summary,
@@ -260,6 +261,160 @@ added in the tags property — the next run counts it, asks you to
 confirm on Telegram, and on your 🗑️ Delete it leaves the library and
 never fetches this site again (v0.60.0).*
 """
+
+
+# ===========================================================================
+# v0.64.0 — ONE NOTE PER SITE: the consolidation's own writer
+# ===========================================================================
+
+#: The body section every consolidated note carries (the human's half
+#: of the law — every extra link of the site, one list, one note).
+SITE_LINKS_HEADING = '## Links on this site'
+
+_SITE_LINKS_LINE_RE = re.compile(r'^site_links:\s*(.*)$', re.MULTILINE)
+
+
+def _parse_site_links_list(raw: str) -> List[str]:
+    """One YAML-ish single-line list (``site_links: [a, b]``) → its
+    items. The same string-scan the tags parse uses; canonical URLs
+    never carry commas (query pairs ride ``&`` — the one-spelling
+    normalizer's own grammar), so a comma split is the honest read."""
+    inner = (raw or '').strip()
+    if inner.startswith('[') and inner.endswith(']'):
+        inner = inner[1:-1]
+    return [t.strip().strip('"').strip("'")
+            for t in inner.split(',') if t.strip()]
+
+
+def _fmt_site_links_list(urls: List[str]) -> str:
+    return 'site_links: [' + ', '.join(urls) + ']'
+
+
+def add_site_links_to_note(path: str, urls: List[str],
+                           log: Optional[Callable] = None
+                           ) -> Dict:
+    """v0.64.0 — ONE NOTE PER SITE, the append-only writer.
+
+    The owner's law (session, verbatim): "for same domains, do not
+    define different notes, try to consolidate all of them in same
+    note, if multiple links of that site exist". This is the ONE
+    sanctioned rewrite of an existing note: every URL of the same
+    site that is not already recorded rides TWO places —
+
+    * the frontmatter's ``site_links: [..]`` line (the machine's
+      half: VaultIndex parses it, so a consolidated link reads "in
+      the vault" exactly like a note of its own would);
+    * the body's ``## Links on this site`` section (the owner's
+      half: one visible list, filed before the closing source
+      footer).
+
+    Every existing byte is preserved — the frontmatter line is
+    INSERTED after ``source:`` (or replaced in place, list extended,
+    when it already exists); the body section is INSERTED before the
+    final ``---`` + ``*Source:*`` footer (or extended when it
+    already exists). Idempotent (an already-recorded URL adds
+    nothing); dry-run aware; an unexpected shape (no frontmatter,
+    unreadable) is skipped with a warning, never mangled. Returns
+    ``{'appended': [urls actually added], 'already': n, 'written':
+    bool}``; never raises."""
+    log = log or (lambda *a, **k: None)
+    out: Dict = {'appended': [], 'already': 0, 'written': False}
+    if not path or not urls or not os.path.isfile(path):
+        return out
+    canon = []
+    seen = set()
+    for u in (urls or []):
+        try:
+            c = normalize_website_url(u)
+        except Exception:
+            c = str(u or '').strip()
+        if c and c not in seen:
+            seen.add(c)
+            canon.append(c)
+    if not canon:
+        return out
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception as e:
+        log(f"⚠️ One note per site: could not read "
+            f"{os.path.basename(path)}: {e} — the link is recorded in "
+            f"the ledger only", "warning")
+        return out
+    lines = content.split('\n')
+    if not lines or lines[0].strip() != '---':
+        log(f"⚠️ One note per site: {os.path.basename(path)} carries no "
+            f"frontmatter block — left untouched (the link is recorded "
+            f"in the ledger only)", "warning")
+        return out
+    # ---- the frontmatter half -------------------------------------------
+    fm_end = -1
+    for i in range(1, len(lines)):
+        if lines[i].strip() == '---':
+            fm_end = i
+            break
+    if fm_end < 0:
+        log(f"⚠️ One note per site: {os.path.basename(path)}'s frontmatter "
+            f"never closes — left untouched", "warning")
+        return out
+    existing: List[str] = []
+    site_line_at = -1
+    source_line_at = -1
+    for i in range(1, fm_end):
+        m = _SITE_LINKS_LINE_RE.match(lines[i])
+        if m:
+            site_line_at = i
+            existing = _parse_site_links_list(m.group(1))
+        if lines[i].strip().lower().startswith('source:'):
+            source_line_at = i
+    have = set(existing)
+    add = [c for c in canon if c not in have]
+    if not add:
+        out['already'] = len(canon)
+        return out
+    merged = existing + add
+    new_line = _fmt_site_links_list(merged)
+    if site_line_at >= 0:
+        lines[site_line_at] = new_line
+    elif source_line_at >= 0:
+        lines.insert(source_line_at + 1, new_line)
+    else:
+        lines.insert(1, new_line)
+        fm_end += 1
+    # ---- the body half ---------------------------------------------------
+    body = '\n'.join(lines[fm_end + 1:])
+    new_links_md = '\n'.join(f"- [{c}]({c})" for c in add)
+    if SITE_LINKS_HEADING in body:
+        # extend the existing section: append after its last bullet
+        b_lines = body.split('\n')
+        head_at = next(i for i, l in enumerate(b_lines)
+                       if l.strip() == SITE_LINKS_HEADING)
+        last_bullet = head_at
+        for i in range(head_at + 1, len(b_lines)):
+            if b_lines[i].strip().startswith('- '):
+                last_bullet = i
+        b_lines.insert(last_bullet + 1, new_links_md)
+        body = '\n'.join(b_lines)
+    else:
+        section = f"{SITE_LINKS_HEADING}\n{new_links_md}\n"
+        # insert before the closing footer block (the final '---' that
+        # precedes the *Source: line); fall back to the very end.
+        idx = body.rfind('\n---')
+        if idx >= 0 and '*Source:' in body[idx:]:
+            body = body[:idx + 1] + section + body[idx + 1:]
+        else:
+            body = (body.rstrip('\n') + '\n\n' + section).rstrip('\n') \
+                + '\n'
+    new_content = '\n'.join(lines[:fm_end + 1]) + '\n' + body
+    try:
+        atomic_write_text(path, new_content)
+        out['appended'] = add
+        out['written'] = True
+    except Exception as e:
+        log(f"⚠️ One note per site: could not write "
+            f"{os.path.basename(path)}: {e} — the link is recorded in "
+            f"the ledger only", "warning")
+    return out
 
 
 # ===========================================================================
@@ -1461,6 +1616,24 @@ def _same_source(source: str, canonical: str) -> bool:
         return False
 
 
+def _note_lists_site_link(path: str, canonical: str) -> bool:
+    """v0.64.0 — does the note's ``site_links:`` frontmatter list carry
+    this canonical link? (ONE NOTE PER SITE's ownership proof: the note
+    belongs to the site, the link rides the list.) Pure read; False on
+    any doubt."""
+    if not path or not canonical or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            head = f.read(4000)
+    except Exception:
+        return False
+    m = _SITE_LINKS_LINE_RE.search(head)
+    if not m:
+        return False
+    return canonical in _parse_site_links_list(m.group(1))
+
+
 def note_is_properly_stored(prior: Optional[Dict]) -> (bool, str):
     """v0.57.0 — THE NOTE IS THE SUCCESS, the test: does a state row's
     note amount to a PROPER, CATEGORIZED note in the vault?
@@ -1508,7 +1681,17 @@ def note_is_properly_stored(prior: Optional[Dict]) -> (bool, str):
         except Exception:
             own = ''
         if own and normalize_website_url(source) != own:
-            return False, 'the note belongs to another link'
+            # v0.64.0 — ONE NOTE PER SITE: a note whose site_links list
+            # carries this link is a PROPER delivery too — the link
+            # consolidated into its site's note (the owner's law: one
+            # note per site, the extra links ride the list). The site
+            # key must agree (the note is the SITE's; the link is one
+            # of the site's pages — a stray same-named stranger with a
+            # pasted link still fails).
+            if not (own and site_key_of(own)
+                    and site_key_of(own) == site_key_of(source)
+                    and _note_lists_site_link(path, own)):
+                return False, 'the note belongs to another link'
         return True, ''
     except Exception:
         return False, 'the note could not be verified'
@@ -3062,7 +3245,8 @@ class WebsitePipeline:
                  note_state_db=None,
                  rate_limiter: Optional[_web_fetch.DomainRateLimiter] = None,
                  fetch_fn=None,
-                 banish_confirm: Optional[Callable] = None):
+                 banish_confirm: Optional[Callable] = None,
+                 site_note_for: Optional[Callable] = None):
         from gitcurator.constants import resolve_taxonomy_path
         self.config = config or {}
         self.llm_call = llm_call
@@ -3070,6 +3254,13 @@ class WebsitePipeline:
         self.state = state
         self.log = log or (lambda *a, **k: None)
         self.note_state_db = note_state_db
+        # v0.64.0 — ONE NOTE PER SITE's probe: ``site_note_for(url) ->
+        # path | None`` answers "does the vault already hold the SITE's
+        # note for this link's host?" (the websites VaultIndex builds
+        # the site map on its walk). None (the default — every existing
+        # test construction) leaves the law off: the pipeline behaves
+        # exactly as before, one note per link.
+        self.site_note_for = site_note_for
         # Optional fetch injection (tests + the offline golden run stub
         # this so NO network is touched; production leaves it None).
         self.fetch_fn = fetch_fn or _web_fetch.fetch_url
@@ -3460,8 +3651,16 @@ class WebsitePipeline:
                   or DOMAIN_DELAY_S))
         # Per-batch counters for the run report.
         self.counters = {'processed': 0, 'review': 0, 'skipped': 0,
-                         'retried': 0, 'failed': 0, 'upgraded': 0}
+                         'retried': 0, 'failed': 0, 'upgraded': 0,
+                         'consolidated': 0}
         self.last_results: List[Dict] = []
+        # v0.64.0 — ONE NOTE PER SITE's batch-local overlay: the site
+        # map was built before this batch began, so the FIRST note a
+        # batch writes for a new site registers here — a second link
+        # of the same site in the SAME batch finds it (the injected
+        # probe alone would miss it; the phase does not feed the index
+        # mid-batch).
+        self._batch_site_notes: Dict[str, str] = {}
 
     # -- helpers -----------------------------------------------------------
 
@@ -3763,6 +3962,109 @@ class WebsitePipeline:
                      "hand-edited; both files now carry the same source",
                      "warning")
 
+    @staticmethod
+    def _read_note_placement(path: str) -> (str, str, str):
+        """v0.64.0 — a note's own (category, subcategory,
+        fetch_status) from its frontmatter, for the consolidation's
+        ledger row (the site note's placement IS the link's placement —
+        the folder is the category). ('', '', 'full') on any doubt —
+        bookkeeping defaults, never failures."""
+        cat = sub = status = ''
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.read(4000).splitlines()
+        except Exception:
+            return '', '', 'full'
+        if not lines or lines[0].strip() != '---':
+            return '', '', 'full'
+        for line in lines[1:]:
+            s = line.strip()
+            if s == '---':
+                break
+            low = s.lower()
+            if low.startswith('category:'):
+                cat = s.partition(':')[2].strip().strip('"').strip("'")
+            elif low.startswith('subcategory:'):
+                sub = s.partition(':')[2].strip().strip('"').strip("'")
+            elif low.startswith('fetch_status:'):
+                status = s.partition(':')[2].strip().strip('"').strip("'")
+        return cat, sub, (status or 'full')
+
+    def _consolidate_into_site_note(self, url: str, canonical: str,
+                                    result: Dict, site_note: str,
+                                    prior: Optional[Dict] = None,
+                                    upgraded: bool = False) -> Dict:
+        """v0.64.0 — ONE NOTE PER SITE, the gate's hands: the link's
+        URL rides the site note's links list (frontmatter +
+        ``## Links on this site``), the ledger row points at the site
+        note, any app-owned failed placeholder of the link is swept,
+        and its retry row resolves — the site is KNOWN, no second note
+        is ever defined. Neither the fetcher nor the LLM is asked (the
+        owner's law is instant). Returns the SUCCESS-shaped result
+        (outcome 'processed', the site note's path); never raises —
+        a broken consolidation falls back to the honest skip."""
+        cat, sub, status = self._read_note_placement(site_note)
+        rep = add_site_links_to_note(site_note, [canonical], log=self.log)
+        if not rep.get('written') and not rep.get('already'):
+            # the note could not take the link — the law cannot hold;
+            # fall back to the plain skip so nothing is invented
+            result['outcome'] = 'skipped'
+            result['error'] = ("the site's note could not be extended — "
+                               "the link stays queued for the full flow")
+            self.counters['skipped'] += 1
+            self.last_results.append(result)
+            return result
+        try:
+            if prior and prior.get('fetch_status') == 'failed' \
+                    and self._is_review_path(prior.get('note_path') or ''):
+                # the sweep re-reads the file at removal time (the
+                # scan's own law): an app-owned failed placeholder
+                # leaves, a hand-edited one stays and warns
+                self._remove_scanned_placeholder(
+                    prior.get('note_path') or '')
+        except Exception:
+            pass
+        try:
+            self.state.resolve_retry(canonical)
+        except Exception:
+            pass
+        try:
+            with open(site_note, 'r', encoding='utf-8',
+                      errors='replace') as f:
+                _content = f.read()
+        except Exception:
+            _content = ''
+        self._record(canonical, site_note, _content, cat, sub, status)
+        # the site's anchor — a later link of the same site in this
+        # batch finds it in the overlay
+        try:
+            self._batch_site_notes.setdefault(
+                site_key_of(canonical), site_note)
+        except Exception:
+            pass
+        # v0.64.0 — the 🖐 hand's delivery lands here too: the link is
+        # properly stored (in its site's note — note_is_properly_stored
+        # honors the site_links list), so the gesture retires exactly
+        # as it would for a note of its own.
+        try:
+            self._harvest_hand_row(canonical, site_note,
+                                   fetch_status=status)
+        except Exception:
+            pass    # the harvest never breaks a consolidation
+        rel = os.path.relpath(site_note, self.vault_path) \
+            .replace(os.sep, '/') if self.vault_path else site_note
+        self.counters['consolidated'] = \
+            self.counters.get('consolidated', 0) + 1
+        result.update(outcome='processed', note_path=site_note,
+                      category=cat, subcategory=sub,
+                      fetch_status=status, error='')
+        self.last_results.append(result)
+        self.log(
+            f"🧲 [{self._vault_name}] {url}: the site's note already "
+            f"holds this domain — the link joined it (one note per "
+            f"site) → {rel}", "success")
+        return result
+
     # -- v0.56.0: THE HAND'S HARVEST — the per-link probes --------------
 
     def _table_rows_cached(self) -> List[Dict]:
@@ -4032,6 +4334,41 @@ class WebsitePipeline:
             self.last_results.append(result)
             return result
 
+        # ---- 2b. ONE NOTE PER SITE (v0.64.0) ------------------------------
+        # The owner's law (verbatim): "for same domains, do not define
+        # different notes, try to consolidate all of them in same note,
+        # if multiple links of that site exist". A link whose SITE
+        # already holds a real note in the vault never gets a second
+        # note: its URL rides the site note's links list, the ledger
+        # row points at the site note, and neither the fetcher nor the
+        # LLM is ever asked. The 🖐 hand outranks the law exactly as it
+        # outranks the settlement (v0.56.0's precedent): a gestured
+        # link falls through to the full flow — where the site note
+        # acts as a soft lock (the note is the answer; the doors are
+        # just the delivery). A failed _review placeholder of the same
+        # site (no hand) rides the consolidation too: its URL joins
+        # the site note's list, the placeholder is swept, the retry
+        # row resolves — the site is KNOWN; the wall's page is not a
+        # second note.
+        _site_note = ''
+        if self.site_note_for is not None:
+            try:
+                _site_note = self.site_note_for(canonical) or ''
+            except Exception:
+                _site_note = ''
+        if not _site_note:
+            # the batch-local overlay (a site this very batch noted)
+            _site_note = self._batch_site_notes.get(
+                site_key_of(canonical), '') or ''
+        if _site_note and not os.path.isfile(_site_note):
+            _site_note = ''      # a stale probe never lies
+        if _site_note and self._is_review_path(_site_note):
+            _site_note = ''      # a placeholder is not the site's note
+        if _site_note and not _hand_gesture:
+            return self._consolidate_into_site_note(
+                url, canonical, result, _site_note, prior=prior,
+                upgraded=bool(in_vault and prior))
+
         retry = self.state.retry_row(canonical)
         if retry and retry['attempts'] >= MAX_FETCH_RETRIES:
             # v0.56.0 — THE HAND'S REBORN COUNTER: a burned-out retry
@@ -4224,6 +4561,12 @@ class WebsitePipeline:
         description = page.meta_description or ''
 
         # ---- 5. classify ---------------------------------------------------
+        # v0.64.0 — ONE NOTE PER SITE's soft lock: a 🖐 hand link whose
+        # site already holds a real note does not need the classifier
+        # either — the site note's own placement IS the answer (the
+        # doors are just the delivery). A locked row (the owner's own
+        # placement for THIS link) still wins first.
+        _site_lock = bool(_site_note) and locked_row is None
         if locked_row is not None:
             # The owner already placed this note — no model call, no
             # _review: their correction IS the classification.
@@ -4233,6 +4576,13 @@ class WebsitePipeline:
                      f"({category}"
                      + (f" / {subcategory}" if subcategory else "")
                      + ") kept, classifier skipped", "info")
+        elif _site_lock:
+            category, subcategory, _st = self._read_note_placement(_site_note)
+            self.log(f"🔗 {url}: the site's note is the answer — its "
+                     f"placement ({category}"
+                     + (f" / {subcategory}" if subcategory else "")
+                     + ") kept, classifier and analysis skipped (one note "
+                     f"per site)", "info")
         else:
             category, conf1 = self._classify_category(
                 canonical, title, description, page.text)
@@ -4271,36 +4621,48 @@ class WebsitePipeline:
                 subcategory = ''      # low-confidence subcategory: category only
 
         # ---- 6. analyze ----------------------------------------------------
-        try:
-            analysis = self._analyze(canonical, title, description,
-                                     page.text, category)
-        except Exception as e:
-            # Analysis failed but classification succeeded: still write a
-            # review note — the link must never be silently dropped.
-            note = build_review_note(
-                canonical, fetch_status,
-                f"Analysis failed: {e}", title=title)
-            path = self._review_path(canonical)
-            self._write_note(path, note)
-            self._record(canonical, path, note, category, subcategory,
-                         fetch_status)
-            result.update(outcome='review', note_path=path,
-                          error=f"analysis failed: {e}",
-                          category=category, subcategory=subcategory,
-                          fetch_status=fetch_status)
-            self.counters['review'] += 1
-            self.last_results.append(result)
-            # v0.57.0 — the redo story for a 🖐 hand link (the note is
-            # half-fetched; the redo pass asks the LLM again)
-            if _hand_gesture:
-                self.log(f"🗂️ [{self._vault_name}] {url}: analysis failed — "
-                         "filed under _review — NOT properly stored yet: "
-                         "the 🖐 row keeps its gesture and the redo pass "
-                         "will re-read the delivered page and ask the LLM "
-                         "again", "warning")
-            return result
+        analysis: Dict = {}
+        if not _site_lock:
+            try:
+                analysis = self._analyze(canonical, title, description,
+                                         page.text, category)
+            except Exception as e:
+                # Analysis failed but classification succeeded: still
+                # write a review note — the link must never be silently
+                # dropped.
+                note = build_review_note(
+                    canonical, fetch_status,
+                    f"Analysis failed: {e}", title=title)
+                path = self._review_path(canonical)
+                self._write_note(path, note)
+                self._record(canonical, path, note, category, subcategory,
+                             fetch_status)
+                result.update(outcome='review', note_path=path,
+                              error=f"analysis failed: {e}",
+                              category=category, subcategory=subcategory,
+                              fetch_status=fetch_status)
+                self.counters['review'] += 1
+                self.last_results.append(result)
+                # v0.57.0 — the redo story for a 🖐 hand link (the note is
+                # half-fetched; the redo pass asks the LLM again)
+                if _hand_gesture:
+                    self.log(f"🗂️ [{self._vault_name}] {url}: analysis "
+                             f"failed — filed under _review — NOT properly "
+                             f"stored yet: the 🖐 row keeps its gesture and "
+                             f"the redo pass will re-read the delivered page "
+                             f"and ask the LLM again", "warning")
+                return result
 
         # ---- 7. build & write ------------------------------------------------
+        if _site_note:
+            # v0.64.0 — ONE NOTE PER SITE, the 🖐 hand's delivery: the
+            # fetched page answered, the site's note is where the link
+            # belongs — it joins the note, no second note is defined
+            # (the soft lock above already skipped the classifier and
+            # the analyzer; the doors were just the delivery).
+            return self._consolidate_into_site_note(
+                url, canonical, result, _site_note, prior=prior,
+                upgraded=upgraded)
         name = str(analysis.get('name') or title or canonical)
         note = build_website_note(canonical, analysis, category, subcategory,
                                   fetch_status)
@@ -4314,6 +4676,15 @@ class WebsitePipeline:
                                                prior.get('note_path') or '')
         self._record(canonical, path, note, category, subcategory,
                      fetch_status)
+        # v0.64.0 — ONE NOTE PER SITE: this note is now the site's
+        # anchor — a later link of the same site in this batch (or a
+        # re-send) consolidates into it instead of defining a second
+        # note.
+        try:
+            self._batch_site_notes.setdefault(
+                site_key_of(canonical), path)
+        except Exception:
+            pass
         # Full success: any pending fetch-retry for this link is resolved.
         if retry:
             self.state.resolve_retry(canonical)
