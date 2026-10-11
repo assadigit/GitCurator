@@ -609,7 +609,8 @@ def _vault_scan_job(config: dict, log_signal,
         state = _website_pipeline.WebsiteStateDB()
     out: Dict = {'success': True, 'verdict': 'defer', 'deletions': 0,
                  'moves': 0, 'new_folders': 0, 'applied': 0,
-                 'moved': 0, 'folders_created': 0}
+                 'moved': 0, 'folders_created': 0, 'consolidations': 0,
+                 'notes_consolidated': 0}
     try:
         llm_call = _scan_llm_call(cfg, log)
         plan = _vault_scan.build_scan_plan(
@@ -617,6 +618,7 @@ def _vault_scan_job(config: dict, log_signal,
         out['deletions'] = len(plan.get('deletions') or [])
         out['moves'] = len(plan.get('moves') or [])
         out['new_folders'] = len(plan.get('new_folders') or [])
+        out['consolidations'] = len(plan.get('consolidations') or [])
         inv = plan.get('inventory') or {}
         log(f"{_vault_scan.SCAN_PREFIX} the vault holds "
             f"{inv.get('total_notes', 0)} note(s) in "
@@ -626,16 +628,25 @@ def _vault_scan_job(config: dict, log_signal,
             "info")
         has_deletions = out['deletions'] > 0
         has_filing = (out['moves'] + out['new_folders']) > 0
-        if not has_deletions and not has_filing:
+        has_consolidations = out['consolidations'] > 0
+        if not has_deletions and not has_filing \
+                and not has_consolidations:
             log(f"{_vault_scan.SCAN_PREFIX} the library is clean — no "
-                f"auto-delete marks, no filing to propose. Nothing to "
-                f"ask, nothing to do.", "info")
+                f"auto-delete marks, no duplicate sites, no filing to "
+                f"propose. Nothing to ask, nothing to do.", "info")
             out['verdict'] = 'clean'
             return out
         if has_deletions:
             log(f"🗑️ {out['deletions']} note(s) carry your delete mark "
                 f"(the v0.60.1 grammar — frontmatter + body tags)",
                 "info")
+        if has_consolidations:
+            for c in (plan.get('consolidations') or []):
+                keep = (c.get('keep') or {}).get('file') or '?'
+                for m in (c.get('merge') or []):
+                    log(f"🧲 Consolidation proposed: {m.get('file')} — "
+                        f"merges into {keep} (site: {c.get('site')})",
+                        "info")
         if has_filing:
             for nf in (plan.get('new_folders') or []):
                 log(f"🌱 New folder proposed: {nf}", "info")
@@ -696,8 +707,9 @@ def _vault_scan_job(config: dict, log_signal,
                     f"next scan)", "warning")
             else:
                 log(f"⚠️ The Telegram worker is not paired/enabled — "
-                    f"the filing plan is dropped (the safe defer: "
-                    f"nothing moves)", "warning")
+                    f"the filing and consolidation plan is dropped (the "
+                    f"safe defer: nothing moves, nothing merges)",
+                    "warning")
             out['verdict'] = 'defer'
             return out
         res = channel(plan, ask_log=log) or {}
@@ -718,9 +730,13 @@ def _vault_scan_job(config: dict, log_signal,
         out['applied'] = int(rep.get('banished') or 0)
         out['moved'] = int(rep.get('notes_moved') or 0)
         out['folders_created'] = int(rep.get('folders_created') or 0)
+        out['notes_consolidated'] = int(rep.get('consolidated') or 0)
         log(f"{_vault_scan.SCAN_PREFIX} done — {out['applied']} "
             f"note(s) removed (resting in .trash/banished, never to be "
-            f"fetched again), {out['moved']} note(s) re-filed, "
+            f"fetched again), {out['notes_consolidated']} duplicate "
+            f"note(s) merged into their site's note (resting in "
+            f".trash/consolidated — one note per site), "
+            f"{out['moved']} note(s) re-filed, "
             f"{out['folders_created']} new folder(s) created",
             "info")
         report = res.get('report')

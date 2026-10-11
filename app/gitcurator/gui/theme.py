@@ -110,6 +110,8 @@ LIGHT: Dict[str, str] = {
     "plan_del_border":  "#F1CFD7",
     "plan_grow_bg":     "#ECF5EF",  # very pale mint — the creations panel
     "plan_grow_border": "#CFE7D9",
+    "plan_mag_bg":      "#E7F2F2",  # very pale teal — the consolidations panel
+    "plan_mag_border":  "#C8E1E1",
     "progress_track":  "#E3DACA",
     "progress_chunk":  "#5F54B4",
     "progress_text":   "#514A63",
@@ -191,6 +193,8 @@ DARK: Dict[str, str] = {
     "plan_del_border":  "#54333E",
     "plan_grow_bg":     "#25352B",  # mint-tinted plum — the creations panel
     "plan_grow_border": "#33503C",
+    "plan_mag_bg":      "#1F3535",  # teal-tinted plum — the consolidations panel
+    "plan_mag_border":  "#2E4A4A",
     "progress_track":  "#17131F",
     "progress_chunk":  "#C4BCF5",
     "progress_text":   "#DDD7EC",
@@ -385,10 +389,12 @@ def _app_rules(t: Dict[str, str]) -> str:
                "bigger headings, to better signal hierarchy"). */
             QWidget#plan_delete_card {{ background-color: {t['plan_del_bg']}; border: 1px solid {t['plan_del_border']}; border-radius: 10px; }}
             QWidget#plan_create_card {{ background-color: {t['plan_grow_bg']}; border: 1px solid {t['plan_grow_border']}; border-radius: 10px; }}
+            QWidget#plan_consolidate_card {{ background-color: {t['plan_mag_bg']}; border: 1px solid {t['plan_mag_border']}; border-radius: 10px; }}
             QWidget#plan_move_card {{ background-color: {t['sheet']}; border: 1px solid {t['border']}; border-radius: 10px; }}
             QLabel#plan_heading {{ font-size: 15px; font-weight: 800; background: transparent; }}
             QLabel#plan_heading[tone="danger"] {{ color: {t['msg_error']}; }}
             QLabel#plan_heading[tone="grow"] {{ color: {t['msg_success']}; }}
+            QLabel#plan_heading[tone="magnet"] {{ color: {t['accent']}; }}
             QLabel#plan_heading[tone="neutral"] {{ color: {t['text']}; }}
             /* each section's list rides its own transparent scroll —
                the panel's wash shows through and the list scrolls when
