@@ -1,3 +1,93 @@
+## [0.65.0] — The repos banishment: the websites' trash door, activated for the GitHub vault — 2026-10-14
+
+**The owner's ask (session, verbatim):** "The same mechanism which we
+created for websites to banish theme, delete from vault and never fetch
+again, i want the same mechanism to be activated for github projects
+vault. so for example i can banish an already processed github repo, so
+it never fetches and processed."
+
+**THE TWIN, LAW FOR LAW (`core/repo_banish.py`, new).** The websites
+banishment (v0.58 the burial, v0.60 the confirmation gate, v0.62 the
+trash door) now owns the GitHub-projects vault too. The MARKS are the
+same grammar read by the same eyes — `scan_banished_notes` was always
+vault-agnostic (`managed_by` + `source` + the marks), so a repo note
+tagged 🗑️ / delete / banish / blacklist / purge / auto_delete (the
+frontmatter list, Obsidian's block style, or the `#auto-delete`
+hashtag typed in the body), a true `decommission:` / `banish:` /
+`blacklist:` frontmatter key, or the owner's MOVE of the note into the
+root `Trash` folder (the move is the verdict) is a pending repo
+banishment. The GATE is the same round-trip: the batch opens with the
+count SPOKEN first, the ask rides the very same Telegram channel
+(`banish_confirm` — the Worker's 🗑️ Delete all N / ✋ Keep all N
+buttons, the repo URLs in the list), and nothing leaves until the
+owner answers; declined / timeout / no-channel defers (the marks stay,
+the next run asks again), and `banish_confirm: false` restores the old
+auto reflex. The channel is INJECTED and built lazily — a clean vault
+never pays the handshake, and the core module never touches the
+network (the hermetic law).
+
+**THE BURIAL — DB FIRST, THEN THE FURNITURE.** A confirmed repo
+banishment dismisses the URL in note_state (§4.4 "never re-added" —
+the batch loop's own skip, checked before any GitHub API call),
+settles it in the settled ledger (v0.63.3 — the queue door never counts
+it pending again, and the batch's settled skip fires too), resolves
+its `failed_repos` row (no "repos need retry" cry can survive it), and
+forgets its `processed_repos` row (the ledger must not outlive the note
+it pointed at — the v0.57 false-success law's repos twin; the new
+`CacheDB.processed_row_for` / `forget_processed_url` helpers). THEN the
+note file itself leaves the library for `.trash/banished` (recoverable
+by hand, invisible to VaultIndex and note_state), and the vault's own
+`_review/DECOMMISSIONED.md` gains the record row (`🗑️ banished —
+confirmed <date>`, ♻️ revivable) — the same table grammar the websites
+vault teaches, so a 🗑 row the owner writes by hand in that table is a
+pending banishment too (the master-table gesture door, note found via
+the ledger row or a vault walk, DB-only when the note is already gone
+— the silent-deletion loop closed by the explicit verdict). A
+hand-written marked note is KEPT with a warning (the sacred law). A
+leftover 404-quarantine row is subsumed — the banishment is the
+stronger verdict, and "Reset 404 Quarantine" can never silently un-do
+it. Dry-run rehearses it all (shadow cache, rehearsed move, note_state
+untouched).
+
+**THE ♻️ DOOR BACK.** A ♻️ row in the vault's table (or ♻️ set on a
+record row) revives the repo — the dismissal clears, the settlement
+lifts, fetched like new again. The revival is the owner's explicit
+hand: it runs BEFORE the gate, whatever the verdict.
+
+**THE PROMISE, EVERY DOOR.** "It never fetches and processed": the
+batch loop (dismissed + settled skips), the queue door (settled
+bucket — never pending), the retry doors (resolved), the cache dedupe
+(row forgotten) — a re-paste of a banished repo link is skipped before
+any GitHub API call, every intake, every month. GitHub itself is the
+next seal's job (git add -A, `.trash/` ignored — the deletion commits
+and pushes away), and the repo notes now teach the door: build_note
+carries the retire hint (tag / hashtag / Trash move — the next run
+counts it, asks, and on 🗑️ Delete the repo is never fetched or counted
+again).
+
+**THE REAL-RUN PROOF'S OWN FIND — the idempotent-settle lock,
+closed.** The proof run (14 checks, `real-run/repos-banish-run.py`)
+caught a latent v0.63.3 bug the new door exposed: `settle_repos`
+committed only `if added`, but an INSERT OR IGNORE that ignores (the
+idempotent no-op — the COMMON case here: the banishment settles an
+already-settled repo, exactly the owner's "already processed" shape)
+still opens a write transaction; the skipped commit left cache.db
+write-locked for every OTHER connection (NoteStateDB,
+WebsiteStateDB) until some later write happened to commit — a
+note-state dismissal then answered "database is locked". The commit is
+unconditional now, with a two-connection regression pin.
+
+**Tests:** `tests/test_repobanish.py` (46 cases — the mark grammar on
+repo notes including the Trash move and the slash twin, the
+hand-written keep, the table gestures, the full burial's every gate,
+the subsumed quarantine, the dry-run rehearsal, the ♻️ cycle, the
+pass's every verdict incl. the lazy channel and the broken-scan defer,
+the never-fetch promise through the worker's own load shapes, the
+CacheDB helpers + the no-op-settle lock regression, the source
+contracts, the note's hint). Suite
+2046 → 2092, all green; the bothdoors changelog window widened
+148000 → 154000 (the v0.64.1 precedent).
+
 ## [0.64.1] — The queue-history settlement: the false "N sites need processing" cry, closed — 2026-10-13
 
 **The owner's report (session, verbatim):** "Now fix this, despite

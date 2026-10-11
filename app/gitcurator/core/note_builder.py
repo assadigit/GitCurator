@@ -334,6 +334,13 @@ prompt_version: {GITHUB_PROMPT_VERSION}
 
 ---
 *Source: [GitHub]({url})*
+
+*Not useful anymore? Tag this note 🗑️ or delete / auto_delete —
+typed inline anywhere in the note (Obsidian's own tag syntax), added
+in the tags property, or moved into the Trash folder — the next run
+counts it, asks you to confirm on Telegram, and on your 🗑️ Delete it
+leaves the library and this repo is never fetched or counted again
+(v0.65.0).*
 """
     return frontmatter
 
