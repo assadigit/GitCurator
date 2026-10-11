@@ -364,7 +364,11 @@ class TestTheDoorHeals(unittest.TestCase):
             _REPO_ROOT, 'app', 'gitcurator', 'core',
             'website_pipeline.py'), encoding='utf-8').read()
         heal_at = src.find("normalize_ledger_keys', None)")
-        guard_at = src.find('if state.get_meta(SETTLED_META_KEY):')
+        # v0.64.1 — the guard's shape became the _first_already probe
+        # (the queue-history settlement falls through it); the law is
+        # unchanged: the heal pass STILL runs before the guard.
+        guard_at = src.find(
+            '_first_already = bool(state.get_meta(SETTLED_META_KEY))')
         self.assertGreater(heal_at, 0)
         self.assertGreater(guard_at, 0)
         self.assertLess(heal_at, guard_at)
@@ -501,7 +505,7 @@ class TestReleaseBookkeeping(unittest.TestCase):
             return f.read()
 
     def test_version_is_0640(self):
-        self.assertEqual(self._read('VERSION').strip(), '0.64.0')
+        self.assertEqual(self._read('VERSION').strip(), '0.64.1')
 
     def test_changelog_has_the_spelling(self):
         text = self._read('CHANGELOG.md')

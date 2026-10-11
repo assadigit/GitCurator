@@ -61,7 +61,8 @@ from gitcurator.core.taxonomy import Taxonomy, load_taxonomy_from_config
 # v0.25.0 — the state ledger moved to core/website_state.py
 # (re-exported here so import paths and test patch targets are unchanged).
 from gitcurator.core.website_state import (  # noqa: F401
-    MAX_FETCH_RETRIES, RETRY_BACKOFF_DAYS, SETTLED_META_KEY, WebsiteStateDB,
+    MAX_FETCH_RETRIES, RETRY_BACKOFF_DAYS, SETTLED_META_KEY,
+    QUEUE_HISTORY_SETTLED_META_KEY, WebsiteStateDB,
 )
 
 # Bump when the website prompt set changes shape (SPEC Appendix A).
@@ -2104,7 +2105,8 @@ def split_settled_links(state, urls: List[str],
 
 
 def settle_the_ledger(state, vault_path: str,
-                      log: Optional[Callable] = None) -> Dict:
+                      log: Optional[Callable] = None,
+                      queue_urls: Optional[List[str]] = None) -> Dict:
     """v0.63.2 — THE SETTLEMENT, run at every production door (the
     websites phase, the bot-queue classification, the caught-up scan).
 
@@ -2123,7 +2125,18 @@ def settle_the_ledger(state, vault_path: str,
     anti-freeze rule). Returns
     ``{'settled': n, 'retries_cleared': m, 'already': bool}``; never
     raises on the caller's head (a broken settlement logs and defers
-    to :meth:`WebsiteStateDB.settle_existing`'s own guard)."""
+    to :meth:`WebsiteStateDB.settle_existing`'s own guard).
+
+    v0.64.1 — ``queue_urls`` (the queue door passes the FULL bot
+    history it just read) runs THE QUEUE-HISTORY SETTLEMENT after the
+    first pass: a second one-time seed (its own meta key) that settles
+    every link the owner already sent to the bot even when no state
+    row ever existed for it — the never-batched history that kept
+    counting as PENDING (the owner's report: "despite everything is
+    fetched and processed, somehow the app says 85 sites need
+    processing… in the procedure they'll get skipped nonetheless").
+    Only the queue door passes it; the other doors keep the cheap
+    first-pass-only shape."""
     log = log or (lambda *a, **k: None)
     # v0.64.0 — THE ONE SPELLING's healing pass, at every door and
     # BEFORE the meta guard: the historical spellings (the owner's
@@ -2145,37 +2158,66 @@ def settle_the_ledger(state, vault_path: str,
     except Exception:
         pass    # a broken heal never blocks the settlement
     try:
-        if state.get_meta(SETTLED_META_KEY):
-            return {'settled': 0, 'retries_cleared': 0, 'already': True}
+        _first_already = bool(state.get_meta(SETTLED_META_KEY))
     except Exception:
-        pass    # fall through — settle_existing guards again
-    extra: List[str] = []
-    if vault_path and os.path.isdir(vault_path):
-        try:
-            extra += [r.get('url') or '' for r in _parse_decommission_rows(
-                decommission_table_path(vault_path))]
-        except Exception:
-            pass    # a hand-edited table never blocks the settlement
-        try:
-            extra += [it.get('url') or '' for it in
-                      scan_review_notes(vault_path)]
-        except Exception:
-            pass    # an unreadable _review never blocks the settlement
-    extra = [normalize_website_url(u) for u in extra if u]
-    try:
-        rep = state.settle_existing(extra_urls=extra) or {}
-    except Exception as e:
-        log(f"⚠️ Settlement skipped: {e}", "warning")
+        _first_already = False   # fall through — settle_existing guards again
+    if _first_already and queue_urls is None:
+        # the old shape, unchanged: this door has nothing new to do
         return {'settled': 0, 'retries_cleared': 0, 'already': True}
-    if not rep.get('already'):
-        log(
-            f"🤝 THE SETTLEMENT: {rep.get('settled', 0)} website link(s) "
-            f"the bot already delivered are settled — addressed and "
-            f"processed, never fetched again; "
-            f"{rep.get('retries_cleared', 0)} queued retry(ies) "
-            f"cleared. Only websites added from now on are fetched "
-            f"(♻️ revived in the master table un-settles any of them)",
-            "info")
+    rep: Dict = {'settled': 0, 'retries_cleared': 0, 'already': True}
+    if not _first_already:
+        extra: List[str] = []
+        if vault_path and os.path.isdir(vault_path):
+            try:
+                extra += [r.get('url') or '' for r in _parse_decommission_rows(
+                    decommission_table_path(vault_path))]
+            except Exception:
+                pass    # a hand-edited table never blocks the settlement
+            try:
+                extra += [it.get('url') or '' for it in
+                          scan_review_notes(vault_path)]
+            except Exception:
+                pass    # an unreadable _review never blocks the settlement
+        extra = [normalize_website_url(u) for u in extra if u]
+        try:
+            rep = state.settle_existing(extra_urls=extra) or {}
+        except Exception as e:
+            log(f"⚠️ Settlement skipped: {e}", "warning")
+            rep = {'settled': 0, 'retries_cleared': 0, 'already': True}
+        if not rep.get('already'):
+            log(
+                f"🤝 THE SETTLEMENT: {rep.get('settled', 0)} website link(s) "
+                f"the bot already delivered are settled — addressed and "
+                f"processed, never fetched again; "
+                f"{rep.get('retries_cleared', 0)} queued retry(ies) "
+                f"cleared. Only websites added from now on are fetched "
+                f"(♻️ revived in the master table un-settles any of them)",
+                "info")
+    # v0.64.1 — THE QUEUE-HISTORY SETTLEMENT, the queue door only (the
+    # websites twin of v0.63.3's repos extras): every link the bot's
+    # history carried at this door — including the never-batched pile
+    # no state row ever recorded — is settled, one time, under its own
+    # meta key. A state object without the method (a mock, an older
+    # shape) is skipped with one warning, never raised.
+    if queue_urls is not None:
+        try:
+            _qh = state.settle_queue_history(extra_urls=queue_urls) or {}
+        except Exception as e:
+            _qh = {}
+            log(f"⚠️ Queue-history settlement skipped: {e}", "warning")
+        if not _qh.get('already') and _qh.get('settled'):
+            log(
+                f"🤝 THE QUEUE-HISTORY SETTLEMENT (websites): "
+                f"{_qh.get('settled', 0)} link(s) the bot already "
+                f"delivered are settled — they were never batched into "
+                f"a state row, so the queue kept counting them as "
+                f"pending; addressed and processed now, never counted "
+                f"or fetched again. Only websites added from now on are "
+                f"counted (♻️ revived in the master table un-settles "
+                f"any of them)",
+                "info")
+    if _first_already:
+        return {'settled': 0, 'retries_cleared': 0, 'already': True}
     return rep
 
 

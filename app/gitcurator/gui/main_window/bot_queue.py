@@ -373,6 +373,21 @@ class BotQueueMixin:
                                 _wstate = _website_pipeline.WebsiteStateDB()
                             except Exception:
                                 _wstate = None
+                            # v0.64.1 — the GUI fallback of the queue door
+                            # runs THE QUEUE-HISTORY SETTLEMENT too (the
+                            # worker path above already did): the full bot
+                            # history lands in the settled ledger, so the
+                            # never-batched pile stops counting as pending
+                            # — only results that arrive unclassified take
+                            # this branch, and they get the same healing.
+                            if _wstate is not None:
+                                try:
+                                    _website_pipeline.settle_the_ledger(
+                                        _wstate, _web_vault,
+                                        log=self.log_message,
+                                        queue_urls=non_github)
+                                except Exception:
+                                    pass
                             _blocked_list = _links.blocked_domains_from_config(self.config)
                             _self_list = _links.self_domains_from_config(self.config)
                             for _u in non_github:
@@ -535,12 +550,24 @@ class BotQueueMixin:
                     # v0.63.3 — the settled repos get their one honest
                     # line alongside the caught-up message (the owner's
                     # law made them addressed, not invisible).
+                    # v0.64.1 — the settled WEBSITES get the same line:
+                    # after THE QUEUE-HISTORY SETTLEMENT the never-batched
+                    # history lands in this bucket, and the owner sees WHY
+                    # the pending count went quiet (not a vanishing act —
+                    # the false-positive report's honest answer).
                     if repos_settled_count:
                         self.log_message(
                             f"🤝 {repos_settled_count} repo link(s) are "
                             f"settled — addressed and processed, never "
                             f"fetched or counted again (the owner's "
                             f"law).", "info")
+                    if _websites_settled:
+                        self.log_message(
+                            f"🤝 {_websites_settled} website link(s) are "
+                            f"settled — addressed and processed, never "
+                            f"fetched or counted again (the owner's "
+                            f"law; ♻️ revived in the master table "
+                            f"un-settles any of them).", "info")
                     self.log_message(
                         f"📬 Queue: all caught up — {len(all_urls)} GitHub repos "
                         f"and {len(non_github)} non-GitHub link(s) are already "
@@ -638,6 +665,33 @@ class BotQueueMixin:
                 f"already sent to the bot and addressed (the owner's "
                 f"law) — excluded from the batch: never fetched again "
                 f"(♻️ Reset 404 Quarantine un-settles any of them)", "info")
+        # v0.64.1 — THE QUEUE-HISTORY SETTLEMENT's second layer, the
+        # websites twin of the repos split above: a settled WEBSITE link
+        # never enters a batch. The queue classification already keeps
+        # them out of _bot_queue_pending_websites; this split guards any
+        # path that writes the list directly (guarded — a broken probe
+        # never hides a link, the worst case is the old behavior).
+        _settled_web_kept_out = []
+        try:
+            _wstate = _website_pipeline.WebsiteStateDB()
+            _kept_web = []
+            for _u in (websites_pending or []):
+                if _wstate.is_settled(
+                        _links.normalize_website_url(_u)):
+                    _settled_web_kept_out.append(_u)
+                else:
+                    _kept_web.append(_u)
+            _wstate.close()
+            websites_pending = _kept_web
+        except Exception:
+            pass
+        if _settled_web_kept_out:
+            self.log_message(
+                f"🤝 {len(_settled_web_kept_out)} website link(s) are "
+                f"settled — already sent to the bot and addressed (the "
+                f"owner's law) — excluded from the batch: never fetched "
+                f"again (♻️ revived in the master table un-settles any "
+                f"of them)", "info")
         if not urls and not websites_pending:
             self.log_message("No items in queue. Click 'Check Queue' first.", "warning")
             return
