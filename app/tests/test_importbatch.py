@@ -124,19 +124,21 @@ class TestParseImportText(unittest.TestCase):
         self.assertEqual(r['website_urls'], ['https://tiangolo.github.io/'])
 
     def test_duplicates_counted_across_both_kinds(self):
-        # NOTE: https://coolors.co and https://www.coolors.co/ are TWO
-        # identities under the app's existing canonical form
-        # (normalize_website_url keeps the root slash) — the parser is
-        # consistent with the vault's own dedupe model, it does not
-        # invent a second one.
+        # NOTE: https://coolors.co and https://www.coolors.co/ are ONE
+        # identity under v0.64.0's canonical form (THE ONE SPELLING —
+        # the root slash and the www both fold), so the pair no longer
+        # demonstrates a duplicate; a DIFFERENT page of the same site
+        # does. The parser stays consistent with the vault's own
+        # dedupe model — it does not invent a second one.
         r = L.parse_import_text(
             "https://coolors.co\n"
             "- [Coolors](https://coolors.co)\n"        # same site
-            "https://www.coolors.co/\n"                # different identity
+            "https://coolors.co/palettes\n"             # different page
             "https://github.com/o/r\n"
             "https://github.com/o/r\n")
         self.assertEqual(r['website_urls'],
-                         ['https://coolors.co', 'https://www.coolors.co/'])
+                         ['https://coolors.co',
+                          'https://coolors.co/palettes'])
         self.assertEqual(r['github_urls'], ['https://github.com/o/r'])
         self.assertEqual(r['duplicates'], 2)
         self.assertEqual(r['raw_count'], 5)

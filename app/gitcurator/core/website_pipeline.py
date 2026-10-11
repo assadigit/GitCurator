@@ -1942,6 +1942,25 @@ def settle_the_ledger(state, vault_path: str,
     raises on the caller's head (a broken settlement logs and defers
     to :meth:`WebsiteStateDB.settle_existing`'s own guard)."""
     log = log or (lambda *a, **k: None)
+    # v0.64.0 — THE ONE SPELLING's healing pass, at every door and
+    # BEFORE the meta guard: the historical spellings (the owner's
+    # report — one link, one slash apart, processed twice) are re-keyed
+    # under the fixed normalizer, so a settled/dismissed/processed row
+    # written with the root slash still answers a probe without it
+    # (and vice versa). Idempotent and cheap; a state object without
+    # the method (a mock, an older shape) is simply skipped.
+    try:
+        _heal = getattr(state, 'normalize_ledger_keys', None)
+        if callable(_heal):
+            _rep = _heal() or {}
+            if _rep.get('rekeyed'):
+                log(f"🩹 The one spelling: {_rep.get('rekeyed')} ledger "
+                    f"row(s) re-keyed to their canonical URL form"
+                    + (f" ({_rep.get('merged')} duplicate spelling(s) "
+                       f"merged)" if _rep.get('merged') else ""),
+                    "info")
+    except Exception:
+        pass    # a broken heal never blocks the settlement
     try:
         if state.get_meta(SETTLED_META_KEY):
             return {'settled': 0, 'retries_cleared': 0, 'already': True}

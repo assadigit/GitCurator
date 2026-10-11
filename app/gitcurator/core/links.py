@@ -575,6 +575,15 @@ def normalize_website_url(url: str) -> str:
       every other query parameter KEPT (unlike GitHub's normalize_url)
     - #fragment dropped, trailing ``/`` dropped
 
+    v0.64.0 — THE ONE SPELLING (the owner's report, verbatim: "it
+    processed a same website two times, only one has slash, other
+    doesnt — https://cleanup.pictures/ / https://cleanup.pictures"):
+    the ROOT path ``/`` is a trailing slash too. ``https://site/`` and
+    ``https://site`` are ONE canonical form (the bare domain) — the
+    old normalizer kept the root slash (it only stripped when the
+    path was longer than one character), so the two spellings made
+    two canonical keys, two fetches, and two notes for one site.
+
     Deliberately does NOT touch ``normalize_url`` (the GitHub/VaultIndex
     normalizer) — its behavior for GitHub links is frozen by SPEC §4.3.1.
     """
@@ -601,7 +610,17 @@ def normalize_website_url(url: str) -> str:
             if key and not _TRACKING_PARAM_RE.match(key):
                 kept.append(pair)
     path = p.path or ''
-    if path.endswith('/') and len(path) > 1:
+    # v0.64.0 — THE ONE SPELLING: the root '/' is a trailing slash
+    # too. https://cleanup.pictures/ and https://cleanup.pictures are
+    # the same site, the same key, the same note — one spelling. With a
+    # query riding the root the slash is the PRETTY form's own
+    # ('site.com/?p=1'), so it stays — and the bare 'site.com?p=1'
+    # spelling gains it, folding the two into one.
+    if path == '/' and not kept:
+        path = ''
+    elif path == '' and kept:
+        path = '/'
+    elif path.endswith('/') and len(path) > 1:
         path = path.rstrip('/')
     out = f"{scheme}://{host}{path}"
     if kept:

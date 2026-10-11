@@ -275,7 +275,9 @@ class TestTheSplit(unittest.TestCase):
 
         class _State:
             def is_settled(self, u):
-                return u == 'https://a.example/'
+                # v0.64.0 — the probe arrives CANONICAL (no root
+                # slash): the split normalizes before it asks.
+                return u == 'https://a.example'
 
         kept, settled = wp.split_settled_links(
             _State(),
